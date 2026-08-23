@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas
+from app.config import settings
 
 
 def payload_digest(payload: schemas.PrequalificationInput) -> str:
@@ -122,3 +123,51 @@ async def match(db: AsyncSession, application_id: uuid.UUID):
     for item in results:
         await db.refresh(item)
     return results
+
+
+async def capability_is_ready(db: AsyncSession, capability: models.CapabilityFlag) -> bool:
+    if not capability.enabled:
+        return False
+    if not capability.provider:
+        return True
+    provider = await db.scalar(
+        select(models.ProviderConnection).where(
+            models.ProviderConnection.provider_name == capability.provider,
+            models.ProviderConnection.environment == settings.app_env,
+            models.ProviderConnection.status == models.ProviderStatus.READY,
+        )
+    )
+    return provider is not None
+
+
+async def effective_capabilities(db: AsyncSession) -> dict[str, bool]:
+    capabilities = (
+        await db.scalars(
+            select(models.CapabilityFlag)
+            .where(models.CapabilityFlag.environment == settings.app_env)
+            .order_by(models.CapabilityFlag.key)
+        )
+    ).all()
+    return {
+        capability.key: await capability_is_ready(db, capability)
+        for capability in capabilities
+    }
+
+
+async def require_capability(db: AsyncSession, key: str) -> models.CapabilityFlag:
+    capability = await db.scalar(
+        select(models.CapabilityFlag).where(
+            models.CapabilityFlag.key == key,
+            models.CapabilityFlag.environment == settings.app_env,
+        )
+    )
+    if capability is None or not await capability_is_ready(db, capability):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "CAPABILITY_UNAVAILABLE",
+                "capability": key,
+                "message": "This capability is not enabled and provider-ready.",
+            },
+        )
+    return capability
