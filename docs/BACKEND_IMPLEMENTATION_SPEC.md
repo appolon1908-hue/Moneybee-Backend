@@ -84,7 +84,7 @@ Module boundaries expose services/interfaces rather than importing another modul
 
 ## 3. Request, auth, and tenant boundary
 
-- Public API: `https://api.moneybeeloans.com/api/v1`
+- Public API: `https://api.moneybeeloans.com/api/v2`
 - Gateway path: Caddy/edge → Kong → FastAPI
 - Canonical issuer: `https://auth.codestra.co/realms/codestra`
 - Human clients: Authorization Code + PKCE S256
@@ -102,7 +102,7 @@ Generate/request a correlation ID. Mutating endpoints use an idempotency key whe
 
 ### Leads and prequalification
 
-`POST /api/v1/public/prequalifications` must:
+`POST /api/v2/public/prequalifications` must:
 
 1. validate the payload and consent version;
 2. apply anti-bot, rate, and fraud checks;
@@ -197,7 +197,7 @@ Each integration event records `event_id`, `idempotency_key`, type/version, atte
 
 Admin actions: inspect, correct permitted mapping/configuration, retry, and replay. Replay creates an audit event and preserves the original event.
 
-Inbound CRM webhook: `POST /api/v1/webhooks/crm`. Verify signature/mTLS as configured, timestamp, replay window, event ID, schema version, and tenant/provider. Handle `LeadAssigned`, `LeadContacted`, `ApplicationRequested`, `ApplicationReceived`, `DocumentsRequested`, `OfferReceived`, `OfferAccepted`, `Declined`, `Funded`, and `Lost` through explicit transition rules.
+Inbound CRM webhook: `POST /api/v2/webhooks/crm`. Verify signature/mTLS as configured, timestamp, replay window, event ID, schema version, and tenant/provider. Handle `LeadAssigned`, `LeadContacted`, `ApplicationRequested`, `ApplicationReceived`, `DocumentsRequested`, `OfferReceived`, `OfferAccepted`, `Declined`, `Funded`, and `Lost` through explicit transition rules.
 
 ## 6. Data model
 
