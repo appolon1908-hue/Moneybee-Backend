@@ -188,6 +188,31 @@ def test_borrower_application_sections_and_submission_flow():
         assert conditions_response.status_code == 200
         assert len(conditions_response.json()) == 1
 
+        expired_offer_response = client.post(
+            f"/api/v2/lender/submissions/{submission['id']}/offers",
+            json={
+                "application_id": application_id,
+                "lender_id": lender_id,
+                "program_id": program_id,
+                "product_type": "WORKING_CAPITAL",
+                "amount": 40000,
+                "term_months": 12,
+                "payment_frequency": "MONTHLY",
+                "payment_amount": 4000,
+                "apr": 15,
+                "origination_fee": 400,
+                "total_repayment": 48000,
+                "expires_at": "2000-01-01T00:00:00Z",
+            },
+        )
+        assert expired_offer_response.status_code == 201
+        expired_acceptance = client.post(
+            f"/api/v2/offers/{expired_offer_response.json()['id']}/accept",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert expired_acceptance.status_code == 409
+        assert expired_acceptance.json()["detail"] == "Offer has expired"
+
         offer_response = client.post(
             f"/api/v2/lender/submissions/{submission['id']}/offers",
             json={
