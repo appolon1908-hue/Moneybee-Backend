@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import banking, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
+from app.commands import AcceptOfferCommand, command_context, parse_expected_version
+from app.config import settings
 from app.db import get_db
 from app.integrations.base import ProviderError
 from app.integrations.plaid import PlaidAdapter
@@ -189,14 +191,35 @@ async def offers(application_id: uuid.UUID, db: Db, user: User):
 )
 async def accept_offer(
     offer_id: uuid.UUID,
+    request: Request,
     db: Db,
     user: User,
     idempotency_key: Annotated[
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
 ):
+    command = AcceptOfferCommand(
+        offer_id=offer_id,
+        expected_application_version=parse_expected_version(if_match),
+    )
+    context = command_context(
+        request,
+        user,
+        idempotency_key=idempotency_key,
+    )
+    if settings.app_env == "production" and command.expected_application_version is None:
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "code": "EXPECTED_VERSION_REQUIRED",
+                "message": "If-Match is required for offer acceptance.",
+            },
+        )
     route = f"/offers/{offer_id}/accept"
-    request_hash = hashlib.sha256(str(offer_id).encode()).hexdigest()
+    request_hash = hashlib.sha256(
+        f"{offer_id}:{command.expected_application_version}".encode()
+    ).hexdigest()
     replay = await db.scalar(
         select(models.IdempotencyRecord).where(
             models.IdempotencyRecord.actor_id == user.subject,
@@ -214,12 +237,33 @@ async def accept_offer(
             raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
         return replay_offer
 
-    offer = await db.get(models.Offer, offer_id)
+    offer = await db.scalar(
+        select(models.Offer)
+        .where(models.Offer.id == command.offer_id)
+        .with_for_update()
+    )
     if not offer:
         raise HTTPException(status_code=404, detail="Offer not found")
-    application = await services.get_authorized_application(
-        db, offer.application_id, user, write=True
+    application = await db.scalar(
+        select(models.Application)
+        .where(models.Application.id == offer.application_id)
+        .with_for_update()
     )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    services.authorize_application(application, user, write=True)
+    if (
+        command.expected_application_version is not None
+        and command.expected_application_version != application.version
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CONCURRENT_MODIFICATION",
+                "expected_version": command.expected_application_version,
+                "actual_version": application.version,
+            },
+        )
     if (
         "*" not in user.permissions
         and "offer.accept.own" not in user.permissions
@@ -262,9 +306,18 @@ async def accept_offer(
     )
     db.add(
         models.OutboxEvent(
-            event_type="OfferAccepted",
-            aggregate_id=offer.id,
-            payload={"offer_id": str(offer.id)},
+            event_type="offer.accepted.v1",
+            aggregate_type="application",
+            aggregate_id=application.id,
+            aggregate_version=application.version,
+            tenant_id=context.tenant_id,
+            correlation_id=context.correlation_id,
+            causation_id=context.request_id,
+            payload={
+                "offer_id": str(offer.id),
+                "lender_id": str(offer.lender_id),
+                "amount": str(offer.amount),
+            },
             idempotency_key=f"OfferAccepted:{offer.id}:{offer.version}",
         )
     )
