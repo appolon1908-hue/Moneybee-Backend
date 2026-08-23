@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -175,3 +176,112 @@ class OfferRead(OfferInput):
     id: uuid.UUID
     status: str
     version: int
+
+
+class CreditAuthorizationInput(BaseModel):
+    authorization_version: str = Field(min_length=1, max_length=50)
+    document_hash: str = Field(min_length=32, max_length=128)
+    accepted: Literal[True]
+
+
+class CreditAuthorizationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    authorization_version: str
+    document_hash: str
+    accepted_by: str
+    accepted_at: datetime
+
+
+class ComplaintInput(BaseModel):
+    category: str = Field(min_length=2, max_length=100)
+    description: str = Field(min_length=10, max_length=10_000)
+    priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] = "NORMAL"
+
+
+class ComplaintRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID | None
+    created_by: str
+    category: str
+    description: str
+    priority: str
+    status: str
+    resolution: str | None
+    created_at: datetime
+
+
+class ConditionInput(BaseModel):
+    description: str = Field(min_length=3, max_length=5_000)
+
+
+class ConditionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    submission_id: uuid.UUID
+    application_id: uuid.UUID
+    description: str
+    status: str
+    created_at: datetime
+
+
+class LenderSubmissionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    lender_id: uuid.UUID
+    program_id: uuid.UUID
+    program_version: int
+    external_submission_id: str | None
+    status: str
+    submitted_at: datetime | None
+    created_at: datetime
+
+
+class FundingRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    offer_id: uuid.UUID
+    status: str
+    approved_amount: Decimal | None
+    funded_amount: Decimal | None
+    provider_reference: str | None
+    funding_confirmed_at: datetime | None
+    created_at: datetime
+
+
+class CommissionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    funding_id: uuid.UUID
+    expected_amount: Decimal
+    received_amount: Decimal
+    status: str
+    created_at: datetime
+
+
+class RenewalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    original_funding_id: uuid.UUID
+    application_id: uuid.UUID
+    eligible_from: datetime
+    eligibility_status: str
+    estimated_amount: Decimal | None
+    status: str
+    created_at: datetime
+
+
+class AffiliateInput(BaseModel):
+    name: str = Field(min_length=2, max_length=255)
+    tracking_code: str = Field(min_length=3, max_length=100)
+    active: bool = True
+
+
+class AffiliateRead(AffiliateInput):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    created_at: datetime
