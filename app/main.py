@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MoneyBeeLoans API",
-    version="0.1.0",
+    version="0.2.0",
     openapi_url="/openapi.json",
     docs_url="/docs" if settings.app_env != "production" else None,
     lifespan=lifespan,
@@ -33,7 +33,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "X-Request-ID"],
 )
-app.include_router(router)
+app.include_router(router, prefix="/api/v2")
+app.include_router(router, prefix="/api/v1", include_in_schema=False)
 
 
 @app.middleware("http")
