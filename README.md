@@ -32,3 +32,7 @@ See [docs/BACKEND_IMPLEMENTATION_SPEC.md](docs/BACKEND_IMPLEMENTATION_SPEC.md) a
 Detailed build sequence and implementation patterns: [Backend build blueprint](docs/BACKEND_BUILD_BLUEPRINT.md).
 
 Mandatory launch gaps and evidence gates: [Production readiness requirements](docs/PRODUCTION_READINESS_REQUIREMENTS.md).
+
+API v2 safety and production activation rules: [API v2 safety contract](docs/API_V2_SAFETY_CONTRACT.md).
+
+P0/P1 work that is still incomplete: [API v2 completion ledger](docs/MONEYBEE_API_V2_COMPLETION_LEDGER.md).
