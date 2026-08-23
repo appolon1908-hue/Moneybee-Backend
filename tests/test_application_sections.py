@@ -110,3 +110,120 @@ def test_borrower_application_sections_and_submission_flow():
         )
         assert timeline_response.status_code == 200
         assert timeline_response.json()[-1]["to_status"] == "READY_FOR_MATCHING"
+
+        credit_response = client.post(
+            f"/api/v2/applications/{application_id}/credit-authorizations",
+            json={
+                "authorization_version": "2026-08",
+                "document_hash": "a" * 64,
+                "accepted": True,
+            },
+        )
+        assert credit_response.status_code == 201
+        assert credit_response.json()["accepted_by"] == "local-admin"
+
+        complaint_response = client.post(
+            f"/api/v2/applications/{application_id}/complaints",
+            json={
+                "category": "APPLICATION_SUPPORT",
+                "description": "Please review the revenue information on this application.",
+                "priority": "NORMAL",
+            },
+        )
+        assert complaint_response.status_code == 201
+        assert complaint_response.json()["status"] == "OPEN"
+
+        preferences_response = client.put(
+            "/api/v2/me/notification-preferences",
+            json={
+                "email_enabled": True,
+                "sms_enabled": False,
+                "in_app_enabled": True,
+            },
+        )
+        assert preferences_response.status_code == 200
+        assert preferences_response.json()["sms_enabled"] is False
+
+        lender_id = str(uuid.uuid4())
+        program_response = client.post(
+            f"/api/v2/lenders/{lender_id}/programs",
+            json={
+                "lender_id": lender_id,
+                "name": "Working Capital Standard",
+                "product_type": "WORKING_CAPITAL",
+                "min_amount": 10000,
+                "max_amount": 250000,
+                "minimum_monthly_revenue": 10000,
+                "minimum_time_in_business_months": 12,
+                "states": [],
+                "excluded_industries": [],
+            },
+        )
+        assert program_response.status_code == 200
+        program_id = program_response.json()["id"]
+
+        match_response = client.post(
+            f"/api/v2/applications/{application_id}/match"
+        )
+        assert match_response.status_code == 200
+        assert match_response.json()[0]["eligible"] is True
+
+        submission_response = client.post(
+            f"/api/v2/admin/applications/{application_id}"
+            "/prepare-matched-submissions"
+        )
+        assert submission_response.status_code == 200
+        submission = submission_response.json()[0]
+        assert submission["status"] == "DRAFT"
+
+        condition_response = client.post(
+            f"/api/v2/lender/submissions/{submission['id']}/conditions",
+            json={"description": "Provide the most recent operating statement."},
+        )
+        assert condition_response.status_code == 201
+
+        conditions_response = client.get(
+            f"/api/v2/applications/{application_id}/conditions"
+        )
+        assert conditions_response.status_code == 200
+        assert len(conditions_response.json()) == 1
+
+        offer_response = client.post(
+            f"/api/v2/lender/submissions/{submission['id']}/offers",
+            json={
+                "application_id": application_id,
+                "lender_id": lender_id,
+                "program_id": program_id,
+                "product_type": "WORKING_CAPITAL",
+                "amount": 50000,
+                "term_months": 12,
+                "payment_frequency": "MONTHLY",
+                "payment_amount": 5000,
+                "apr": 15,
+                "origination_fee": 500,
+                "total_repayment": 60000,
+            },
+        )
+        assert offer_response.status_code == 201
+        offer_id = offer_response.json()["id"]
+
+        accept_key = uuid.uuid4().hex
+        accepted_response = client.post(
+            f"/api/v2/offers/{offer_id}/accept",
+            headers={"Idempotency-Key": accept_key},
+        )
+        assert accepted_response.status_code == 200
+        assert accepted_response.json()["status"] == "ACCEPTED"
+
+        replay_response = client.post(
+            f"/api/v2/offers/{offer_id}/accept",
+            headers={"Idempotency-Key": accept_key},
+        )
+        assert replay_response.status_code == 200
+        assert replay_response.json()["id"] == offer_id
+
+        funding_response = client.get(
+            f"/api/v2/applications/{application_id}/funding"
+        )
+        assert funding_response.status_code == 200
+        assert funding_response.json()["status"] == "CONDITIONS_PENDING"
