@@ -65,7 +65,10 @@ class CodestraProvider:
         event_type: str,
         aggregate_type: str,
         aggregate_id: str,
+        aggregate_version: int | None,
         tenant_id: str | None,
+        correlation_id: str | None,
+        causation_id: str | None,
         occurred_at: str,
         payload: dict,
     ) -> MiddlewareResult:
@@ -75,9 +78,14 @@ class CodestraProvider:
         envelope = {
             "event_id": event_id,
             "event_type": canonical_event_type(event_type),
-            "aggregate_type": aggregate_type,
-            "aggregate_id": aggregate_id,
+            "aggregate": {
+                "type": aggregate_type,
+                "id": aggregate_id,
+                "version": aggregate_version,
+            },
             "tenant_id": tenant_id,
+            "correlation_id": correlation_id,
+            "causation_id": causation_id,
             "occurred_at": occurred_at,
             "payload": payload,
             "source": "moneybee",
@@ -108,4 +116,3 @@ class CodestraProvider:
             accepted=True,
             response={"status": status},
         )
-
