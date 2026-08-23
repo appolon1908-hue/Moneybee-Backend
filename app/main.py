@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app import models  # noqa: F401
 from app.config import settings
 from app.db import SessionLocal, initialize_local_schema
+from app.integration_routes import router as integration_router
 from app.routers import router
 
 
@@ -34,7 +35,9 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "X-Request-ID"],
 )
 app.include_router(router, prefix="/api/v2")
+app.include_router(integration_router, prefix="/api/v2")
 app.include_router(router, prefix="/api/v1", include_in_schema=False)
+app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
 
 
 @app.middleware("http")
