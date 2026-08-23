@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from uuid import UUID
+
 from fastapi import Request
+
 
 @dataclass(frozen=True)
 class CommandContext:
@@ -16,5 +18,15 @@ class CommandContext:
     @classmethod
     def from_request(cls, request: Request) -> "CommandContext":
         request_id = getattr(request.state, "request_id", request.headers.get("X-Request-ID", ""))
-        correlation_id = getattr(request.state, "correlation_id", request.headers.get("X-Correlation-ID", request_id))
-        return cls(request_id=request_id, correlation_id=correlation_id, idempotency_key=request.headers.get("Idempotency-Key"), ip_address=request.client.host if request.client else None, user_agent=request.headers.get("User-Agent"))
+        correlation_id = getattr(
+            request.state,
+            "correlation_id",
+            request.headers.get("X-Correlation-ID", request_id),
+        )
+        return cls(
+            request_id=request_id,
+            correlation_id=correlation_id,
+            idempotency_key=request.headers.get("Idempotency-Key"),
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("User-Agent"),
+        )

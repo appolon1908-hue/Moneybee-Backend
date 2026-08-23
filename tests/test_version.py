@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
+
 
 def test_version_endpoint() -> None:
     response = client.get("/api/v2/system/version")

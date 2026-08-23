@@ -1,5 +1,7 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, Mapping, Any
+from typing import Any, Protocol
+
 
 @dataclass(frozen=True)
 class ProviderResult:
@@ -10,6 +12,14 @@ class ProviderResult:
     error_code: str | None = None
     retry_after_seconds: int | None = None
 
+
 class IntegrationAdapter(Protocol):
     name: str
-    async def execute(self, operation: str, payload: Mapping[str, Any], *, idempotency_key: str | None = None) -> ProviderResult: ...
+
+    async def execute(
+        self,
+        operation: str,
+        payload: Mapping[str, Any],
+        *,
+        idempotency_key: str | None = None,
+    ) -> ProviderResult: ...
