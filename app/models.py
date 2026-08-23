@@ -232,6 +232,9 @@ class Offer(Base, Record):
     factor_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     origination_fee: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     total_repayment: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(40), default="AVAILABLE")
     version: Mapped[int] = mapped_column(Integer, default=1)
 
