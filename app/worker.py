@@ -6,7 +6,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_, select
 
 from app.db import SessionLocal
-from app.models import OutboxEvent, OutboxStatus
+from app.integrations.base import ProviderError
+from app.integrations.middleware import canonical_event_type
+from app.integrations.registry import middleware_adapter
+from app.models import IntegrationEvent, OutboxEvent, OutboxStatus
+from app.services import effective_capabilities
 
 
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
@@ -41,12 +45,48 @@ async def deliver(event_id: str) -> None:
         if not event or event.lease_owner != WORKER_ID:
             return
         try:
-            # Local deterministic provider. Production adapter is configured through Codestra middleware.
-            await asyncio.sleep(0)
+            capabilities = await effective_capabilities(db)
+            if not capabilities.get("crm.write", False):
+                raise ProviderError(
+                    "codestra",
+                    "crm.write is not enabled and provider-ready",
+                )
+            adapter = middleware_adapter()
+            canonical_type = canonical_event_type(event.event_type)
+            result = await adapter.publish(
+                event_id=str(event.id),
+                event_type=canonical_type,
+                aggregate_type=canonical_type.split(".", 1)[0],
+                aggregate_id=str(event.aggregate_id),
+                tenant_id=event.payload.get("tenant_id"),
+                occurred_at=event.created_at.isoformat(),
+                payload=event.payload,
+            )
+            db.add(
+                IntegrationEvent(
+                    provider=result.provider,
+                    event_type=canonical_type,
+                    aggregate_id=event.aggregate_id,
+                    status="DELIVERED",
+                    attempts=event.attempt_count,
+                    external_id=result.external_id,
+                    response=result.response,
+                )
+            )
             event.status = OutboxStatus.DELIVERED
             event.last_error = None
         except Exception as exc:
             event.last_error = str(exc)[:1000]
+            db.add(
+                IntegrationEvent(
+                    provider="codestra",
+                    event_type=canonical_event_type(event.event_type),
+                    aggregate_id=event.aggregate_id,
+                    status="FAILED",
+                    attempts=event.attempt_count,
+                    last_error=event.last_error,
+                )
+            )
             event.status = OutboxStatus.DEAD if event.attempt_count >= 8 else OutboxStatus.RETRY
             event.next_attempt_at = datetime.now(UTC) + timedelta(
                 seconds=min(3600, 2 ** event.attempt_count)
