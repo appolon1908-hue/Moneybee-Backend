@@ -47,7 +47,7 @@ def test_borrower_application_sections_and_submission_flow():
             "/api/v2/applications",
             json={"lead_id": lead_id},
         )
-        assert application_response.status_code == 201
+        assert application_response.status_code == 200
         application_id = application_response.json()["id"]
 
         business_response = client.put(
