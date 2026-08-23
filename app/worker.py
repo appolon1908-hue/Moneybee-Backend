@@ -9,6 +9,7 @@ from app.db import SessionLocal
 from app.integrations.base import ProviderError
 from app.integrations.middleware import canonical_event_type
 from app.integrations.registry import middleware_adapter
+from app.integration_models import OperationalException
 from app.models import IntegrationEvent, OutboxEvent, OutboxStatus
 from app.services import effective_capabilities
 
@@ -36,6 +37,10 @@ async def claim() -> str | None:
         event.lease_owner = WORKER_ID
         event.lease_expires_at = now + timedelta(seconds=60)
         event.attempt_count += 1
+        event.first_attempt_at = event.first_attempt_at or now
+        event.last_attempt_at = now
+        event.provider = "codestra"
+        event.destination = "codestra:event-ingress"
         return str(event.id)
 
 
@@ -58,7 +63,10 @@ async def deliver(event_id: str) -> None:
                 event_type=canonical_type,
                 aggregate_type=canonical_type.split(".", 1)[0],
                 aggregate_id=str(event.aggregate_id),
-                tenant_id=event.payload.get("tenant_id"),
+                aggregate_version=event.aggregate_version,
+                tenant_id=event.tenant_id,
+                correlation_id=event.correlation_id,
+                causation_id=event.causation_id,
                 occurred_at=event.created_at.isoformat(),
                 payload=event.payload,
             )
@@ -74,9 +82,15 @@ async def deliver(event_id: str) -> None:
                 )
             )
             event.status = OutboxStatus.DELIVERED
+            event.delivered_at = datetime.now(UTC)
             event.last_error = None
+            event.last_error_code = None
         except Exception as exc:
             event.last_error = str(exc)[:1000]
+            event.last_error_code = type(exc).__name__[:120]
+            event.last_http_status = (
+                exc.status_code if isinstance(exc, ProviderError) else None
+            )
             db.add(
                 IntegrationEvent(
                     provider="codestra",
@@ -87,10 +101,31 @@ async def deliver(event_id: str) -> None:
                     last_error=event.last_error,
                 )
             )
-            event.status = OutboxStatus.DEAD if event.attempt_count >= 8 else OutboxStatus.RETRY
+            terminal = event.attempt_count >= 8
+            event.status = OutboxStatus.DEAD if terminal else OutboxStatus.RETRY
             event.next_attempt_at = datetime.now(UTC) + timedelta(
                 seconds=min(3600, 2 ** event.attempt_count)
             )
+            if terminal:
+                fingerprint = f"OUTBOX_RETRY_EXHAUSTED:{event.id}"
+                existing = await db.scalar(
+                    select(OperationalException).where(
+                        OperationalException.fingerprint == fingerprint
+                    )
+                )
+                if existing is None:
+                    db.add(
+                        OperationalException(
+                            fingerprint=fingerprint,
+                            code="OUTBOX_RETRY_EXHAUSTED",
+                            severity="HIGH",
+                            resource_type="outbox_event",
+                            resource_id=str(event.id),
+                            correlation_id=event.correlation_id,
+                            retry_action="REPLAY_OUTBOX_EVENT",
+                            comments=[],
+                        )
+                    )
         finally:
             event.lease_owner = None
             event.lease_expires_at = None
