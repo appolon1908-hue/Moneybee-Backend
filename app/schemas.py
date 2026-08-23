@@ -300,3 +300,105 @@ class NotificationPreferenceRead(NotificationPreferenceInput):
     subject: str
     created_at: datetime
     updated_at: datetime
+
+class RequirementSnapshotRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    policy_version: int
+    completion_percentage: int
+    ready_for_submission: bool
+    ready_for_contract: bool
+    ready_for_funding: bool
+    requirements: list[dict]
+    created_at: datetime
+
+
+class UnderwritingReviewInput(BaseModel):
+    decision: Literal[
+        "APPROVE",
+        "DECLINE",
+        "FRAUD_REVIEW",
+        "COMPLIANCE_REVIEW",
+        "CONDITIONS",
+    ]
+    submission_id: uuid.UUID | None = None
+    reason_codes: list[str] = Field(default_factory=list, max_length=50)
+    notes: str | None = Field(default=None, max_length=10_000)
+
+
+class UnderwritingReviewRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    submission_id: uuid.UUID | None
+    reviewer_subject: str
+    decision: str
+    reason_codes: list[str]
+    notes: str | None
+    policy_version: int
+    created_at: datetime
+
+
+class FraudAssessmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    policy_version: int
+    score: int
+    decision: str
+    flags: list[dict]
+    created_at: datetime
+
+
+class CommissionSplitRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    commission_id: uuid.UUID
+    recipient_type: str
+    recipient_reference: str
+    percentage: Decimal | None
+    amount: Decimal
+    status: str
+    created_at: datetime
+
+
+class CommissionAdjustmentInput(BaseModel):
+    adjustment_type: str = Field(min_length=2, max_length=50)
+    amount: Decimal
+    reason: str = Field(min_length=5, max_length=10_000)
+
+
+class CommissionAdjustmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    commission_id: uuid.UUID
+    adjustment_type: str
+    amount: Decimal
+    reason: str
+    created_by: str
+    created_at: datetime
+
+
+class SLAAlertRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    code: str
+    severity: str
+    message: str
+    status: str
+    resolved_at: datetime | None
+    created_at: datetime
+
+
+class UserAccountRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    subject: str
+    email: str | None
+    display_name: str | None
+    role: str
+    active: bool
+    last_login_at: datetime | None
+    created_at: datetime
