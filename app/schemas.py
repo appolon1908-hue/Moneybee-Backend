@@ -69,6 +69,7 @@ class ApplicationRead(BaseModel):
     id: uuid.UUID
     lead_id: uuid.UUID
     borrower_subject: str | None
+    borrower_organization_id: uuid.UUID | None
     requested_amount: Decimal
     monthly_revenue: Decimal
     time_in_business_months: int
@@ -77,6 +78,29 @@ class ApplicationRead(BaseModel):
     status: str
     completion_percentage: int
     version: int
+
+
+class PrincipalRead(BaseModel):
+    user_id: uuid.UUID
+    issuer: str
+    subject: str
+    organization_ids: list[uuid.UUID]
+    active_organization_id: uuid.UUID | None
+    roles: list[str]
+    permissions: list[str]
+    membership_types: list[str]
+    borrower_id: uuid.UUID | None
+    lender_id: uuid.UUID | None
+    is_active: bool
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    detail: ErrorDetail
 
 
 class BusinessInput(BaseModel):

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import banking, domain_logic, models, schemas, services
@@ -43,9 +43,29 @@ async def prequalify(
     )
 
 
-@router.get("/me", tags=["identity"])
+@router.get(
+    "/me",
+    response_model=schemas.PrincipalRead,
+    responses={
+        401: {"model": schemas.ErrorResponse, "description": "Authentication or binding failed"},
+        403: {"model": schemas.ErrorResponse, "description": "User, membership, or tenant rejected"},
+    },
+    tags=["identity"],
+)
 async def me(user: User):
-    return {"id": user.subject, "roles": sorted(user.roles), "permissions": sorted(user.permissions)}
+    return schemas.PrincipalRead(
+        user_id=user.user_id,
+        issuer=user.issuer,
+        subject=user.subject,
+        organization_ids=list(user.organization_ids),
+        active_organization_id=user.active_organization_id,
+        roles=sorted(user.roles),
+        permissions=sorted(user.permissions),
+        membership_types=sorted(user.membership_types),
+        borrower_id=user.borrower_id,
+        lender_id=user.lender_id,
+        is_active=user.is_active,
+    )
 
 
 @router.get("/me/capabilities", tags=["identity"])
@@ -59,8 +79,9 @@ async def create_application(payload: schemas.ApplicationCreate, db: Db, user: U
         select(models.Application).where(models.Application.lead_id == payload.lead_id)
     )
     if existing:
-        if "BORROWER" in user.roles and not existing.borrower_subject:
+        if "BORROWER" in user.membership_types and not existing.borrower_subject:
             existing.borrower_subject = user.subject
+            existing.borrower_organization_id = user.borrower_id
             await db.commit()
         services.authorize_application(existing, user)
         return existing
@@ -72,7 +93,10 @@ async def create_application(payload: schemas.ApplicationCreate, db: Db, user: U
         requested_amount=lead.funding_amount,
         monthly_revenue=lead.monthly_revenue,
         time_in_business_months=lead.time_in_business_months,
-        borrower_subject=user.subject if "BORROWER" in user.roles else None,
+        borrower_subject=(
+            user.subject if "BORROWER" in user.membership_types else None
+        ),
+        borrower_organization_id=user.borrower_id,
     )
     lead.status = models.LeadStatus.APPLICATION_STARTED
     db.add(item)
@@ -349,11 +373,14 @@ async def create_program(
 ):
     if lender_id != payload.lender_id:
         raise HTTPException(status_code=422, detail="Lender ID mismatch")
-    if (
-        "*" not in user.permissions
-        and user.organization_id != str(lender_id)
-    ):
-        raise HTTPException(status_code=403, detail="Lender organization mismatch")
+    if "*" not in user.permissions and user.lender_id != lender_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "RESOURCE_ACCESS_DENIED",
+                "message": "The lender organization does not own this resource.",
+            },
+        )
     item = models.LenderProgram(**payload.model_dump())
     db.add(item)
     await db.commit()
@@ -374,11 +401,14 @@ async def lender_offer(
 ):
     if payload.application_id != application_id:
         raise HTTPException(status_code=422, detail="Application ID mismatch")
-    if (
-        "*" not in user.permissions
-        and user.organization_id != str(payload.lender_id)
-    ):
-        raise HTTPException(status_code=403, detail="Lender organization mismatch")
+    if "*" not in user.permissions and user.lender_id != payload.lender_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "RESOURCE_ACCESS_DENIED",
+                "message": "The lender organization does not own this resource.",
+            },
+        )
     item = models.Offer(**payload.model_dump())
     db.add(item)
     application = await db.get(models.Application, application_id)
@@ -494,11 +524,27 @@ async def provider_connections(
 
 @router.get("/borrower/dashboard", tags=["borrower"])
 async def borrower_dashboard(db: Db, user: User):
+    if user.borrower_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "RESOURCE_ACCESS_DENIED",
+                "message": "An active borrower membership is required.",
+            },
+        )
     items = list(
         (
             await db.scalars(
                 select(models.Application)
-                .where(models.Application.borrower_subject == user.subject)
+                .where(
+                    or_(
+                        models.Application.borrower_organization_id == user.borrower_id,
+                        (
+                            models.Application.borrower_organization_id.is_(None)
+                            & (models.Application.borrower_subject == user.subject)
+                        ),
+                    )
+                )
                 .order_by(models.Application.updated_at.desc())
             )
         ).all()
@@ -519,11 +565,27 @@ async def borrower_dashboard(db: Db, user: User):
     tags=["borrower"],
 )
 async def borrower_applications(db: Db, user: User):
+    if user.borrower_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "RESOURCE_ACCESS_DENIED",
+                "message": "An active borrower membership is required.",
+            },
+        )
     return list(
         (
             await db.scalars(
                 select(models.Application)
-                .where(models.Application.borrower_subject == user.subject)
+                .where(
+                    or_(
+                        models.Application.borrower_organization_id == user.borrower_id,
+                        (
+                            models.Application.borrower_organization_id.is_(None)
+                            & (models.Application.borrower_subject == user.subject)
+                        ),
+                    )
+                )
                 .order_by(models.Application.updated_at.desc())
             )
         ).all()
@@ -748,14 +810,15 @@ async def submit_application(application_id: uuid.UUID, db: Db, user: User):
 def lender_scope(user: Principal) -> uuid.UUID | None:
     if "*" in user.permissions:
         return None
-    if not user.organization_id:
-        raise HTTPException(status_code=403, detail="Lender organization is not mapped")
-    try:
-        return uuid.UUID(user.organization_id)
-    except ValueError as exc:
+    if user.lender_id is None:
         raise HTTPException(
-            status_code=403, detail="Invalid lender organization mapping"
-        ) from exc
+            status_code=403,
+            detail={
+                "code": "RESOURCE_ACCESS_DENIED",
+                "message": "An active lender membership is required.",
+            },
+        )
+    return user.lender_id
 
 
 @router.post(
@@ -1009,7 +1072,13 @@ async def authorized_submission(
         raise HTTPException(status_code=404, detail="Submission not found")
     lender_id = lender_scope(user)
     if lender_id and item.lender_id != lender_id:
-        raise HTTPException(status_code=403, detail="Lender organization mismatch")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "RESOURCE_ACCESS_DENIED",
+                "message": "The lender organization does not own this submission.",
+            },
+        )
     return item
 
 

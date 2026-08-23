@@ -129,23 +129,20 @@ async def system_readiness(db: AsyncSession) -> dict:
     if auth_status != "PASS":
         blockers.append("Canonical production authentication is not enforced")
 
-    final_status = (
-        "READY"
-        if settings.app_env == "production" and not blockers
-        else "PARTIAL"
-    )
+    final_status = "BLOCKED" if auth_status == "FAIL" else "PARTIAL"
     enabled_features = sorted(key for key, enabled in capabilities.items() if enabled)
 
     return {
         "FINAL_STATUS": final_status,
+        "OVERALL_SYSTEM_STATUS": "PARTIAL",
         "ENVIRONMENT": settings.app_env,
         **release_evidence,
         "AUTH_STATUS": auth_status,
         "AUTHORIZATION_STATUS": "PARTIAL",
-        "IDEMPOTENCY_STATUS": "PASS",
+        "IDEMPOTENCY_STATUS": "PARTIAL",
         "CONCURRENCY_STATUS": "PARTIAL",
-        "OUTBOX_STATUS": "FAIL" if dead_outbox else "PASS",
-        "INBOX_STATUS": "FAIL" if failed_inbox else "PASS",
+        "OUTBOX_STATUS": "FAIL" if dead_outbox else "PARTIAL",
+        "INBOX_STATUS": "FAIL" if failed_inbox else "PARTIAL",
         "OUTBOX_PENDING": pending_outbox,
         "INBOX_PENDING": pending_inbox,
         "OPEN_OPERATIONAL_EXCEPTIONS": open_exceptions,
@@ -155,6 +152,5 @@ async def system_readiness(db: AsyncSession) -> dict:
         "STAGING_STATUS": settings.staging_status,
         "PRODUCTION_FEATURES_ENABLED": enabled_features,
         "BLOCKERS": blockers,
-        "NEXT_SAFE_ACTION": blockers[0] if blockers else "Controlled production canary",
+        "NEXT_SAFE_ACTION": blockers[0] if blockers else "Continue Step 1 verification",
     }
-

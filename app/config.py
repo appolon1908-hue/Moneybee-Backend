@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     auto_create_schema: bool = True
     local_auth_bypass: bool = True
+    local_identity_enforcement: bool = False
     cors_origins_csv: str = (
         "http://localhost:5173,http://localhost:5174,"
         "http://localhost:5175,http://localhost:5176"
@@ -22,6 +23,7 @@ class Settings(BaseSettings):
     oidc_jwks_url: str = (
         "https://auth.codestra.co/realms/codestra/protocol/openid-connect/certs"
     )
+    oidc_algorithms_csv: str = "RS256"
     codestra_middleware_base_url: str | None = None
     codestra_middleware_token_url: str | None = None
     codestra_middleware_client_id: str | None = None
@@ -133,6 +135,14 @@ class Settings(BaseSettings):
         return [item.strip() for item in self.cors_origins_csv.split(",") if item.strip()]
 
     @property
+    def oidc_algorithms(self) -> list[str]:
+        return [
+            item.strip()
+            for item in self.oidc_algorithms_csv.split(",")
+            if item.strip()
+        ]
+
+    @property
     def plaid_products(self) -> list[str]:
         return [
             item.strip()
@@ -156,8 +166,12 @@ class Settings(BaseSettings):
         if self.app_env in {"staging", "production"}:
             if self.local_auth_bypass or self.auto_create_schema:
                 raise ValueError("Local bypass/schema creation must be disabled")
+            if not self.local_identity_enforcement:
+                raise ValueError("Local identity enforcement must be enabled")
             if not self.oidc_issuer.startswith("https://auth.codestra.co/"):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
+            if self.oidc_algorithms != ["RS256"]:
+                raise ValueError("Production OIDC tokens must use RS256")
             if self.bank_provider == "plaid" and not all(
                 [
                     self.plaid_client_id,

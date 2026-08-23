@@ -111,6 +111,9 @@ class Application(Base, Record):
 
     lead_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leads.id"), unique=True)
     borrower_subject: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    borrower_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id"), nullable=True, index=True
+    )
     requested_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     monthly_revenue: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     time_in_business_months: Mapped[int] = mapped_column(Integer)

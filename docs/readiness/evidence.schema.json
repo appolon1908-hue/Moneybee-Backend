@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MoneyBee Readiness Evidence",
+  "type": "object",
+  "required": [
+    "gate",
+    "status",
+    "source_sha",
+    "environment",
+    "evidence_type",
+    "evidence_reference",
+    "generated_at"
+  ],
+  "properties": {
+    "gate": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "PARTIAL",
+        "BLOCKED",
+        "NOT_APPLICABLE"
+      ]
+    },
+    "source_sha": {
+      "type": "string",
+      "minLength": 7
+    },
+    "environment": {
+      "enum": [
+        "ci",
+        "development",
+        "staging",
+        "production"
+      ]
+    },
+    "evidence_type": {
+      "type": "string"
+    },
+    "evidence_reference": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "approved_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
+

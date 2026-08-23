@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app import models  # noqa: F401
+from app import identity_models, models  # noqa: F401
 from app.config import settings
 from app.db import SessionLocal, initialize_local_schema
 from app.integration_routes import router as integration_router
@@ -39,6 +39,7 @@ app.add_middleware(
         "If-Match",
         "X-Correlation-ID",
         "X-Request-ID",
+        "X-Organization-ID",
     ],
 )
 app.include_router(router, prefix="/api/v2")

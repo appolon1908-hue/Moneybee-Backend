@@ -338,11 +338,22 @@ def authorize_application(
         return
     broad = "application.edit" if write else "application.read"
     own = "application.edit.own" if write else "application.read.own"
-    if broad in principal.permissions:
+    if broad in principal.permissions and "MONEYBEE" in principal.membership_types:
         return
-    if own in principal.permissions and application.borrower_subject == principal.subject:
-        return
-    raise HTTPException(status_code=403, detail="Application access denied")
+    if own in principal.permissions and principal.borrower_id is not None:
+        if application.borrower_organization_id is not None:
+            if application.borrower_organization_id == principal.borrower_id:
+                return
+        elif application.borrower_subject == principal.subject:
+            # Additive-migration compatibility for records awaiting organization backfill.
+            return
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "RESOURCE_ACCESS_DENIED",
+            "message": "The principal cannot access this application.",
+        },
+    )
 
 
 async def get_authorized_application(

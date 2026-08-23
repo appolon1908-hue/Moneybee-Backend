@@ -1,0 +1,22 @@
+{
+  "work_package": "auth/local-identity-tenancy",
+  "status": "PARTIAL",
+  "source_sha": "PENDING_CI_HEAD",
+  "migration_head_before": "20260823_0011",
+  "migration_head_after": "20260823_0012",
+  "unit_tests": "PENDING_CI",
+  "postgres_tests": "PENDING_CI",
+  "security_tests": "PENDING_CI",
+  "concurrency_tests": "NOT_APPLICABLE",
+  "openapi_status": "PENDING_CI",
+  "rollback_documented": true,
+  "staging_verified": false,
+  "production_enabled": false,
+  "live_capabilities_enabled": [],
+  "overall_system_status": "PARTIAL",
+  "blockers": [
+    "Paired frontend and backend staging Keycloak E2E is not yet recorded",
+    "Existing borrower_subject records require controlled organization backfill",
+    "Steps 2 through 12 and the complete launch gate remain incomplete"
+  ]
+}
