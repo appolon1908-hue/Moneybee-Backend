@@ -1,22 +1,27 @@
 {
   "work_package": "auth/local-identity-tenancy",
-  "status": "PARTIAL",
-  "source_sha": "PENDING_CI_HEAD",
+  "status": "PASS",
+  "source_sha": "b1c230276fb253ac2d1602a6572dda585d33110b",
   "migration_head_before": "20260823_0011",
   "migration_head_after": "20260823_0012",
-  "unit_tests": "PENDING_CI",
-  "postgres_tests": "PENDING_CI",
-  "security_tests": "PENDING_CI",
+  "unit_tests": "PASS",
+  "postgres_tests": "PASS",
+  "security_tests": "PASS",
   "concurrency_tests": "NOT_APPLICABLE",
-  "openapi_status": "PENDING_CI",
+  "openapi_status": "PASS",
+  "migration_upgrade": "PASS",
+  "migration_downgrade_reupgrade": "PASS",
+  "empty_database_to_head": "PASS",
+  "ci_run": "https://github.com/appolon1908-hue/Moneybee-Backend/actions/runs/32657283097",
   "rollback_documented": true,
   "staging_verified": false,
   "production_enabled": false,
   "live_capabilities_enabled": [],
   "overall_system_status": "PARTIAL",
-  "blockers": [
-    "Paired frontend and backend staging Keycloak E2E is not yet recorded",
-    "Existing borrower_subject records require controlled organization backfill",
+  "blockers": [],
+  "known_limitations": [
+    "Paired frontend and backend staging Keycloak E2E is outside this backend PR and is not yet recorded",
+    "Existing borrower_subject records require controlled organization backfill before compatibility removal",
     "Steps 2 through 12 and the complete launch gate remain incomplete"
   ]
 }
