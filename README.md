@@ -19,7 +19,7 @@ The backend is the authority for business rules and data. The CRM is a sales sys
 
 ## Canonical boundaries
 
-- Public API: `https://api.moneybeeloan.com/api/v1`
+- Public API: `https://api.moneybeeloan.com/api/v2`
 - Identity issuer: `https://auth.codestra.co/realms/codestra`
 - Human authentication: Authorization Code + PKCE
 - Machine authentication: short-lived Client Credentials tokens
