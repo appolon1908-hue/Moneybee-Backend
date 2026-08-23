@@ -67,6 +67,7 @@ class ApplicationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     lead_id: uuid.UUID
+    borrower_subject: str | None
     requested_amount: Decimal
     monthly_revenue: Decimal
     time_in_business_months: int
@@ -75,6 +76,53 @@ class ApplicationRead(BaseModel):
     status: str
     completion_percentage: int
     version: int
+
+
+class BusinessInput(BaseModel):
+    legal_name: str = Field(min_length=2, max_length=240)
+    dba: str | None = Field(default=None, max_length=240)
+    entity_type: str | None = Field(default=None, max_length=80)
+    state_formed: str | None = Field(default=None, min_length=2, max_length=2)
+    industry: str | None = Field(default=None, max_length=120)
+    naics: str | None = Field(default=None, max_length=12)
+    website: str | None = Field(default=None, max_length=500)
+    address: dict = Field(default_factory=dict)
+
+
+class BusinessRead(BusinessInput):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+
+
+class FinancialProfileInput(BaseModel):
+    annual_revenue: Decimal | None = Field(default=None, ge=0)
+    monthly_revenue: Decimal | None = Field(default=None, ge=0)
+    monthly_expenses: Decimal | None = Field(default=None, ge=0)
+    existing_debt: Decimal | None = Field(default=None, ge=0)
+    existing_positions: int = Field(default=0, ge=0)
+
+
+class FinancialProfileRead(FinancialProfileInput):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+
+
+class OwnerInput(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    ownership_percent: Decimal = Field(gt=0, le=100)
+    title: str | None = Field(default=None, max_length=100)
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, max_length=32)
+    address: dict = Field(default_factory=dict)
+
+
+class OwnerRead(OwnerInput):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
 
 
 class ProgramInput(BaseModel):
