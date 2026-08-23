@@ -1,0 +1,1 @@
+"""Application lifecycle domain boundary."""

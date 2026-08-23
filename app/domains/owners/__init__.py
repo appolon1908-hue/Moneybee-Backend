@@ -1,0 +1,1 @@
+"""Ownership domain boundary."""

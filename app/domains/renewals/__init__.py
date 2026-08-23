@@ -1,0 +1,1 @@
+"""Renewal domain boundary."""

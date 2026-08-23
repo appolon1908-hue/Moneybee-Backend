@@ -1,0 +1,1 @@
+"""Lead acquisition domain boundary."""

@@ -1,0 +1,1 @@
+"""Business profile domain boundary."""

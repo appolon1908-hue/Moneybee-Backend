@@ -1,0 +1,1 @@
+"""Fraud assessment domain boundary."""

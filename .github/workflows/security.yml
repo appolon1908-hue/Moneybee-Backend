@@ -1,0 +1,23 @@
+name: backend-security
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: pip-audit
+      - name: Guard live capabilities
+        run: |
+          grep -q '^CREDIT_LIVE_PULL=false' .env.example
+          grep -q '^LENDERS_LIVE_SUBMISSION=false' .env.example
+          grep -q '^ESIGN_LIVE_SEND=false' .env.example
+          grep -q '^FUNDING_LIVE_CONFIRMATION=false' .env.example
+          grep -q '^PAYMENTS=false' .env.example
+          grep -q '^PAYOUTS=false' .env.example

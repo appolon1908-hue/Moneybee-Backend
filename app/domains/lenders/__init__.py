@@ -1,0 +1,1 @@
+"""Lender configuration domain boundary."""

@@ -1,0 +1,1 @@
+"""Financial profile domain boundary."""
