@@ -3,10 +3,11 @@ import json
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas
+from app.auth import Principal
 from app.config import settings
 
 
@@ -171,3 +172,116 @@ async def require_capability(db: AsyncSession, key: str) -> models.CapabilityFla
             },
         )
     return capability
+
+
+def authorize_application(
+    application: models.Application,
+    principal: Principal,
+    *,
+    write: bool = False,
+) -> None:
+    if "*" in principal.permissions:
+        return
+    broad = "application.edit" if write else "application.read"
+    own = "application.edit.own" if write else "application.read.own"
+    if broad in principal.permissions:
+        return
+    if own in principal.permissions and application.borrower_subject == principal.subject:
+        return
+    raise HTTPException(status_code=403, detail="Application access denied")
+
+
+async def get_authorized_application(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    principal: Principal,
+    *,
+    write: bool = False,
+) -> models.Application:
+    application = await db.get(models.Application, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    authorize_application(application, principal, write=write)
+    return application
+
+
+async def application_requirements(
+    db: AsyncSession,
+    application: models.Application,
+) -> dict:
+    business = await db.scalar(
+        select(models.Business).where(models.Business.application_id == application.id)
+    )
+    financial = await db.scalar(
+        select(models.FinancialProfile).where(
+            models.FinancialProfile.application_id == application.id
+        )
+    )
+    owners = await db.scalar(
+        select(func.count(models.Owner.id)).where(
+            models.Owner.application_id == application.id
+        )
+    )
+    consents = await db.scalar(
+        select(func.count(models.Consent.id)).where(
+            or_(
+                models.Consent.application_id == application.id,
+                models.Consent.lead_id == application.lead_id,
+            )
+        )
+    )
+    values = [
+        {
+            "code": "BUSINESS_INFORMATION",
+            "label": "Business information",
+            "complete": business is not None,
+        },
+        {
+            "code": "FINANCIAL_PROFILE",
+            "label": "Financial profile",
+            "complete": financial is not None,
+        },
+        {
+            "code": "OWNERS",
+            "label": "Ownership information",
+            "complete": bool(owners),
+        },
+        {
+            "code": "CONSENTS",
+            "label": "Required consents",
+            "complete": bool(consents),
+        },
+    ]
+    for value in values:
+        value["status"] = "COMPLETE" if value["complete"] else "ACTION_REQUIRED"
+    completed = sum(1 for value in values if value["complete"])
+    next_item = next((value for value in values if not value["complete"]), None)
+    return {
+        "completion_percentage": int(completed / len(values) * 100),
+        "ready_to_submit": completed == len(values),
+        "next_action": next_item,
+        "requirements": values,
+    }
+
+
+def transition_application(
+    db: AsyncSession,
+    application: models.Application,
+    to_status: models.ApplicationStatus,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = application.status
+    if previous == to_status:
+        return
+    application.status = to_status
+    application.version += 1
+    db.add(
+        models.ApplicationStatusHistory(
+            application_id=application.id,
+            from_status=previous.value if hasattr(previous, "value") else str(previous),
+            to_status=to_status.value,
+            reason=reason,
+            changed_by=principal.subject,
+        )
+    )
