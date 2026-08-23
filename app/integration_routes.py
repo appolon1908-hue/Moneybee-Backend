@@ -2,23 +2,31 @@ import hashlib
 import hmac
 import json
 import time
+import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from app import models
 from app.auth import Principal, require_permission
 from app.config import settings
 from app.db import get_db
-from app.integration_models import IntegrationInboxMessage
+from app.integration_models import IntegrationInboxMessage, OperationalException
 from app.integrations.registry import provider_statuses
 from app.integrations.middesk import MiddeskAdapter
+from app.readiness import system_readiness
 
 
 router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_db)]
+
+
+class ExceptionResolution(BaseModel):
+    resolution: str = Field(min_length=5, max_length=10_000)
 
 
 def verify_codestra_signature(
@@ -243,3 +251,81 @@ async def integration_control_plane(
             for row in provider_statuses()
         ],
     }
+
+
+@router.get("/admin/operational-exceptions", tags=["admin", "operations"])
+async def operational_exceptions(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("capability.read"))],
+    status_filter: Annotated[str | None, Query(alias="status", max_length=40)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+):
+    statement = select(OperationalException)
+    if status_filter:
+        statement = statement.where(OperationalException.status == status_filter)
+    rows = (
+        await db.scalars(
+            statement.order_by(OperationalException.created_at.desc()).limit(limit)
+        )
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "code": row.code,
+            "severity": row.severity,
+            "status": row.status,
+            "owner_subject": row.owner_subject,
+            "sla_due_at": row.sla_due_at,
+            "resource_type": row.resource_type,
+            "resource_id": row.resource_id,
+            "correlation_id": row.correlation_id,
+            "retry_action": row.retry_action,
+            "resolution": row.resolution,
+            "created_at": row.created_at,
+            "resolved_at": row.resolved_at,
+        }
+        for row in rows
+    ]
+
+
+@router.post(
+    "/admin/operational-exceptions/{exception_id}/resolve",
+    tags=["admin", "operations"],
+)
+async def resolve_operational_exception(
+    exception_id: str,
+    payload: ExceptionResolution,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("capability.manage"))],
+):
+    try:
+        parsed_id = uuid.UUID(exception_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid exception ID") from exc
+    row = await db.get(OperationalException, parsed_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Operational exception not found")
+    if row.status == "RESOLVED":
+        return {"id": row.id, "status": row.status, "resolution": row.resolution}
+    row.status = "RESOLVED"
+    row.resolution = payload.resolution
+    row.resolved_at = datetime.now(UTC)
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="OPERATIONAL_EXCEPTION_RESOLVED",
+            resource_type="operational_exception",
+            resource_id=str(row.id),
+            details={"code": row.code, "resolution_recorded": True},
+        )
+    )
+    await db.commit()
+    return {"id": row.id, "status": row.status, "resolution": row.resolution}
+
+
+@router.get("/admin/system/readiness", tags=["admin", "system"])
+async def readiness_report(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("capability.read"))],
+):
+    return await system_readiness(db)
