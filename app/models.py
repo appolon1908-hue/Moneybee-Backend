@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, Uuid
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -42,6 +42,15 @@ class OutboxStatus(str, enum.Enum):
     DELIVERED = "DELIVERED"
     RETRY = "RETRY"
     DEAD = "DEAD"
+
+
+class ProviderStatus(str, enum.Enum):
+    NOT_CONFIGURED = "NOT_CONFIGURED"
+    CONFIGURED = "CONFIGURED"
+    VERIFYING = "VERIFYING"
+    READY = "READY"
+    DEGRADED = "DEGRADED"
+    DISABLED = "DISABLED"
 
 
 class Record:
@@ -170,3 +179,41 @@ class AuditEvent(Base, Record):
     resource_id: Mapped[str] = mapped_column(String(120))
     request_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     details: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CapabilityFlag(Base, Record):
+    __tablename__ = "capability_flags"
+
+    key: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    environment: Mapped[str] = mapped_column(String(40), index=True)
+    enabled: Mapped[bool] = mapped_column(default=False)
+    provider: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enabled_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class ProviderConnection(Base, Record):
+    __tablename__ = "provider_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_type",
+            "provider_name",
+            "environment",
+            name="uq_provider_connection_identity",
+        ),
+    )
+
+    provider_type: Mapped[str] = mapped_column(String(80), index=True)
+    provider_name: Mapped[str] = mapped_column(String(120), index=True)
+    environment: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[ProviderStatus] = mapped_column(
+        Enum(ProviderStatus), default=ProviderStatus.NOT_CONFIGURED
+    )
+    external_account_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    configuration_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_health_check: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
