@@ -22,7 +22,12 @@ class Principal:
 ROLE_PERMISSIONS = {
     "MONEYBEE_ADMIN": {"*"},
     "MONEYBEE_SALES": {"lead.read", "application.read", "application.edit"},
-    "MONEYBEE_UNDERWRITER": {\n        "application.read",\n        "underwriting.review",\n        "matching.run",\n        "fraud.run",\n    },
+    "MONEYBEE_UNDERWRITER": {
+        "application.read",
+        "underwriting.review",
+        "matching.run",
+        "fraud.run",
+    },
     "LENDER_ADMIN": {
         "lender.application.read",
         "lender.submission.read",
