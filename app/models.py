@@ -673,3 +673,87 @@ class DocumentReview(Base, Record):
     reviewer_subject: Mapped[str] = mapped_column(String(255))
     decision: Mapped[str] = mapped_column(String(40))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+class RequirementSnapshot(Base, Record):
+    __tablename__ = "requirement_snapshots"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"), index=True
+    )
+    policy_version: Mapped[int] = mapped_column(Integer, default=1)
+    completion_percentage: Mapped[int] = mapped_column(Integer)
+    ready_for_submission: Mapped[bool] = mapped_column(default=False)
+    ready_for_contract: Mapped[bool] = mapped_column(default=False)
+    ready_for_funding: Mapped[bool] = mapped_column(default=False)
+    requirements: Mapped[list] = mapped_column(JSON)
+
+
+class UnderwritingReview(Base, Record):
+    __tablename__ = "underwriting_reviews"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    submission_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("lender_submissions.id"), nullable=True, index=True
+    )
+    reviewer_subject: Mapped[str] = mapped_column(String(255))
+    decision: Mapped[str] = mapped_column(String(50))
+    reason_codes: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    policy_version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class CommissionSplit(Base, Record):
+    __tablename__ = "commission_splits"
+
+    commission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("commissions.id", ondelete="CASCADE"), index=True
+    )
+    recipient_type: Mapped[str] = mapped_column(String(50))
+    recipient_reference: Mapped[str] = mapped_column(String(255))
+    percentage: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 4), nullable=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    status: Mapped[str] = mapped_column(String(40), default="PENDING")
+
+
+class CommissionAdjustment(Base, Record):
+    __tablename__ = "commission_adjustments"
+
+    commission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("commissions.id", ondelete="CASCADE"), index=True
+    )
+    adjustment_type: Mapped[str] = mapped_column(String(50))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    reason: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(255))
+
+
+class SLAAlert(Base, Record):
+    __tablename__ = "sla_alerts"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    code: Mapped[str] = mapped_column(String(100), index=True)
+    severity: Mapped[str] = mapped_column(String(30), default="WARNING")
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="OPEN", index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class UserAccount(Base, Record):
+    __tablename__ = "user_accounts"
+
+    subject: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str] = mapped_column(String(100))
+    active: Mapped[bool] = mapped_column(default=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
