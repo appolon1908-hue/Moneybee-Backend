@@ -1,4 +1,4 @@
-# PR Delivery and Release Governance
+# PR DELIVERY AND RELEASE GOVERNANCE
 
 Every implementation step in this specification MUST be delivered as a separate, independently reviewable pull request.
 
@@ -301,3 +301,61 @@ It is not authority to:
 - allow real funding
 
 Only the complete production launch process can do that.
+
+---
+
+# 12-STEP HARDENING PR SEQUENCE
+
+| Step | PR / work package | Main deliverable |
+|---:|---|---|
+| 1 | `auth/local-identity-tenancy` | Keycloak frontend PKCE/session plus backend identity binding, users, organizations, memberships, and tenant isolation |
+| 2 | `commands/command-context` | Command architecture and shared mutation context |
+| 3 | `concurrency/versioning` | `If-Match`, row locks, version checks, and race tests |
+| 4 | `integration/outbox-deliveries` | Destination subscriptions and per-destination delivery state |
+| 5 | `integration/durable-inbox` | Inbox persistence, leasing, and asynchronous processing |
+| 6 | `webhooks/provider-translators` | Codestra, Odoo, Middesk, Plaid, lender, DocuSign, and communications callbacks |
+| 7 | `documents/secure-pipeline` | Presigned uploads, completion, ClamAV, quarantine, and download controls |
+| 8 | `pii/security-controls` | Masking, reason-based reveal, reveal audit, and key versions |
+| 9 | `lenders-contracts-funding` | Lender sends, contract state, funding dual control, and reconciliation |
+| 10 | `operations/api-consistency` | Recovery APIs, stable errors, cursor pagination, rate limits, and payload policies |
+| 11 | `observability/postgres-tests` | OpenTelemetry, metrics, alerts, and real PostgreSQL concurrency/security tests |
+| 12 | `staging-recovery-release` | Staging, PITR, restore rehearsal, immutable images, SBOM, provenance, and canary |
+
+When a work package changes both repositories, it MUST be delivered as one independently reviewable PR per repository under the same step. Step 1 therefore requires a frontend PKCE/session PR and a backend local-identity/tenancy PR. Neither PR may be merged automatically.
+
+The execution order in this table overrides earlier work-package numbering while preserving every mandatory requirement in the underlying specifications.
+
+Tests must accompany every implementation PR. Step 11 is the comprehensive PostgreSQL and observability certification work package, not the first point at which tests are written.
+
+# OVERALL READINESS FLOW
+
+```text
+Steps 1–11 complete
+        ↓
+FINAL_STATUS remains PARTIAL
+
+Step 12 complete
+        ↓
+run complete launch gate
+
+launch gate partially passes
+        ↓
+PARTIAL / BLOCKED
+
+all mandatory gates pass
+        ↓
+eligible for explicit READY review
+
+human approval
+        ↓
+separate capability activation
+```
+
+Every PR completion report MUST include:
+
+```text
+OVERALL_SYSTEM_STATUS = PARTIAL
+```
+
+This value remains `PARTIAL` until Step 12 and the entire launch gate are complete. A work-package-level `PASS` must never be reported as overall system `READY`.
+
