@@ -14,7 +14,7 @@ async def live() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/health/ready")
+@router.get("/health/ready", response_model=None)
 async def ready() -> dict[str, object] | JSONResponse:
     database_ok = False
     redis_ok = False
