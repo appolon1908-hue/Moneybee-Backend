@@ -282,3 +282,321 @@ class ProviderConnection(Base, Record):
     )
     last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_failure: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BankConnection(Base, Record):
+    __tablename__ = "bank_connections"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(100))
+    provider_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="PENDING")
+
+
+class BankAnalysis(Base, Record):
+    __tablename__ = "bank_analyses"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    analysis_version: Mapped[int] = mapped_column(Integer, default=1)
+    average_monthly_deposits: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    average_daily_balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    negative_balance_days_90d: Mapped[int] = mapped_column(Integer, default=0)
+    nsf_count_90d: Mapped[int] = mapped_column(Integer, default=0)
+    deposit_count_90d: Mapped[int] = mapped_column(Integer, default=0)
+    largest_deposit_90d: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    existing_payment_obligations: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    revenue_trend: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cash_flow_trend: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    risk_flags: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class Verification(Base, Record):
+    __tablename__ = "verifications"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("owners.id"), nullable=True
+    )
+    verification_type: Mapped[str] = mapped_column(String(60))
+    provider: Mapped[str] = mapped_column(String(100))
+    provider_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="PENDING")
+    normalized_result: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CreditAuthorization(Base, Record):
+    __tablename__ = "credit_authorizations"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            "authorization_version",
+            name="uq_credit_authorization_version",
+        ),
+    )
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    authorization_version: Mapped[str] = mapped_column(String(50))
+    document_hash: Mapped[str] = mapped_column(String(128))
+    accepted_by: Mapped[str] = mapped_column(String(200))
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
+class CreditResult(Base, Record):
+    __tablename__ = "credit_results"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(100))
+    provider_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    normalized_result: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class FraudAssessment(Base, Record):
+    __tablename__ = "fraud_assessments"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    policy_version: Mapped[int] = mapped_column(Integer, default=1)
+    score: Mapped[int] = mapped_column(Integer)
+    decision: Mapped[str] = mapped_column(String(40))
+    flags: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class LenderSubmission(Base, Record):
+    __tablename__ = "lender_submissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            "program_id",
+            "program_version",
+            name="uq_submission_application_program_version",
+        ),
+    )
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    lender_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    program_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("lender_programs.id")
+    )
+    program_version: Mapped[int] = mapped_column(Integer)
+    external_submission_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(60), default="QUEUED")
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class UnderwritingCondition(Base, Record):
+    __tablename__ = "underwriting_conditions"
+
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("lender_submissions.id"), index=True
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(60), default="BORROWER_ACTION_REQUIRED"
+    )
+
+
+class Document(Base, Record):
+    __tablename__ = "documents"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("owners.id"), nullable=True
+    )
+    condition_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("underwriting_conditions.id"), nullable=True
+    )
+    document_type: Mapped[str] = mapped_column(String(80))
+    original_file_name: Mapped[str] = mapped_column(String(500))
+    mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    storage_key: Mapped[str] = mapped_column(String(1000))
+    sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(40), default="QUARANTINED")
+    uploaded_by: Mapped[str] = mapped_column(String(200))
+
+
+class Contract(Base, Record):
+    __tablename__ = "contracts"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    offer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("offers.id"))
+    template_version: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    external_envelope_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    document_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(60), default="DRAFT")
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    signed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class Funding(Base, Record):
+    __tablename__ = "fundings"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), unique=True, index=True
+    )
+    offer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("offers.id"), unique=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(60), default="CONDITIONS_PENDING"
+    )
+    approved_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    funded_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    provider_reference: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    funds_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    funding_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class Commission(Base, Record):
+    __tablename__ = "commissions"
+
+    funding_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("fundings.id"), unique=True, index=True
+    )
+    expected_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), default=0
+    )
+    received_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), default=0
+    )
+    status: Mapped[str] = mapped_column(String(40), default="EXPECTED")
+
+
+class RenewalOpportunity(Base, Record):
+    __tablename__ = "renewal_opportunities"
+
+    original_funding_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("fundings.id"), unique=True, index=True
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    eligible_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    eligibility_status: Mapped[str] = mapped_column(
+        String(40), default="PENDING"
+    )
+    estimated_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(40), default="PENDING")
+
+
+class Complaint(Base, Record):
+    __tablename__ = "complaints"
+
+    application_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("applications.id"), nullable=True, index=True
+    )
+    created_by: Mapped[str] = mapped_column(String(200), index=True)
+    category: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text)
+    priority: Mapped[str] = mapped_column(String(30), default="NORMAL")
+    status: Mapped[str] = mapped_column(String(40), default="OPEN")
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Affiliate(Base, Record):
+    __tablename__ = "affiliates"
+
+    name: Mapped[str] = mapped_column(String(255))
+    tracking_code: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(default=True)
+
+
+class Communication(Base, Record):
+    __tablename__ = "communications"
+
+    application_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("applications.id"), nullable=True, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(30))
+    recipient_reference: Mapped[str] = mapped_column(String(320))
+    template_key: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(40), default="QUEUED")
+    provider_reference: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    metadata_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class IntegrationEvent(Base, Record):
+    __tablename__ = "integration_events"
+
+    provider: Mapped[str] = mapped_column(String(100), index=True)
+    event_type: Mapped[str] = mapped_column(String(120))
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class IdempotencyRecord(Base, Record):
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_id",
+            "route",
+            "key",
+            name="uq_idempotency_actor_route_key",
+        ),
+    )
+
+    key: Mapped[str] = mapped_column(String(160), index=True)
+    actor_id: Mapped[str] = mapped_column(String(200))
+    route: Mapped[str] = mapped_column(String(255))
+    request_hash: Mapped[str] = mapped_column(String(128))
+    response_status: Mapped[int] = mapped_column(Integer)
+    response_body: Mapped[dict] = mapped_column(JSON)
