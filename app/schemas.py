@@ -402,3 +402,56 @@ class UserAccountRead(BaseModel):
     active: bool
     last_login_at: datetime | None
     created_at: datetime
+
+class BankExchangeInput(BaseModel):
+    public_token: str = Field(min_length=8, max_length=2_000)
+
+
+class BankConnectionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    provider: str
+    status: str
+    created_at: datetime
+
+
+class BankAccountRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    connection_id: uuid.UUID
+    name: str
+    official_name: str | None
+    mask: str | None
+    account_type: str | None
+    subtype: str | None
+    current_balance: Decimal | None
+    available_balance: Decimal | None
+    currency: str | None
+    active: bool
+    updated_at: datetime
+
+
+class BankAnalysisRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    analysis_version: int
+    average_monthly_deposits: Decimal | None
+    average_daily_balance: Decimal | None
+    negative_balance_days_90d: int
+    nsf_count_90d: int
+    deposit_count_90d: int
+    largest_deposit_90d: Decimal | None
+    existing_payment_obligations: Decimal | None
+    revenue_trend: str | None
+    cash_flow_trend: str | None
+    risk_flags: list
+    created_at: datetime
+
+
+class ProviderAdapterStatus(BaseModel):
+    provider_type: str
+    provider: str
+    selected: bool
+    configured: bool
