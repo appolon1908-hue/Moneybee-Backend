@@ -21,5 +21,15 @@ jobs:
       - run: pip install ".[dev]"
       - run: ruff check app tests
       - run: pytest -q
-      - run: python -m compileall -q app
+      - name: Verify migration upgrade and rollback
+        env:
+          APP_ENV: test
+          AUTO_CREATE_SCHEMA: "false"
+          LOCAL_AUTH_BYPASS: "true"
+          DATABASE_URL: sqlite+aiosqlite:///./migration-test.db
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+      - run: python -m compileall -q app migrations
       - run: docker build -t moneybee-backend:test .
