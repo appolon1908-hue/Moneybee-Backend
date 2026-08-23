@@ -26,7 +26,7 @@ cp ../.env.production.example .env.production
 chmod 600 .env.production
 ```
 
-Replace every placeholder. Keep the canonical issuer `https://auth.codestra.co/realms/codestra`. The production API base URL is `https://api.moneybeeloan.com/api/v1`.
+Replace every placeholder. Keep the canonical issuer `https://auth.codestra.co/realms/codestra`. The production API base URL is `https://api.moneybeeloan.com/api/v2`.
 
 ## Validate and migrate
 
