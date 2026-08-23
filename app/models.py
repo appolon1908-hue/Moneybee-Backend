@@ -94,6 +94,7 @@ class Application(Base, Record):
     __tablename__ = "applications"
 
     lead_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("leads.id"), unique=True)
+    borrower_subject: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     requested_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     monthly_revenue: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     time_in_business_months: Mapped[int] = mapped_column(Integer)
@@ -104,6 +105,70 @@ class Application(Base, Record):
     )
     completion_percentage: Mapped[int] = mapped_column(Integer, default=20)
     version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class ApplicationStatusHistory(Base, Record):
+    __tablename__ = "application_status_history"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    from_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(80))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changed_by: Mapped[str] = mapped_column(String(200))
+
+
+class Business(Base, Record):
+    __tablename__ = "businesses"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), unique=True, index=True
+    )
+    legal_name: Mapped[str] = mapped_column(String(240))
+    dba: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    state_formed: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    naics: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    address: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Owner(Base, Record):
+    __tablename__ = "owners"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), index=True
+    )
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100))
+    ownership_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    title: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    address: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class FinancialProfile(Base, Record):
+    __tablename__ = "financial_profiles"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("applications.id"), unique=True, index=True
+    )
+    annual_revenue: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    monthly_revenue: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    monthly_expenses: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    existing_debt: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    existing_positions: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class LenderProgram(Base, Record):
