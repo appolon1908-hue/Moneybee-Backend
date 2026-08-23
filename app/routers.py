@@ -10,7 +10,7 @@ from app.auth import Principal, current_principal, require_permission
 from app.db import get_db
 
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_db)]
 User = Annotated[Principal, Depends(current_principal)]
 
@@ -38,6 +38,11 @@ async def prequalify(
 @router.get("/me", tags=["identity"])
 async def me(user: User):
     return {"id": user.subject, "roles": sorted(user.roles), "permissions": sorted(user.permissions)}
+
+
+@router.get("/me/capabilities", tags=["identity"])
+async def my_capabilities(db: Db, user: User):
+    return await services.effective_capabilities(db)
 
 
 @router.post("/applications", response_model=schemas.ApplicationRead, tags=["applications"])
@@ -271,4 +276,61 @@ async def crm_events(
             "last_error": event.last_error,
         }
         for event in events
+    ]
+
+
+@router.get("/admin/capabilities", tags=["admin"])
+async def capabilities(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("capability.read"))],
+):
+    items = (
+        await db.scalars(
+            select(models.CapabilityFlag)
+            .order_by(models.CapabilityFlag.environment, models.CapabilityFlag.key)
+        )
+    ).all()
+    return [
+        {
+            "id": str(item.id),
+            "key": item.key,
+            "environment": item.environment,
+            "enabled": item.enabled,
+            "provider": item.provider,
+            "provider_ready": await services.capability_is_ready(db, item),
+            "reason": item.reason,
+            "enabled_at": item.enabled_at,
+            "enabled_by": item.enabled_by,
+        }
+        for item in items
+    ]
+
+
+@router.get("/admin/provider-connections", tags=["admin"])
+async def provider_connections(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("capability.read"))],
+):
+    items = (
+        await db.scalars(
+            select(models.ProviderConnection)
+            .order_by(
+                models.ProviderConnection.environment,
+                models.ProviderConnection.provider_type,
+                models.ProviderConnection.provider_name,
+            )
+        )
+    ).all()
+    return [
+        {
+            "id": str(item.id),
+            "provider_type": item.provider_type,
+            "provider_name": item.provider_name,
+            "environment": item.environment,
+            "status": item.status,
+            "last_health_check": item.last_health_check,
+            "last_success": item.last_success,
+            "last_failure": item.last_failure,
+        }
+        for item in items
     ]
