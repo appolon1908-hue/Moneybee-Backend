@@ -12,6 +12,7 @@ from app.main import app
 
 def test_authoritative_requirement_fraud_and_underwriting_records():
     unique = uuid.uuid4().hex
+    phone = "+1" + "".join(str(int(char, 16) % 10) for char in unique[:10])
     prequalification = {
         "funding_amount": 90000,
         "currency": "USD",
@@ -22,7 +23,7 @@ def test_authoritative_requirement_fraud_and_underwriting_records():
         "first_name": "Domain",
         "last_name": "Tester",
         "email": f"domain-{unique}@example.com",
-        "phone": f"+1555{unique[:7]}",
+        "phone": phone,
         "postal_code": "33101",
         "consents": [
             {
