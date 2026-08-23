@@ -310,3 +310,144 @@ Every provider webhook uses provider-specific verification, timestamp/replay pro
 - `GET /health/ready`
 
 Liveness does not probe remote dependencies. Readiness checks only dependencies required to serve traffic, migration compatibility, and critical configuration with strict timeouts. Public health responses expose no connection strings, host inventory, secrets, tenant data, or raw dependency errors.
+
+
+## Production-readiness API surface
+
+The following operations support the mandatory security, risk, reconciliation, complaint, renewal, affiliate, and reporting workflows.
+
+### Sessions and account security
+
+- `GET /me/sessions`
+- `DELETE /me/sessions/{session_id}`
+- `POST /me/step-up/challenge`
+- `GET /me/security-events`
+
+Password reset, MFA enrollment/challenge, and identity-provider recovery execute through approved Keycloak OIDC/action flows rather than accepting passwords through MoneyBee API endpoints. MoneyBee session responses expose a safe device label, approximate location where permitted, created/last-active time, current-session marker, and revocable session ID—never tokens.
+
+### Duplicate-review cases
+
+- `GET /admin/duplicates`
+- `GET /admin/duplicates/{case_id}`
+- `POST /admin/duplicates/{case_id}/preview-merge`
+- `POST /admin/duplicates/{case_id}/merge`
+- `POST /admin/duplicates/{case_id}/keep-separate`
+- `POST /admin/duplicates/{case_id}/escalate`
+
+Decisions require expected case version, structured reason, idempotency key, and permission. Merge preview identifies conflicts and affected object types without exposing unauthorized fields. Historical consent, attribution, lender, offer, adverse-action, complaint, and audit records remain preserved.
+
+### Fraud/manual review
+
+- `GET /admin/fraud-reviews`
+- `GET /admin/fraud-reviews/{review_id}`
+- `POST /admin/fraud-reviews/{review_id}/request-information`
+- `POST /admin/fraud-reviews/{review_id}/clear`
+- `POST /admin/fraud-reviews/{review_id}/block`
+- `POST /admin/fraud-reviews/{review_id}/escalate`
+- `POST /admin/fraud-reviews/{review_id}/override`
+
+Responses use safe reason categories and evidence references. They do not reveal exploitable vendor rules to borrowers or unauthorized staff. Override operations require step-up authentication, structured reason, and configured approval.
+
+### Document processing
+
+- `GET /documents/{document_id}/processing`
+- `GET /documents/{document_id}/versions`
+- `GET /admin/documents/{document_id}/extractions`
+- `POST /admin/documents/{document_id}/extractions/{extraction_id}/verify`
+- `POST /admin/documents/{document_id}/reject`
+
+Processing status is server-owned and may include quarantine, malware scan, type validation, classification, OCR/extraction, review, approval/rejection, and replacement requirement. Authorized extraction responses include value, confidence, source location, version, and verification status. Untrusted documents are never served inline.
+
+### Underwriting policies and reviews
+
+- `GET /admin/underwriting/policies`
+- `POST /admin/underwriting/policies`
+- `GET /admin/underwriting/policies/{policy_id}/versions`
+- `POST /admin/underwriting/policies/{policy_id}/versions`
+- `POST /applications/{application_id}/underwriting/re-evaluate`
+
+Policy versions are immutable once effective. Decisions reference exact policy, input snapshot/hash, reason codes, reviewer, and override/approval evidence. Re-evaluation creates a new review; it does not rewrite history.
+
+### Lender submissions
+
+- `GET /applications/{application_id}/lender-submissions`
+- `GET /lender/submissions/{submission_id}`
+- `POST /lender/submissions/{submission_id}/withdraw`
+- `GET /admin/lender-submissions`
+- `GET /admin/lender-submissions/{submission_id}`
+- `POST /admin/lender-submissions/{submission_id}/retry`
+
+Submission responses include lender/program/application versions, external reference, status, timestamps, safe delivery state, and history. Create/retry/withdraw operations are idempotent. Lender users can access only their own submissions.
+
+### Offer updates, contracts, and e-sign
+
+- `PATCH /lender/offers/{offer_id}`
+- `POST /lender/offers/{offer_id}/withdraw`
+- `GET /contracts/{contract_id}`
+- `POST /applications/{application_id}/contracts`
+- `POST /contracts/{contract_id}/send`
+- `GET /contracts/{contract_id}/signing-session`
+- `POST /webhooks/esign`
+
+Contract creation references accepted offer/disclosure versions. Send/signing-session operations require authorized signer state and idempotency. Executed agreements are immutable, hashed, access-controlled documents. Webhooks are verified, replay-protected, durably received, and processed asynchronously.
+
+### Funding reconciliation and commissions
+
+- `GET /applications/{application_id}/funding`
+- `POST /admin/fundings/{funding_id}/mark-sent`
+- `POST /admin/fundings/{funding_id}/confirm`
+- `GET /admin/funding-reconciliations`
+- `GET /admin/funding-reconciliations/{case_id}`
+- `POST /admin/funding-reconciliations/{case_id}/resolve`
+- `GET /admin/commissions`
+- `GET /admin/commissions/{commission_id}`
+- `POST /admin/commissions/{commission_id}/record-receipt`
+- `POST /admin/commissions/{commission_id}/adjustments`
+
+Offer acceptance never implies funding. Funding and commission commands require expected version, evidence/provider reference, idempotency, permission/step-up, and audit. Financial corrections are additive adjustments; historical amounts are not silently overwritten.
+
+### Complaints
+
+- `POST /complaints`
+- `GET /complaints/{complaint_id}` — borrower-visible own complaint
+- `GET /admin/complaints`
+- `GET /admin/complaints/{complaint_id}`
+- `PATCH /admin/complaints/{complaint_id}`
+- `POST /admin/complaints/{complaint_id}/assign`
+- `POST /admin/complaints/{complaint_id}/escalate`
+- `POST /admin/complaints/{complaint_id}/resolve`
+
+Complaint records include category, priority, borrower/application/lender linkage, SLA, owner, state, communications, resolution, and audit. Free-form text is treated as sensitive and protected from logging/analytics.
+
+### Renewals
+
+- `GET /applications/{application_id}/renewal-eligibility`
+- `POST /applications/{application_id}/renewals`
+- `GET /admin/renewals`
+- `POST /admin/renewals/{renewal_id}/review`
+- `POST /admin/renewals/{renewal_id}/notify`
+
+Renewal eligibility is policy/version driven. Creating a renewal produces a linked new/refreshed application. Notification, bank refresh, credit access, and lender submission require their own current authority/consent; none is implied by prior funding.
+
+### Affiliates
+
+- `GET /admin/affiliates`
+- `POST /admin/affiliates`
+- `GET /admin/affiliates/{affiliate_id}`
+- `PATCH /admin/affiliates/{affiliate_id}`
+- `GET /admin/affiliates/{affiliate_id}/performance`
+- `GET /admin/affiliate-payouts`
+- `POST /admin/affiliate-payouts/{payout_id}/reconcile`
+
+Affiliate records include status, contract/reference, approved campaigns/creative, attributed lead/application/funding, payout, fraud, conversion, complaint, and source/consent evidence. Partner-facing access, if added, requires a separate scoped tenant/API contract.
+
+### Reporting
+
+- `GET /admin/reports/marketing`
+- `GET /admin/reports/sales`
+- `GET /admin/reports/lenders`
+- `GET /admin/reports/finance`
+- `POST /admin/reports/exports`
+- `GET /admin/reports/exports/{export_id}`
+
+Report responses include metric-definition/version, active filters, currency/timezone, data-through time, and source completeness. Exports are permissioned, bounded, generated asynchronously, encrypted, short-lived, and audited.
