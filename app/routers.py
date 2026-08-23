@@ -1156,3 +1156,225 @@ async def create_affiliate(
     await db.commit()
     await db.refresh(item)
     return item
+
+
+@router.get(
+    "/me/notification-preferences",
+    response_model=schemas.NotificationPreferenceRead,
+    tags=["identity", "communications"],
+)
+async def notification_preferences(db: Db, user: User):
+    item = await db.scalar(
+        select(models.NotificationPreference).where(
+            models.NotificationPreference.subject == user.subject
+        )
+    )
+    if item is None:
+        item = models.NotificationPreference(subject=user.subject)
+        db.add(item)
+        await db.commit()
+        await db.refresh(item)
+    return item
+
+
+@router.put(
+    "/me/notification-preferences",
+    response_model=schemas.NotificationPreferenceRead,
+    tags=["identity", "communications"],
+)
+async def update_notification_preferences(
+    payload: schemas.NotificationPreferenceInput,
+    db: Db,
+    user: User,
+):
+    item = await db.scalar(
+        select(models.NotificationPreference).where(
+            models.NotificationPreference.subject == user.subject
+        )
+    )
+    if item is None:
+        item = models.NotificationPreference(
+            subject=user.subject,
+            **payload.model_dump(),
+        )
+        db.add(item)
+    else:
+        for name, value in payload.model_dump().items():
+            setattr(item, name, value)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post(
+    "/conditions/{condition_id}/submit",
+    response_model=schemas.ConditionRead,
+    tags=["underwriting"],
+)
+async def submit_condition(
+    condition_id: uuid.UUID,
+    db: Db,
+    user: User,
+):
+    item = await db.get(models.UnderwritingCondition, condition_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Condition not found")
+    await services.get_authorized_application(
+        db, item.application_id, user, write=True
+    )
+    if item.status not in {"BORROWER_ACTION_REQUIRED", "REJECTED"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Condition cannot be submitted in its current state",
+        )
+    item.status = "SUBMITTED"
+    db.add(
+        models.OutboxEvent(
+            event_type="ConditionSubmitted",
+            aggregate_id=item.application_id,
+            payload={
+                "application_id": str(item.application_id),
+                "condition_id": str(item.id),
+            },
+            idempotency_key=f"ConditionSubmitted:{item.id}:{item.updated_at}",
+        )
+    )
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def decide_condition(
+    condition_id: uuid.UUID,
+    decision: str,
+    db: AsyncSession,
+    user: Principal,
+) -> models.UnderwritingCondition:
+    item = await db.get(models.UnderwritingCondition, condition_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Condition not found")
+    submission = await authorized_submission(item.submission_id, db, user)
+    if item.status not in {
+        "SUBMITTED",
+        "BORROWER_ACTION_REQUIRED",
+        "REJECTED",
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail="Condition cannot be reviewed in its current state",
+        )
+    item.status = decision
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action=f"CONDITION_{decision}",
+            resource_type="condition",
+            resource_id=str(item.id),
+            details={"submission_id": str(submission.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post(
+    "/lender/conditions/{condition_id}/approve",
+    response_model=schemas.ConditionRead,
+    tags=["lender", "underwriting"],
+)
+async def approve_condition(
+    condition_id: uuid.UUID,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("lender.condition.review"))
+    ],
+):
+    return await decide_condition(condition_id, "SATISFIED", db, user)
+
+
+@router.post(
+    "/lender/conditions/{condition_id}/reject",
+    response_model=schemas.ConditionRead,
+    tags=["lender", "underwriting"],
+)
+async def reject_condition(
+    condition_id: uuid.UUID,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("lender.condition.review"))
+    ],
+):
+    return await decide_condition(condition_id, "REJECTED", db, user)
+
+
+@router.post(
+    "/lender/conditions/{condition_id}/waive",
+    response_model=schemas.ConditionRead,
+    tags=["lender", "underwriting"],
+)
+async def waive_condition(
+    condition_id: uuid.UUID,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("lender.condition.review"))
+    ],
+):
+    return await decide_condition(condition_id, "WAIVED", db, user)
+
+
+@router.get("/admin/reconciliation-runs", tags=["admin", "reconciliation"])
+async def reconciliation_runs(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("lead.read"))],
+):
+    items = (
+        await db.scalars(
+            select(models.ReconciliationRun).order_by(
+                models.ReconciliationRun.created_at.desc()
+            )
+        )
+    ).all()
+    return [
+        {
+            "id": str(item.id),
+            "provider": item.provider,
+            "status": item.status,
+            "checked": item.checked,
+            "mismatches": item.mismatches,
+            "created_at": item.created_at,
+            "completed_at": item.completed_at,
+        }
+        for item in items
+    ]
+
+
+@router.get(
+    "/admin/reconciliation-runs/{run_id}/items",
+    tags=["admin", "reconciliation"],
+)
+async def reconciliation_items(
+    run_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("lead.read"))],
+):
+    run = await db.get(models.ReconciliationRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Reconciliation run not found")
+    items = (
+        await db.scalars(
+            select(models.ReconciliationItem)
+            .where(models.ReconciliationItem.run_id == run_id)
+            .order_by(models.ReconciliationItem.created_at)
+        )
+    ).all()
+    return [
+        {
+            "id": str(item.id),
+            "resource_type": item.resource_type,
+            "resource_id": item.resource_id,
+            "status": item.status,
+            "details": item.details,
+        }
+        for item in items
+    ]
