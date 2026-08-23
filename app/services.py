@@ -25,6 +25,8 @@ APPLICATION_TRANSITIONS: dict[
         {
             models.ApplicationStatus.APPLICATION_COMPLETE,
             models.ApplicationStatus.READY_FOR_MATCHING,
+            models.ApplicationStatus.FRAUD_REVIEW,
+            models.ApplicationStatus.COMPLIANCE_REVIEW,
             models.ApplicationStatus.WITHDRAWN,
         }
     ),
@@ -41,6 +43,19 @@ APPLICATION_TRANSITIONS: dict[
             models.ApplicationStatus.READY_FOR_MATCHING,
             models.ApplicationStatus.FRAUD_REVIEW,
             models.ApplicationStatus.COMPLIANCE_REVIEW,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.FRAUD_REVIEW: frozenset(
+        {
+            models.ApplicationStatus.READY_FOR_MATCHING,
+            models.ApplicationStatus.COMPLIANCE_REVIEW,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.COMPLIANCE_REVIEW: frozenset(
+        {
+            models.ApplicationStatus.READY_FOR_MATCHING,
             models.ApplicationStatus.DECLINED,
         }
     ),
