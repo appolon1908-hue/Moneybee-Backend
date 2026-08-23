@@ -285,3 +285,17 @@ class AffiliateRead(AffiliateInput):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     created_at: datetime
+
+
+class NotificationPreferenceInput(BaseModel):
+    email_enabled: bool = True
+    sms_enabled: bool = False
+    in_app_enabled: bool = True
+
+
+class NotificationPreferenceRead(NotificationPreferenceInput):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    subject: str
+    created_at: datetime
+    updated_at: datetime
