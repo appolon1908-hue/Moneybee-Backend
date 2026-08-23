@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import models, schemas, services
+from app import domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
 from app.db import get_db
 
@@ -1431,3 +1431,400 @@ async def reconciliation_items(
         }
         for item in items
     ]
+
+@router.post(
+    "/applications/{application_id}/requirement-snapshots",
+    response_model=schemas.RequirementSnapshotRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["applications", "underwriting"],
+)
+async def create_requirement_snapshot(
+    application_id: uuid.UUID,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("underwriting.review"))
+    ],
+):
+    application = await services.get_authorized_application(
+        db, application_id, user
+    )
+    snapshot = await domain_logic.create_requirement_snapshot(db, application)
+    await db.commit()
+    await db.refresh(snapshot)
+    return snapshot
+
+
+@router.get(
+    "/applications/{application_id}/requirement-snapshots",
+    response_model=list[schemas.RequirementSnapshotRead],
+    tags=["applications"],
+)
+async def requirement_snapshots(
+    application_id: uuid.UUID,
+    db: Db,
+    user: User,
+):
+    await services.get_authorized_application(db, application_id, user)
+    return list(
+        (
+            await db.scalars(
+                select(models.RequirementSnapshot)
+                .where(
+                    models.RequirementSnapshot.application_id
+                    == application_id
+                )
+                .order_by(models.RequirementSnapshot.created_at.desc())
+            )
+        ).all()
+    )
+
+
+@router.post(
+    "/admin/applications/{application_id}/fraud-assessments",
+    response_model=schemas.FraudAssessmentRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["admin", "fraud"],
+)
+async def run_fraud_assessment(
+    application_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("fraud.run"))],
+):
+    application = await services.get_authorized_application(
+        db, application_id, user
+    )
+    assessment = await domain_logic.evaluate_fraud(db, application)
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="FRAUD_ASSESSMENT_RUN",
+            resource_type="application",
+            resource_id=str(application.id),
+            details={
+                "assessment_id": str(assessment.id),
+                "decision": assessment.decision,
+                "score": assessment.score,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(assessment)
+    return assessment
+
+
+@router.get(
+    "/admin/underwriting/reviews",
+    response_model=list[schemas.UnderwritingReviewRead],
+    tags=["admin", "underwriting"],
+)
+async def underwriting_reviews(
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("underwriting.review"))
+    ],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.UnderwritingReview)
+                .order_by(models.UnderwritingReview.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.post(
+    "/admin/applications/{application_id}/underwriting/reviews",
+    response_model=schemas.UnderwritingReviewRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["admin", "underwriting"],
+)
+async def create_underwriting_review(
+    application_id: uuid.UUID,
+    payload: schemas.UnderwritingReviewInput,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("underwriting.review"))
+    ],
+):
+    application = await services.get_authorized_application(
+        db, application_id, user
+    )
+    review = await domain_logic.create_underwriting_review(
+        db, application, payload, user
+    )
+    await db.commit()
+    await db.refresh(review)
+    return review
+
+
+@router.get(
+    "/admin/commissions/{commission_id}/splits",
+    response_model=list[schemas.CommissionSplitRead],
+    tags=["admin", "funding"],
+)
+async def commission_splits(
+    commission_id: uuid.UUID,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("commission.read"))
+    ],
+):
+    if await db.get(models.Commission, commission_id) is None:
+        raise HTTPException(status_code=404, detail="Commission not found")
+    return list(
+        (
+            await db.scalars(
+                select(models.CommissionSplit)
+                .where(models.CommissionSplit.commission_id == commission_id)
+                .order_by(models.CommissionSplit.created_at)
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/commissions/{commission_id}/adjustments",
+    response_model=list[schemas.CommissionAdjustmentRead],
+    tags=["admin", "funding"],
+)
+async def commission_adjustments(
+    commission_id: uuid.UUID,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("commission.read"))
+    ],
+):
+    if await db.get(models.Commission, commission_id) is None:
+        raise HTTPException(status_code=404, detail="Commission not found")
+    return list(
+        (
+            await db.scalars(
+                select(models.CommissionAdjustment)
+                .where(
+                    models.CommissionAdjustment.commission_id
+                    == commission_id
+                )
+                .order_by(models.CommissionAdjustment.created_at)
+            )
+        ).all()
+    )
+
+
+@router.post(
+    "/admin/commissions/{commission_id}/adjustments",
+    response_model=schemas.CommissionAdjustmentRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["admin", "funding"],
+)
+async def create_commission_adjustment(
+    commission_id: uuid.UUID,
+    payload: schemas.CommissionAdjustmentInput,
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("commission.adjust"))
+    ],
+):
+    if payload.amount == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Adjustment amount must be non-zero",
+        )
+    if await db.get(models.Commission, commission_id) is None:
+        raise HTTPException(status_code=404, detail="Commission not found")
+    adjustment = models.CommissionAdjustment(
+        commission_id=commission_id,
+        adjustment_type=payload.adjustment_type,
+        amount=payload.amount,
+        reason=payload.reason,
+        created_by=user.subject,
+    )
+    db.add(adjustment)
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="COMMISSION_ADJUSTMENT_RECORDED",
+            resource_type="commission",
+            resource_id=str(commission_id),
+            details={
+                "adjustment_type": payload.adjustment_type,
+                "amount": str(payload.amount),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(adjustment)
+    return adjustment
+
+
+@router.get(
+    "/admin/sla-alerts",
+    response_model=list[schemas.SLAAlertRead],
+    tags=["admin", "operations"],
+)
+async def sla_alerts(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("lead.read"))],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.SLAAlert)
+                .order_by(models.SLAAlert.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/users",
+    response_model=list[schemas.UserAccountRead],
+    tags=["admin", "identity"],
+)
+async def user_accounts(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("user.read"))],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.UserAccount)
+                .order_by(models.UserAccount.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.get("/admin/catalog/leads", tags=["admin", "catalog"])
+async def catalog_leads(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("lead.read"))],
+):
+    rows = (
+        await db.scalars(
+            select(models.Lead).order_by(models.Lead.created_at.desc()).limit(500)
+        )
+    ).all()
+    return [
+        {
+            "id": str(row.id),
+            "business_name": row.business_name,
+            "funding_amount": row.funding_amount,
+            "monthly_revenue": row.monthly_revenue,
+            "use_of_funds": row.use_of_funds,
+            "status": row.status,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+@router.get(
+    "/admin/catalog/applications",
+    response_model=list[schemas.ApplicationRead],
+    tags=["admin", "catalog"],
+)
+async def catalog_applications(
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("application.read"))
+    ],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.Application)
+                .order_by(models.Application.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/catalog/programs",
+    response_model=list[schemas.ProgramRead],
+    tags=["admin", "catalog"],
+)
+async def catalog_programs(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("lead.read"))],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.LenderProgram)
+                .order_by(models.LenderProgram.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/catalog/submissions",
+    response_model=list[schemas.LenderSubmissionRead],
+    tags=["admin", "catalog"],
+)
+async def catalog_submissions(
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("application.read"))
+    ],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.LenderSubmission)
+                .order_by(models.LenderSubmission.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/catalog/offers",
+    response_model=list[schemas.OfferRead],
+    tags=["admin", "catalog"],
+)
+async def catalog_offers(
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("application.read"))
+    ],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.Offer)
+                .order_by(models.Offer.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/catalog/matches",
+    response_model=list[schemas.MatchRead],
+    tags=["admin", "catalog"],
+)
+async def catalog_matches(
+    db: Db,
+    user: Annotated[
+        Principal, Depends(require_permission("application.read"))
+    ],
+):
+    return list(
+        (
+            await db.scalars(
+                select(models.ApplicationMatch)
+                .order_by(models.ApplicationMatch.created_at.desc())
+                .limit(500)
+            )
+        ).all()
+    )
