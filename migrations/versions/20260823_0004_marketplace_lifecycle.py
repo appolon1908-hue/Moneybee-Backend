@@ -30,6 +30,7 @@ def application_table(
     *columns: sa.Column,
     unique: bool = False,
     foreign_keys: tuple[tuple[str, str], ...] = (),
+    unique_columns: tuple[tuple[str, ...], ...] = (),
 ) -> None:
     constraints: list = [
         sa.ForeignKeyConstraint(["application_id"], ["applications.id"]),
@@ -37,6 +38,10 @@ def application_table(
     constraints.extend(
         sa.ForeignKeyConstraint([local], [target])
         for local, target in foreign_keys
+    )
+    constraints.extend(
+        sa.UniqueConstraint(*columns)
+        for columns in unique_columns
     )
     if unique:
         constraints.append(sa.UniqueConstraint("application_id"))
@@ -87,11 +92,7 @@ def upgrade() -> None:
         sa.Column("document_hash", sa.String(128), nullable=False),
         sa.Column("accepted_by", sa.String(200), nullable=False),
         sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=False),
-    )
-    op.create_unique_constraint(
-        "uq_credit_authorization_version",
-        "credit_authorizations",
-        ["application_id", "authorization_version"],
+        unique_columns=(("application_id", "authorization_version"),),
     )
     application_table(
         "credit_results",
@@ -202,8 +203,8 @@ def upgrade() -> None:
         sa.Column("funding_confirmed_at", sa.DateTime(timezone=True), nullable=True),
         unique=True,
         foreign_keys=(("offer_id", "offers.id"),),
+        unique_columns=(("offer_id",),),
     )
-    op.create_unique_constraint("uq_fundings_offer_id", "fundings", ["offer_id"])
 
     op.create_table(
         "commissions",
