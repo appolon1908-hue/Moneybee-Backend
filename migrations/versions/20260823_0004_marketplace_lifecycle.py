@@ -25,10 +25,19 @@ def record_columns() -> list[sa.Column]:
     ]
 
 
-def application_table(name: str, *columns: sa.Column, unique: bool = False) -> None:
+def application_table(
+    name: str,
+    *columns: sa.Column,
+    unique: bool = False,
+    foreign_keys: tuple[tuple[str, str], ...] = (),
+) -> None:
     constraints: list = [
         sa.ForeignKeyConstraint(["application_id"], ["applications.id"]),
     ]
+    constraints.extend(
+        sa.ForeignKeyConstraint([local], [target])
+        for local, target in foreign_keys
+    )
     if unique:
         constraints.append(sa.UniqueConstraint("application_id"))
     op.create_table(
@@ -70,13 +79,7 @@ def upgrade() -> None:
         sa.Column("provider_reference", sa.String(255), nullable=True),
         sa.Column("status", sa.String(40), nullable=False),
         sa.Column("normalized_result", sa.JSON(), nullable=False),
-    )
-    op.create_foreign_key(
-        "fk_verifications_owner_id",
-        "verifications",
-        "owners",
-        ["owner_id"],
-        ["id"],
+        foreign_keys=(("owner_id", "owners.id"),),
     )
     application_table(
         "credit_authorizations",
@@ -185,13 +188,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(60), nullable=False),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("signed_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_contracts_offer_id",
-        "contracts",
-        "offers",
-        ["offer_id"],
-        ["id"],
+        foreign_keys=(("offer_id", "offers.id"),),
     )
 
     application_table(
@@ -204,15 +201,9 @@ def upgrade() -> None:
         sa.Column("funds_sent_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("funding_confirmed_at", sa.DateTime(timezone=True), nullable=True),
         unique=True,
+        foreign_keys=(("offer_id", "offers.id"),),
     )
     op.create_unique_constraint("uq_fundings_offer_id", "fundings", ["offer_id"])
-    op.create_foreign_key(
-        "fk_fundings_offer_id",
-        "fundings",
-        "offers",
-        ["offer_id"],
-        ["id"],
-    )
 
     op.create_table(
         "commissions",
