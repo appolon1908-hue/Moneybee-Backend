@@ -31,7 +31,7 @@ async def ready() -> dict[str, object] | JSONResponse:
     except Exception:
         redis_ok = False
 
-    payload = {
+    payload: dict[str, object] = {
         "status": "ready" if database_ok and redis_ok else "not_ready",
         "dependencies": {
             "postgresql": database_ok,
