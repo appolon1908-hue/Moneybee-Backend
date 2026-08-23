@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     codestra_middleware_token_url: str | None = None
     codestra_middleware_client_id: str | None = None
     codestra_middleware_client_secret: str | None = None
+    middleware_provider: Literal["disabled", "codestra"] = "disabled"
+    codestra_middleware_event_path: str = "/v1/events"
+    codestra_middleware_scope: str | None = None
+    codestra_middleware_webhook_secret: str | None = None
+    codestra_middleware_webhook_tolerance_seconds: int = 300
 
     field_encryption_key: str | None = None
     provider_timeout_seconds: float = 30.0
@@ -40,20 +45,46 @@ class Settings(BaseSettings):
     plaid_webhook_url: str | None = None
     plaid_redirect_uri: str | None = None
 
-    crm_provider: Literal["disabled", "generic_http"] = "disabled"
+    crm_provider: Literal["disabled", "generic_http", "odoo"] = "disabled"
     crm_base_url: str | None = None
     crm_api_key: str | None = None
     crm_event_path: str = "/moneybee/events"
 
-    kyb_provider: Literal["disabled", "generic_http"] = "disabled"
+    odoo_base_url: str | None = None
+    odoo_database: str | None = None
+    odoo_api_mode: Literal["auto", "json2", "xmlrpc"] = "auto"
+    odoo_username: str | None = None
+    odoo_api_key: str | None = None
+
+    kyb_provider: Literal["disabled", "generic_http", "middesk"] = "disabled"
     kyb_base_url: str | None = None
     kyb_api_key: str | None = None
     kyb_verify_path: str = "/v1/business-verifications"
 
-    credit_provider: Literal["disabled", "generic_http"] = "disabled"
+    middesk_base_url: str = "https://api-sandbox.middesk.com"
+    middesk_api_key: str | None = None
+    middesk_webhook_secret: str | None = None
+
+    credit_provider: Literal["disabled", "generic_http", "experian"] = "disabled"
     credit_base_url: str | None = None
     credit_api_key: str | None = None
     credit_request_path: str = "/v1/credit-requests"
+
+    experian_base_url: str | None = None
+    experian_token_url: str | None = None
+    experian_client_id: str | None = None
+    experian_client_secret: str | None = None
+    experian_scope: str | None = None
+    experian_token_auth_style: Literal["basic", "body"] = "basic"
+    experian_business_search_path: str | None = None
+    experian_business_report_path_template: str | None = None
+    experian_search_mapping_json: str = "{}"
+    experian_search_id_path: str = "id"
+    experian_score_path: str = ""
+    experian_risk_class_path: str = ""
+    experian_bankruptcy_count_path: str = ""
+    experian_lien_count_path: str = ""
+    experian_judgment_count_path: str = ""
 
     lender_provider: Literal["disabled", "generic_http"] = "disabled"
     lender_base_url: str | None = None
@@ -125,6 +156,33 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "Plaid requires credentials and FIELD_ENCRYPTION_KEY"
                 )
+            if self.middleware_provider == "codestra" and not all(
+                [
+                    self.codestra_middleware_base_url,
+                    self.codestra_middleware_token_url,
+                    self.codestra_middleware_client_id,
+                    self.codestra_middleware_client_secret,
+                ]
+            ):
+                raise ValueError("Codestra middleware configuration is incomplete")
+            if self.crm_provider == "odoo" and not all(
+                [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
+            ):
+                raise ValueError("Odoo configuration is incomplete")
+            if self.kyb_provider == "middesk" and not self.middesk_api_key:
+                raise ValueError("Middesk configuration is incomplete")
+            if self.credit_provider == "experian" and not all(
+                [
+                    self.experian_base_url,
+                    self.experian_token_url,
+                    self.experian_client_id,
+                    self.experian_client_secret,
+                    self.experian_business_search_path,
+                    self.experian_business_report_path_template,
+                    self.experian_search_mapping_json != "{}",
+                ]
+            ):
+                raise ValueError("Experian configuration is incomplete")
             if self.email_provider == "sendgrid" and not all(
                 [self.sendgrid_api_key, self.sendgrid_from_email]
             ):
