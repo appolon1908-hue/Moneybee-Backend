@@ -45,20 +45,6 @@ jobs:
 
   postgres-identity-tenancy:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: moneybee
-          POSTGRES_PASSWORD: moneybee_test
-          POSTGRES_DB: moneybee_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U moneybee -d moneybee_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       APP_ENV: test
       AUTO_CREATE_SCHEMA: "false"
@@ -67,6 +53,12 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://moneybee:moneybee_test@localhost:5432/moneybee_test
     steps:
       - uses: actions/checkout@v4
+      - name: Start runner PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER moneybee WITH PASSWORD 'moneybee_test'"
+          sudo -u postgres createdb --owner=moneybee moneybee_test
+          pg_isready --host=localhost --port=5432 --username=moneybee
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
