@@ -32,7 +32,14 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "If-Match", "X-Request-ID"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "If-Match",
+        "X-Correlation-ID",
+        "X-Request-ID",
+    ],
 )
 app.include_router(router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
