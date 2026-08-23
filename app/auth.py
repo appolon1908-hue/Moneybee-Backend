@@ -27,6 +27,7 @@ ROLE_PERMISSIONS = {
         "lender.application.read",
         "lender.submission.read",
         "lender.condition.create",
+        "lender.condition.review",
         "offer.create",
         "program.manage",
     },
