@@ -30,3 +30,5 @@ The backend is the authority for business rules and data. The CRM is a sales sys
 See [docs/BACKEND_IMPLEMENTATION_SPEC.md](docs/BACKEND_IMPLEMENTATION_SPEC.md) and [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 Detailed build sequence and implementation patterns: [Backend build blueprint](docs/BACKEND_BUILD_BLUEPRINT.md).
+
+Mandatory launch gaps and evidence gates: [Production readiness requirements](docs/PRODUCTION_READINESS_REQUIREMENTS.md).
