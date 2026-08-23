@@ -16,7 +16,9 @@ dependencies = [
   "PyJWT[crypto]>=2.10,<3",
   "email-validator>=2.2,<3",
   "httpx>=0.28,<1",
-  "alembic>=1.16,<2"
+  "alembic>=1.16,<2",
+  "boto3>=1.40,<2",
+  "cryptography>=46,<51"
 ]
 
 [project.optional-dependencies]
