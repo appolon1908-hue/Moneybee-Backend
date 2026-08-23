@@ -600,3 +600,57 @@ class IdempotencyRecord(Base, Record):
     request_hash: Mapped[str] = mapped_column(String(128))
     response_status: Mapped[int] = mapped_column(Integer)
     response_body: Mapped[dict] = mapped_column(JSON)
+
+
+class ReconciliationRun(Base, Record):
+    __tablename__ = "reconciliation_runs"
+
+    provider: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="PENDING", index=True)
+    checked: Mapped[int] = mapped_column(Integer, default=0)
+    mismatches: Mapped[int] = mapped_column(Integer, default=0)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ReconciliationItem(Base, Record):
+    __tablename__ = "reconciliation_items"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reconciliation_runs.id", ondelete="CASCADE"), index=True
+    )
+    resource_type: Mapped[str] = mapped_column(String(100))
+    resource_id: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CommunicationTemplate(Base, Record):
+    __tablename__ = "communication_templates"
+
+    code: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    channel: Mapped[str] = mapped_column(String(30))
+    subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class NotificationPreference(Base, Record):
+    __tablename__ = "notification_preferences"
+
+    subject: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email_enabled: Mapped[bool] = mapped_column(default=True)
+    sms_enabled: Mapped[bool] = mapped_column(default=False)
+    in_app_enabled: Mapped[bool] = mapped_column(default=True)
+
+
+class DocumentReview(Base, Record):
+    __tablename__ = "document_reviews"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    reviewer_subject: Mapped[str] = mapped_column(String(255))
+    decision: Mapped[str] = mapped_column(String(40))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
