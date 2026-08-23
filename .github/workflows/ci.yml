@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
 
   test:
@@ -65,12 +68,18 @@ jobs:
         run: pytest -q
 
       - name: OpenAPI
-        run: |
-          python scripts/export_openapi.py
+        run: python scripts/export_openapi.py
+
+      - name: Preserve OpenAPI contract
+        uses: actions/upload-artifact@v4
+        with:
+          name: moneybee-openapi
+          path: openapi.json
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Dependency audit
         run: pip-audit
 
       - name: Docker build
-        run: |
-          docker build -t moneybee-backend:${GITHUB_SHA} .
+        run: docker build -t moneybee-backend:${GITHUB_SHA} .
