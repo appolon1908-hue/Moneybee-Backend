@@ -1,0 +1,124 @@
+import hashlib
+import json
+import uuid
+
+from fastapi import HTTPException
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import models, schemas
+
+
+def payload_digest(payload: schemas.PrequalificationInput) -> str:
+    value = payload.model_dump(mode="json", exclude={"anti_bot_token"})
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+async def create_lead(
+    db: AsyncSession,
+    payload: schemas.PrequalificationInput,
+    idempotency_key: str,
+    request_id: str,
+) -> schemas.LeadAccepted:
+    if not all(item.accepted for item in payload.consents):
+        raise HTTPException(status_code=422, detail="Required consent was not accepted")
+    lead = models.Lead(
+        first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),
+        email=str(payload.email).lower(),
+        phone=payload.phone,
+        business_name=payload.business_name.strip(),
+        funding_amount=payload.funding_amount,
+        monthly_revenue=payload.monthly_revenue,
+        use_of_funds=payload.use_of_funds,
+        time_in_business_months=payload.time_in_business_months,
+        postal_code=payload.postal_code.strip(),
+        attribution=payload.marketing.model_dump(mode="json"),
+    )
+    db.add(lead)
+    await db.flush()
+    for item in payload.consents:
+        db.add(
+            models.Consent(
+                lead_id=lead.id,
+                consent_type=item.type,
+                document_version=item.document_version,
+                evidence={"accepted": True, "request_id": request_id},
+            )
+        )
+    db.add(
+        models.OutboxEvent(
+            event_type="LeadSubmitted",
+            aggregate_id=lead.id,
+            payload={"lead_id": str(lead.id), "digest": payload_digest(payload)},
+            idempotency_key=idempotency_key,
+        )
+    )
+    db.add(
+        models.AuditEvent(
+            actor_id="public",
+            action="LEAD_RECEIVED",
+            resource_type="lead",
+            resource_id=str(lead.id),
+            request_id=request_id,
+            details={"landing_page": payload.marketing.landing_page},
+        )
+    )
+    await db.commit()
+    return schemas.LeadAccepted(
+        lead_id=lead.id,
+        reference=f"MB-{str(lead.id).split('-')[0].upper()}",
+        next_action={
+            "type": "CREATE_ACCOUNT",
+            "url": f"http://localhost:5174/start?lead={lead.id}",
+        },
+        request_id=request_id,
+    )
+
+
+def score(application: models.Application, program: models.LenderProgram):
+    reasons: list[str] = []
+    if application.requested_amount < program.min_amount:
+        reasons.append("REQUEST_BELOW_MINIMUM")
+    if application.requested_amount > program.max_amount:
+        reasons.append("REQUEST_ABOVE_MAXIMUM")
+    if application.monthly_revenue < program.minimum_monthly_revenue:
+        reasons.append("REVENUE_BELOW_MINIMUM")
+    if application.time_in_business_months < program.minimum_time_in_business_months:
+        reasons.append("TIME_IN_BUSINESS_BELOW_MINIMUM")
+    if application.state and program.states and application.state not in program.states:
+        reasons.append("STATE_NOT_SUPPORTED")
+    if application.industry and application.industry in program.excluded_industries:
+        reasons.append("INDUSTRY_EXCLUDED")
+    return not reasons, max(0, 100 - len(reasons) * 20), reasons
+
+
+async def match(db: AsyncSession, application_id: uuid.UUID):
+    application = await db.get(models.Application, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    programs = list((await db.scalars(select(models.LenderProgram).where(models.LenderProgram.active))).all())
+    await db.execute(
+        delete(models.ApplicationMatch).where(
+            models.ApplicationMatch.application_id == application.id
+        )
+    )
+    results = []
+    for program in programs:
+        eligible, value, reasons = score(application, program)
+        item = models.ApplicationMatch(
+            application_id=application.id,
+            lender_id=program.lender_id,
+            program_id=program.id,
+            eligible=eligible,
+            score=value,
+            reasons=reasons,
+            program_version=program.version,
+        )
+        db.add(item)
+        results.append(item)
+    application.status = models.ApplicationStatus.MATCHED
+    await db.commit()
+    for item in results:
+        await db.refresh(item)
+    return results

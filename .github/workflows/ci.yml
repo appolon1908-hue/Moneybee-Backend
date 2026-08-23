@@ -1,0 +1,25 @@
+name: backend-ci
+
+on:
+  pull_request:
+  push:
+    branches: ["main", "planning/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install ".[dev]"
+      - run: ruff check app tests
+      - run: pytest -q
+      - run: python -m compileall -q app
+      - run: docker build -t moneybee-backend:test .
