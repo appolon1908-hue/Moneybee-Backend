@@ -23,6 +23,29 @@ class ProviderHealth:
     configured: bool
 
 
+@dataclass(frozen=True)
+class MiddlewareResult:
+    provider: str
+    external_id: str | None
+    accepted: bool
+    response: dict
+
+
+class MiddlewareProvider(Protocol):
+    async def publish(
+        self,
+        *,
+        event_id: str,
+        event_type: str,
+        aggregate_type: str,
+        aggregate_id: str,
+        tenant_id: str | None,
+        occurred_at: str,
+        payload: dict,
+    ) -> MiddlewareResult:
+        ...
+
+
 class BankAdapter(Protocol):
     name: str
 
