@@ -32,3 +32,24 @@ class IntegrationInboxMessage(Base, Record):
         nullable=True,
     )
 
+
+class OperationalException(Base, Record):
+    __tablename__ = "operational_exceptions"
+
+    fingerprint: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(120), index=True)
+    severity: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="OPEN", index=True)
+    owner_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sla_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resource_type: Mapped[str] = mapped_column(String(80), index=True)
+    resource_id: Mapped[str] = mapped_column(String(160), index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    retry_action: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comments: Mapped[list] = mapped_column(JSON, default=list)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
