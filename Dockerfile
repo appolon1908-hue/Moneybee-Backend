@@ -6,6 +6,8 @@ WORKDIR /app
 RUN addgroup --system moneybee && adduser --system --ingroup moneybee moneybee
 COPY pyproject.toml README.md ./
 COPY app ./app
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 RUN pip install --no-cache-dir .
 
 USER moneybee
