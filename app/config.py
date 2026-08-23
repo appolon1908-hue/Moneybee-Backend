@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     field_encryption_key: str | None = None
     provider_timeout_seconds: float = 30.0
 
+    source_sha: str | None = None
+    api_image_digest: str | None = None
+    frontend_image_digest: str | None = None
+    migration_head: str | None = None
+    configuration_checksum: str | None = None
+    sbom_digest: str | None = None
+    provenance_digest: str | None = None
+    backup_reference: str | None = None
+    backup_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    restore_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    staging_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+
     bank_provider: Literal["disabled", "plaid"] = "disabled"
     plaid_base_url: str = "https://sandbox.plaid.com"
     plaid_client_id: str | None = None
