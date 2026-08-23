@@ -23,12 +23,26 @@ ROLE_PERMISSIONS = {
     "MONEYBEE_ADMIN": {"*"},
     "MONEYBEE_SALES": {"lead.read", "application.read", "application.edit"},
     "MONEYBEE_UNDERWRITER": {"application.read", "underwriting.review", "matching.run"},
-    "LENDER_ADMIN": {"lender.application.read", "offer.create", "program.manage"},
-    "LENDER_UNDERWRITER": {"lender.application.read", "offer.create"},
+    "LENDER_ADMIN": {
+        "lender.application.read",
+        "lender.submission.read",
+        "lender.condition.create",
+        "offer.create",
+        "program.manage",
+    },
+    "LENDER_UNDERWRITER": {
+        "lender.application.read",
+        "lender.submission.read",
+        "lender.condition.create",
+        "offer.create",
+    },
     "BORROWER": {
         "application.read.own",
         "application.edit.own",
         "application.submit.own",
+        "condition.read.own",
+        "complaint.create.own",
+        "credit.authorize.own",
         "offer.accept.own",
     },
 }
