@@ -1,23 +1,46 @@
 # MoneyBee Backend
 
-Authoritative Python/FastAPI backend for **MoneyBeeLoans** — “Business funding that keeps you moving.”
+Authoritative MoneyBeeLoans lending backend.
 
-## Included baseline
-- Versioned FastAPI API and health probes
-- PostgreSQL/SQLAlchemy models and Alembic migration
-- Keycloak JWT validation against `https://auth.codestra.co/realms/codestra`
-- Role enforcement, correlation IDs, audit events, idempotent intake, signed webhook ingestion
-- Docker Compose with PostgreSQL 17 and Redis
-- CI lint/compile/tests and production readiness gates
+## Current status
 
-## Local start
+`PARTIAL`
+
+This repository is not yet approved for live lending or funding.
+
+## Development
+
 ```bash
 cp .env.example .env
-docker compose up -d postgres redis
-docker compose run --rm api alembic upgrade head
-docker compose up --build api
+
+docker compose -f compose.dev.yml up -d postgres redis
+
+pip install -e ".[dev]"
+
+alembic upgrade head
+
+uvicorn app.main:app --reload
 ```
 
-Public API contract: `docs/API_CONTRACT.md`. Production gate: `docs/PRODUCTION_READINESS.md`.
+API: `http://localhost:8000`
 
-Live lender submission and funding actions are **disabled by default** and must not be enabled until legal, security, vendor, and launch gates are approved.
+Health: `GET /health/live`
+
+Readiness: `GET /health/ready`
+
+System readiness: `GET /api/v2/system/readiness`
+
+## Capability freeze
+
+The following remain disabled until launch certification:
+
+- `credit.live_pull`
+- `lenders.live_submission`
+- `esign.live_send`
+- `funding.live_confirmation`
+- `payments`
+- `payouts`
+
+## Next PR
+
+`auth/local-identity-tenancy`
