@@ -26,19 +26,24 @@ class ProviderHealth:
 class BankAdapter(Protocol):
     name: str
 
-    async def create_link_session(self, application_id: str) -> dict:\n        ...
+    async def create_link_session(self, application_id: str) -> dict:
+        ...
 
-    async def exchange_public_token(self, public_token: str) -> dict:\n        ...
+    async def exchange_public_token(self, public_token: str) -> dict:
+        ...
 
-    async def get_accounts(self, access_token: str) -> dict:\n        ...
+    async def get_accounts(self, access_token: str) -> dict:
+        ...
 
     async def sync_transactions(
         self,
         access_token: str,
         cursor: str | None,
-    ) -> dict: ...
+    ) -> dict:
+        ...
 
-    async def remove_item(self, access_token: str) -> None:\n        ...
+    async def remove_item(self, access_token: str) -> None:
+        ...
 
 
 class CRMAdapter(Protocol):
@@ -47,19 +52,23 @@ class CRMAdapter(Protocol):
         event_type: str,
         aggregate_id: str,
         payload: dict,
-    ) -> dict: ...
+    ) -> dict:
+        ...
 
 
 class KYBAdapter(Protocol):
-    async def verify_business(self, payload: dict) -> dict:\n        ...
+    async def verify_business(self, payload: dict) -> dict:
+        ...
 
 
 class CreditAdapter(Protocol):
-    async def request_credit(self, payload: dict) -> dict:\n        ...
+    async def request_credit(self, payload: dict) -> dict:
+        ...
 
 
 class LenderAdapter(Protocol):
-    async def submit(self, payload: dict) -> dict:\n        ...
+    async def submit(self, payload: dict) -> dict:
+        ...
 
 
 class ESignAdapter(Protocol):
@@ -69,7 +78,8 @@ class ESignAdapter(Protocol):
         contract_id: str,
         signer_email: str,
         signer_name: str,
-    ) -> dict: ...
+    ) -> dict:
+        ...
 
 
 class EmailAdapter(Protocol):
@@ -79,11 +89,13 @@ class EmailAdapter(Protocol):
         recipient: str,
         subject: str,
         body: str,
-    ) -> dict: ...
+    ) -> dict:
+        ...
 
 
 class SMSAdapter(Protocol):
-    async def send(self, *, recipient: str, body: str) -> dict:\n        ...
+    async def send(self, *, recipient: str, body: str) -> dict:
+        ...
 
 
 class ObjectStorageAdapter(Protocol):
@@ -93,11 +105,13 @@ class ObjectStorageAdapter(Protocol):
         object_key: str,
         content: bytes,
         content_type: str,
-    ) -> dict: ...
+    ) -> dict:
+        ...
 
     async def presigned_download(
         self,
         *,
         object_key: str,
         expires_seconds: int,
-    ) -> str: ...
+    ) -> str:
+        ...
