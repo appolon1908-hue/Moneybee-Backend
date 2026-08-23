@@ -227,3 +227,12 @@ def test_borrower_application_sections_and_submission_flow():
         )
         assert funding_response.status_code == 200
         assert funding_response.json()["status"] == "CONDITIONS_PENDING"
+
+        invalid_transition = client.post(
+            f"/api/v2/applications/{application_id}/match"
+        )
+        assert invalid_transition.status_code == 409
+        assert (
+            invalid_transition.json()["detail"]["code"]
+            == "INVALID_APPLICATION_TRANSITION"
+        )
