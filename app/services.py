@@ -11,6 +11,132 @@ from app.auth import Principal
 from app.config import settings
 
 
+APPLICATION_TRANSITIONS: dict[
+    models.ApplicationStatus, frozenset[models.ApplicationStatus]
+] = {
+    models.ApplicationStatus.APPLICATION_STARTED: frozenset(
+        {
+            models.ApplicationStatus.APPLICATION_IN_PROGRESS,
+            models.ApplicationStatus.READY_FOR_MATCHING,
+            models.ApplicationStatus.WITHDRAWN,
+        }
+    ),
+    models.ApplicationStatus.APPLICATION_IN_PROGRESS: frozenset(
+        {
+            models.ApplicationStatus.APPLICATION_COMPLETE,
+            models.ApplicationStatus.READY_FOR_MATCHING,
+            models.ApplicationStatus.WITHDRAWN,
+        }
+    ),
+    models.ApplicationStatus.APPLICATION_COMPLETE: frozenset(
+        {
+            models.ApplicationStatus.VERIFICATION_PENDING,
+            models.ApplicationStatus.READY_FOR_MATCHING,
+            models.ApplicationStatus.FRAUD_REVIEW,
+            models.ApplicationStatus.COMPLIANCE_REVIEW,
+        }
+    ),
+    models.ApplicationStatus.VERIFICATION_PENDING: frozenset(
+        {
+            models.ApplicationStatus.READY_FOR_MATCHING,
+            models.ApplicationStatus.FRAUD_REVIEW,
+            models.ApplicationStatus.COMPLIANCE_REVIEW,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.READY_FOR_MATCHING: frozenset(
+        {
+            models.ApplicationStatus.MATCHED,
+            models.ApplicationStatus.DECLINED,
+            models.ApplicationStatus.FRAUD_REVIEW,
+        }
+    ),
+    models.ApplicationStatus.MATCHED: frozenset(
+        {
+            models.ApplicationStatus.SUBMITTED_TO_LENDERS,
+            models.ApplicationStatus.OFFERS_AVAILABLE,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.SUBMITTED_TO_LENDERS: frozenset(
+        {
+            models.ApplicationStatus.UNDERWRITING,
+            models.ApplicationStatus.CONDITIONS_PENDING,
+            models.ApplicationStatus.OFFERS_AVAILABLE,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.UNDERWRITING: frozenset(
+        {
+            models.ApplicationStatus.CONDITIONS_PENDING,
+            models.ApplicationStatus.OFFERS_AVAILABLE,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.CONDITIONS_PENDING: frozenset(
+        {
+            models.ApplicationStatus.CONDITIONS_COMPLETE,
+            models.ApplicationStatus.OFFERS_AVAILABLE,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.OFFERS_AVAILABLE: frozenset(
+        {
+            models.ApplicationStatus.OFFER_ACCEPTED,
+            models.ApplicationStatus.EXPIRED,
+            models.ApplicationStatus.DECLINED,
+        }
+    ),
+    models.ApplicationStatus.OFFER_ACCEPTED: frozenset(
+        {
+            models.ApplicationStatus.CONDITIONS_PENDING,
+            models.ApplicationStatus.CONTRACT_READY,
+            models.ApplicationStatus.CANCELLED,
+        }
+    ),
+    models.ApplicationStatus.CONDITIONS_COMPLETE: frozenset(
+        {
+            models.ApplicationStatus.CONTRACT_READY,
+            models.ApplicationStatus.CANCELLED,
+        }
+    ),
+    models.ApplicationStatus.CONTRACT_READY: frozenset(
+        {
+            models.ApplicationStatus.CONTRACT_SENT,
+            models.ApplicationStatus.CANCELLED,
+        }
+    ),
+    models.ApplicationStatus.CONTRACT_SENT: frozenset(
+        {
+            models.ApplicationStatus.CONTRACT_SIGNED,
+            models.ApplicationStatus.EXPIRED,
+            models.ApplicationStatus.CANCELLED,
+        }
+    ),
+    models.ApplicationStatus.CONTRACT_SIGNED: frozenset(
+        {
+            models.ApplicationStatus.APPROVED_FOR_FUNDING,
+            models.ApplicationStatus.CANCELLED,
+        }
+    ),
+    models.ApplicationStatus.APPROVED_FOR_FUNDING: frozenset(
+        {
+            models.ApplicationStatus.FUNDS_SENT,
+            models.ApplicationStatus.CANCELLED,
+        }
+    ),
+    models.ApplicationStatus.FUNDS_SENT: frozenset(
+        {
+            models.ApplicationStatus.FUNDED,
+            models.ApplicationStatus.COMPLIANCE_REVIEW,
+        }
+    ),
+    models.ApplicationStatus.FUNDED: frozenset(
+        {models.ApplicationStatus.CLOSED}
+    ),
+}
+
+
 def payload_digest(payload: schemas.PrequalificationInput) -> str:
     value = payload.model_dump(mode="json", exclude={"anti_bot_token"})
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -95,7 +221,11 @@ def score(application: models.Application, program: models.LenderProgram):
     return not reasons, max(0, 100 - len(reasons) * 20), reasons
 
 
-async def match(db: AsyncSession, application_id: uuid.UUID):
+async def match(
+    db: AsyncSession,
+    application_id: uuid.UUID,
+    principal: Principal,
+):
     application = await db.get(models.Application, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
@@ -119,7 +249,13 @@ async def match(db: AsyncSession, application_id: uuid.UUID):
         )
         db.add(item)
         results.append(item)
-    application.status = models.ApplicationStatus.MATCHED
+    transition_application(
+        db,
+        application,
+        models.ApplicationStatus.MATCHED,
+        principal,
+        reason="Explainable matching completed",
+    )
     await db.commit()
     for item in results:
         await db.refresh(item)
@@ -274,6 +410,17 @@ def transition_application(
     previous = application.status
     if previous == to_status:
         return
+    allowed = APPLICATION_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_APPLICATION_TRANSITION",
+                "from_status": previous.value,
+                "to_status": to_status.value,
+                "allowed": sorted(value.value for value in allowed),
+            },
+        )
     application.status = to_status
     application.version += 1
     db.add(
