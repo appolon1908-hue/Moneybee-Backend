@@ -1,0 +1,22 @@
+name: backend-ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: python -m compileall app migrations
+      - run: pytest -q
+      - name: Ensure deprecated identity host is absent
+        run: python -c "import pathlib; p='auth.codestra.'+'agency'; assert all(p not in f.read_text(errors='ignore') for f in pathlib.Path('.').rglob('*') if f.is_file() and '.git' not in f.parts)"

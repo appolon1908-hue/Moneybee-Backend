@@ -2,29 +2,22 @@
 
 Authoritative Python/FastAPI backend for **MoneyBeeLoans** — “Business funding that keeps you moving.”
 
-## Repository ownership
+## Included baseline
+- Versioned FastAPI API and health probes
+- PostgreSQL/SQLAlchemy models and Alembic migration
+- Keycloak JWT validation against `https://auth.codestra.co/realms/codestra`
+- Role enforcement, correlation IDs, audit events, idempotent intake, signed webhook ingestion
+- Docker Compose with PostgreSQL 17 and Redis
+- CI lint/compile/tests and production readiness gates
 
-This repository owns:
+## Local start
+```bash
+cp .env.example .env
+docker compose up -d postgres redis
+docker compose run --rm api alembic upgrade head
+docker compose up --build api
+```
 
-- FastAPI application and OpenAPI contract
-- PostgreSQL system of record and Alembic migrations
-- Redis caching, queues, workers, idempotency, retry, and dead-letter handling
-- Authentication/authorization enforcement and audit trails
-- Leads, applications, borrowers, businesses, owners, lenders, programs, matching, underwriting, offers, documents, funding, commissions, reporting, consent, and compliance
-- CRM and Codestra middleware delivery
-- Plaid, KYB/KYC, credit, e-sign, email, SMS, lender, and analytics adapters
-- Docker, CI/CD, observability, security controls, and deployment configuration
+Public API contract: `docs/API_CONTRACT.md`. Production gate: `docs/PRODUCTION_READINESS.md`.
 
-The backend is the authority for business rules and data. The CRM is a sales system, not the application database. Frontend applications must communicate only through versioned APIs.
-
-## Canonical boundaries
-
-- Public API: `https://api.moneybeeloans.com/api/v1`
-- Identity issuer: `https://auth.codestra.co/realms/codestra`
-- Human authentication: Authorization Code + PKCE
-- Machine authentication: short-lived Client Credentials tokens
-- No reference to `auth.codestra.agency` is permitted
-- External integrations and secrets remain server-side
-- Production financial actions remain disabled until legal, security, vendor, and launch gates are approved
-
-See [docs/BACKEND_IMPLEMENTATION_SPEC.md](docs/BACKEND_IMPLEMENTATION_SPEC.md) and [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
+Live lender submission and funding actions are **disabled by default** and must not be enabled until legal, security, vendor, and launch gates are approved.
