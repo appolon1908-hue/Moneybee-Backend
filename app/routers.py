@@ -111,7 +111,14 @@ async def update_application(
     for name, value in payload.model_dump(exclude={"version"}, exclude_none=True).items():
         setattr(item, name, value)
     item.version += 1
-    item.status = models.ApplicationStatus.APPLICATION_IN_PROGRESS
+    if item.status == models.ApplicationStatus.APPLICATION_STARTED:
+        services.transition_application(
+            db,
+            item,
+            models.ApplicationStatus.APPLICATION_IN_PROGRESS,
+            user,
+            reason="Application fields updated",
+        )
     item.completion_percentage = min(90, item.completion_percentage + 10)
     await db.commit()
     await db.refresh(item)
@@ -133,7 +140,7 @@ async def requirements(application_id: uuid.UUID, db: Db, user: User):
 async def match_application(application_id: uuid.UUID, db: Db, user: User):
     if "*" not in user.permissions and "matching.run" not in user.permissions:
         raise HTTPException(status_code=403, detail="Permission denied")
-    return await services.match(db, application_id)
+    return await services.match(db, application_id, user)
 
 
 @router.get(
@@ -310,7 +317,13 @@ async def lender_offer(
     application = await db.get(models.Application, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
-    application.status = models.ApplicationStatus.OFFERS_AVAILABLE
+    services.transition_application(
+        db,
+        application,
+        models.ApplicationStatus.OFFERS_AVAILABLE,
+        user,
+        reason="Lender created offer",
+    )
     await db.commit()
     await db.refresh(item)
     return item
@@ -881,6 +894,14 @@ async def prepare_matched_submissions(
         )
         db.add(item)
         prepared.append(item)
+    if application.status == models.ApplicationStatus.MATCHED:
+        services.transition_application(
+            db,
+            application,
+            models.ApplicationStatus.SUBMITTED_TO_LENDERS,
+            user,
+            reason="Matched lender submissions prepared",
+        )
     await db.commit()
     for item in prepared:
         await db.refresh(item)
@@ -947,7 +968,22 @@ async def create_condition(
         status="BORROWER_ACTION_REQUIRED",
     )
     submission.status = "CONDITIONS"
+    application = await db.get(models.Application, submission.application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if application.status in {
+        models.ApplicationStatus.SUBMITTED_TO_LENDERS,
+        models.ApplicationStatus.UNDERWRITING,
+    }:
+        services.transition_application(
+            db,
+            application,
+            models.ApplicationStatus.CONDITIONS_PENDING,
+            user,
+            reason="Lender requested an underwriting condition",
+        )
     db.add(item)
+    await db.flush()
     db.add(
         models.OutboxEvent(
             event_type="ConditionRequested",
@@ -986,8 +1022,15 @@ async def create_submission_offer(
     application = await db.get(models.Application, submission.application_id)
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
-    application.status = models.ApplicationStatus.OFFERS_AVAILABLE
+    services.transition_application(
+        db,
+        application,
+        models.ApplicationStatus.OFFERS_AVAILABLE,
+        user,
+        reason="Lender created offer from submission",
+    )
     db.add(item)
+    await db.flush()
     db.add(
         models.OutboxEvent(
             event_type="OfferReceived",
