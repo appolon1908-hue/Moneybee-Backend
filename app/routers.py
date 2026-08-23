@@ -2001,6 +2001,8 @@ async def provider_adapters(
                 row.configured
                 and capabilities.get(
                     {
+                        "middleware": "crm.write",
+                        "crm": "crm.write",
                         "bank": "bank.live_connection",
                         "kyb": "kyb.live_verification",
                         "credit": "credit.live_pull",
