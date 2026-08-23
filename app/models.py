@@ -757,3 +757,121 @@ class UserAccount(Base, Record):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+class BankProviderState(Base, Record):
+    __tablename__ = "bank_provider_states"
+
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bank_connections.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(100))
+    item_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    access_token_ciphertext: Mapped[str] = mapped_column(Text)
+    transaction_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class BankAccount(Base, Record):
+    __tablename__ = "bank_accounts"
+    __table_args__ = (
+        UniqueConstraint(
+            "connection_id",
+            "provider_account_id",
+            name="uq_bank_account_provider_identity",
+        ),
+    )
+
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bank_connections.id", ondelete="CASCADE"), index=True
+    )
+    provider_account_id: Mapped[str] = mapped_column(String(255), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    official_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    mask: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    account_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    subtype: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    current_balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    available_balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    active: Mapped[bool] = mapped_column(default=True)
+
+
+class BankBalanceSnapshot(Base, Record):
+    __tablename__ = "bank_balance_snapshots"
+
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bank_accounts.id", ondelete="CASCADE"), index=True
+    )
+    current_balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    available_balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+
+class BankTransaction(Base, Record):
+    __tablename__ = "bank_transactions"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_transaction_id",
+            name="uq_bank_transaction_provider_identity",
+        ),
+    )
+
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bank_connections.id", ondelete="CASCADE"), index=True
+    )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("bank_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(100))
+    provider_transaction_id: Mapped[str] = mapped_column(String(255), index=True)
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    authorized_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(500))
+    merchant_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    pending: Mapped[bool] = mapped_column(default=False)
+    removed: Mapped[bool] = mapped_column(default=False)
+    categories: Mapped[list] = mapped_column(JSON, default=list)
+    metadata_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class WebhookReceipt(Base, Record):
+    __tablename__ = "webhook_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_event_id",
+            name="uq_webhook_receipt_provider_event",
+        ),
+    )
+
+    provider: Mapped[str] = mapped_column(String(100), index=True)
+    provider_event_id: Mapped[str] = mapped_column(String(255))
+    event_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    payload_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(40), default="RECEIVED", index=True)
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
