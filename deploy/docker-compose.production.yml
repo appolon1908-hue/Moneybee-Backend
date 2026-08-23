@@ -82,7 +82,7 @@ services:
       context: ../../Moneybee-frontend-
       args:
         APP: marketing
-        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v1
+        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v2
         VITE_BORROWER_URL: https://app.moneybeeloan.com
         VITE_LENDER_URL: https://lenders.moneybeeloan.com
         VITE_ADMIN_URL: https://admin.moneybeeloan.com
@@ -98,7 +98,7 @@ services:
       context: ../../Moneybee-frontend-
       args:
         APP: borrower
-        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v1
+        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v2
         VITE_OIDC_AUTHORITY: https://auth.codestra.co/realms/codestra
         VITE_OIDC_CLIENT_ID: moneybee-web
         VITE_OIDC_AUDIENCE: moneybee-api
@@ -111,7 +111,7 @@ services:
       context: ../../Moneybee-frontend-
       args:
         APP: lender
-        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v1
+        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v2
         VITE_OIDC_AUTHORITY: https://auth.codestra.co/realms/codestra
         VITE_OIDC_CLIENT_ID: moneybee-web
         VITE_OIDC_AUDIENCE: moneybee-api
@@ -124,7 +124,7 @@ services:
       context: ../../Moneybee-frontend-
       args:
         APP: admin
-        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v1
+        VITE_API_BASE_URL: https://api.moneybeeloan.com/api/v2
         VITE_OIDC_AUTHORITY: https://auth.codestra.co/realms/codestra
         VITE_OIDC_CLIENT_ID: moneybee-web
         VITE_OIDC_AUDIENCE: moneybee-api
