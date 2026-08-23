@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -222,6 +223,15 @@ async def accept_offer(
         raise HTTPException(status_code=403, detail="Permission denied")
     if offer.status != "AVAILABLE":
         raise HTTPException(status_code=409, detail="Offer is not available")
+    if offer.expires_at:
+        expires_at = offer.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at <= datetime.now(UTC):
+            offer.status = "EXPIRED"
+            offer.version += 1
+            await db.commit()
+            raise HTTPException(status_code=409, detail="Offer has expired")
     existing_funding = await db.scalar(
         select(models.Funding).where(
             models.Funding.application_id == application.id
