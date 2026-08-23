@@ -39,7 +39,10 @@ class MiddlewareProvider(Protocol):
         event_type: str,
         aggregate_type: str,
         aggregate_id: str,
+        aggregate_version: int | None,
         tenant_id: str | None,
+        correlation_id: str | None,
+        causation_id: str | None,
         occurred_at: str,
         payload: dict,
     ) -> MiddlewareResult:
