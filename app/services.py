@@ -284,7 +284,10 @@ async def capability_is_ready(db: AsyncSession, capability: models.CapabilityFla
         return True
     provider = await db.scalar(
         select(models.ProviderConnection).where(
-            models.ProviderConnection.provider_name == capability.provider,
+            or_(
+                models.ProviderConnection.provider_name == capability.provider,
+                models.ProviderConnection.provider_type == capability.provider,
+            ),
             models.ProviderConnection.environment == settings.app_env,
             models.ProviderConnection.status == models.ProviderStatus.READY,
         )
