@@ -237,3 +237,76 @@ Every send enforces template version, purpose/consent/suppression policy, author
 - Consumer-driven tests cover all four frontend applications.
 - Webhook payloads are independently versioned and retained for replay compatibility.
 - Contract tests include tenant isolation, masked PII, unsupported transitions, stale versions, idempotency, duplicate webhooks, provider outage, and retry/DLQ behavior.
+
+
+## Expanded V1 feature surface
+
+The implementation blueprint adds the following explicit operations. These remain subject to the same authentication, tenant, permission, version, idempotency, PII, and problem-detail rules above.
+
+### Borrower dashboard, timeline, owners, contracts, funding, and messages
+
+- `GET /client/dashboard`
+- `GET /applications/{application_id}/timeline`
+- `DELETE /applications/{application_id}/owners/{owner_id}`
+- `GET /applications/{application_id}/contracts`
+- `GET /applications/{application_id}/funding`
+- `GET /applications/{application_id}/messages`
+
+The dashboard is an aggregate read model with current application, completion, next action, requirements summary, recent messages, offers/contracts/funding summary, and stale-data timestamp. It does not create an independent source of truth.
+
+### Business verification
+
+- `POST /applications/{application_id}/business-verification`
+- `GET /applications/{application_id}/business-verification`
+- `POST /webhooks/kyb`
+
+Normalized verification includes status, business-registration match, tax-ID match, address match, watchlist result, risk flags, review state, provider reference, and observed timestamp. Responses mask identifiers and exclude raw provider payloads.
+
+### Lender workspace
+
+- `GET /lender/dashboard`
+- `POST /lender/applications/{application_id}/decision`
+- `GET /lender/offers`
+- `GET /lender/fundings`
+- `GET /lender/programs`
+
+A lender can access only applications explicitly submitted to that lender. Decision and condition operations require a current submission, permission, expected version, approved reason codes, and audit evidence.
+
+### Administrative dashboards and lead merge
+
+- `GET /admin/dashboard`
+- `GET /admin/pipeline`
+- `GET /admin/funnel`
+- `GET /admin/funding-summary`
+- `GET /admin/marketing-performance`
+- `POST /admin/leads/{lead_id}/merge`
+- `GET /admin/crm/events/{event_id}`
+- `POST /admin/crm/events/{event_id}/replay`
+- `GET /admin/audit-events/{event_id}`
+
+Dashboard values are backend-defined read models with metric definition, data-through timestamp, currency/timezone, filter context, and permissions. Lead merge requires source/target validation, duplicate evidence, preview, reason, idempotency, and an immutable audit record.
+
+### Compliance, disclosures, consent, and adverse action
+
+- `GET /applications/{application_id}/required-disclosures`
+- `POST /applications/{application_id}/consents`
+- `GET /applications/{application_id}/consents`
+- `POST /applications/{application_id}/adverse-action`
+- `GET /applications/{application_id}/adverse-action`
+
+Required-disclosure responses identify product, jurisdiction, lender/context, immutable version/hash, effective date, presentation instructions, and acceptance requirements. Consent creation records exact document/disclosure version, text/artifact hash, time, actor, IP, user agent, request ID, and method. Adverse-action creation accepts approved structured reason codes and workflow metadata, never unrestricted denial prose from ordinary sales users.
+
+### Provider webhooks
+
+- `POST /webhooks/banking`
+- `POST /webhooks/lenders`
+- `POST /webhooks/esign`
+
+Every provider webhook uses provider-specific verification, timestamp/replay protection, unique event ID, schema version, bounded body size, sanitized logging, durable receipt, and idempotent asynchronous processing. A `2xx` acknowledges durable receipt; downstream business processing remains observable separately.
+
+### Health
+
+- `GET /health/live`
+- `GET /health/ready`
+
+Liveness does not probe remote dependencies. Readiness checks only dependencies required to serve traffic, migration compatibility, and critical configuration with strict timeouts. Public health responses expose no connection strings, host inventory, secrets, tenant data, or raw dependency errors.
