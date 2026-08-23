@@ -42,10 +42,7 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["app"]
+select = ["E", "F", "B", "UP"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
