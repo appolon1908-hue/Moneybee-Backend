@@ -16,15 +16,21 @@ class Principal:
     subject: str
     roles: frozenset[str]
     permissions: frozenset[str]
+    organization_id: str | None = None
 
 
 ROLE_PERMISSIONS = {
     "MONEYBEE_ADMIN": {"*"},
     "MONEYBEE_SALES": {"lead.read", "application.read", "application.edit"},
-    "MONEYBEE_UNDERWRITER": {"application.read", "underwriting.review"},
+    "MONEYBEE_UNDERWRITER": {"application.read", "underwriting.review", "matching.run"},
     "LENDER_ADMIN": {"lender.application.read", "offer.create", "program.manage"},
     "LENDER_UNDERWRITER": {"lender.application.read", "offer.create"},
-    "BORROWER": {"application.read.own", "application.edit.own", "offer.accept.own"},
+    "BORROWER": {
+        "application.read.own",
+        "application.edit.own",
+        "application.submit.own",
+        "offer.accept.own",
+    },
 }
 
 
@@ -56,7 +62,13 @@ async def current_principal(
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Invalid access token") from exc
     roles = set(claims.get("realm_access", {}).get("roles", []))
-    return Principal(str(claims["sub"]), frozenset(roles), permission_set(roles))
+    organization_id = claims.get("organization_id") or claims.get("org_id")
+    return Principal(
+        str(claims["sub"]),
+        frozenset(roles),
+        permission_set(roles),
+        str(organization_id) if organization_id else None,
+    )
 
 
 def require_permission(permission: str):
