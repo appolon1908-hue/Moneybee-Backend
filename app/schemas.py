@@ -169,6 +169,7 @@ class OfferInput(BaseModel):
     factor_rate: Decimal | None = None
     origination_fee: Decimal = 0
     total_repayment: Decimal | None = None
+    expires_at: datetime | None = None
 
 
 class OfferRead(OfferInput):
