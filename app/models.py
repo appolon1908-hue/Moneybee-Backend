@@ -243,7 +243,13 @@ class OutboxEvent(Base, Record):
     __tablename__ = "outbox_events"
 
     event_type: Mapped[str] = mapped_column(String(120), index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    aggregate_type: Mapped[str] = mapped_column(String(80), default="unknown")
     aggregate_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    aggregate_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    causation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
     status: Mapped[OutboxStatus] = mapped_column(Enum(OutboxStatus), default=OutboxStatus.PENDING)
@@ -251,6 +257,13 @@ class OutboxEvent(Base, Record):
     lease_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    destination: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    last_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
