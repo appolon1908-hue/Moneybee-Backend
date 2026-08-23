@@ -52,7 +52,7 @@ async def validation_problem(request: Request, exc: RequestValidationError):
         status_code=422,
         media_type="application/problem+json",
         content={
-            "type": "https://api.moneybeeloans.com/problems/validation",
+            "type": "https://api.moneybeeloan.com/problems/validation",
             "title": "Request validation failed",
             "status": 422,
             "detail": "One or more fields are invalid.",
@@ -65,7 +65,7 @@ async def validation_problem(request: Request, exc: RequestValidationError):
 
 @app.get("/health/live", tags=["health"])
 async def live():
-    return {"status": "ok"}
+    return {"status": "ok", "environment": settings.app_env}
 
 
 @app.get("/health/ready", tags=["health"])
@@ -73,6 +73,6 @@ async def ready():
     try:
         async with SessionLocal() as db:
             await db.execute(text("SELECT 1"))
-        return {"status": "ready"}
+        return {"status": "ready", "environment": settings.app_env}
     except Exception:
-        return JSONResponse(status_code=503, content={"status": "not_ready"})
+        return JSONResponse(status_code=503, content={"status": "not_ready", "environment": settings.app_env})
