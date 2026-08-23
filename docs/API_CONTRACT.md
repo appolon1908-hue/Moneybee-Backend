@@ -1,7 +1,7 @@
 # MoneyBee V1 API Contract
 
 Contract version: `v1`  
-Base URL: `https://api.moneybeeloans.com/api/v1`  
+Base URL: `https://api.moneybeeloans.com/api/v2`  
 Canonical OIDC issuer: `https://auth.codestra.co/realms/codestra`
 
 The backend repository owns the generated OpenAPI document. The frontend repository pins a reviewed copy or generated client to the same contract version. CI must fail on unreviewed breaking changes or generated-client drift.
