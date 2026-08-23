@@ -6,7 +6,7 @@ This document applies the V3 marketplace architecture to the dedicated backend r
 
 FastAPI and PostgreSQL are the system of record. Frontends and the CRM never own underwriting, fraud, eligibility, offer normalization, commission, funding, or compliance decisions.
 
-- API: `https://api.moneybeeloan.com/api/v1`
+- API: `https://api.moneybeeloan.com/api/v2`
 - Identity: `https://auth.codestra.co/realms/codestra`
 - Human access: Authorization Code + PKCE
 - Machine access: short-lived Client Credentials tokens
