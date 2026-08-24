@@ -183,3 +183,14 @@ Step 2 (`commands/command-context`) may begin only after Step 1A and Step 1B are
 - `AUTHORIZATION=PASS`
 
 Do not jump from identity directly to Step 9. Financial capabilities remain disabled.
+
+## Current prerequisite state
+
+```text
+STEP0_PR_STATE=DRAFT
+STEP0_MERGED=NO
+STEP1B_BRANCH_CREATED=NO
+STEP1B_IMPLEMENTED=NO
+LIVE_CAPABILITIES_ENABLED=NONE
+PRODUCTION_DEPLOYED=NO
+```
