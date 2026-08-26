@@ -1,0 +1,116 @@
+name: publish-portal-features
+
+on:
+  push:
+    branches:
+      - automation/publish-portal-features-20260826
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee_test
+          POSTGRES_DB: moneybee_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Reconstruct and verify feature series
+        run: |
+          set -euo pipefail
+          cat .github/automation/backend-series.part* | base64 -d | gzip -d > /tmp/backend-portal-series.patch
+          echo "6b78031556705f47d22ba5f89722fa23bfa39a0f7006c7d227bedca338a55070  /tmp/backend-portal-series.patch" | sha256sum -c -
+          mkdir -p /tmp/backend-mails
+          git mailsplit -o/tmp/backend-mails /tmp/backend-portal-series.patch
+          test "$(find /tmp/backend-mails -type f | wc -l)" -eq 5
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Apply, validate, and publish stacked branches
+        env:
+          BASE_SHA: 7919692dd0d62485ea6401b48a6eec9ed21c0daf
+          POSTGRES_URL: postgresql+asyncpg://moneybee:moneybee_test@localhost:5432/moneybee_test
+        run: |
+          set -euo pipefail
+          git config user.name "MoneyBee Feature Automation"
+          git config user.email "appolon1908@gmail.com"
+          git checkout --detach "$BASE_SHA"
+
+          branches=(
+            feature/portal-api-foundation
+            feature/borrower-portal-api
+            feature/lender-bank-portal-api
+            feature/admin-operations-api
+            feature/provider-webhook-gateway
+          )
+          mapfile -t patches < <(find /tmp/backend-mails -type f | sort)
+          commits=()
+
+          for i in "${!patches[@]}"; do
+            echo "Applying layer $((i + 1)): ${branches[$i]}"
+            git am "${patches[$i]}"
+
+            python scripts/export_openapi.py
+            git add openapi.json
+            if ! git diff --cached --quiet; then
+              git commit --amend --no-edit
+            fi
+
+            rm -f test-moneybee.db /tmp/moneybee-layer.db
+            ruff check app tests
+            pytest -q
+            APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=true DATABASE_URL=sqlite+aiosqlite:////tmp/moneybee-layer.db alembic upgrade head
+            APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=true DATABASE_URL=sqlite+aiosqlite:////tmp/moneybee-layer.db alembic downgrade base
+            APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=true DATABASE_URL=sqlite+aiosqlite:////tmp/moneybee-layer.db alembic upgrade head
+            python -m compileall -q app migrations
+
+            commits+=("$(git rev-parse HEAD)")
+          done
+
+          APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=false LOCAL_IDENTITY_ENFORCEMENT=true DATABASE_URL="$POSTGRES_URL" alembic upgrade head
+          APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=false LOCAL_IDENTITY_ENFORCEMENT=true DATABASE_URL="$POSTGRES_URL" pytest -q tests/test_identity_tenancy_postgres.py
+          APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=false LOCAL_IDENTITY_ENFORCEMENT=true DATABASE_URL="$POSTGRES_URL" alembic downgrade 20260823_0012
+          APP_ENV=test AUTO_CREATE_SCHEMA=false LOCAL_AUTH_BYPASS=false LOCAL_IDENTITY_ENFORCEMENT=true DATABASE_URL="$POSTGRES_URL" alembic upgrade head
+          docker build -t moneybee-backend:portal-validation .
+
+          : > /tmp/backend-portal-manifest.txt
+          for i in "${!branches[@]}"; do
+            if git ls-remote --exit-code --heads origin "refs/heads/${branches[$i]}" >/dev/null 2>&1; then
+              echo "Refusing to overwrite existing branch: ${branches[$i]}" >&2
+              exit 1
+            fi
+            git push origin "${commits[$i]}:refs/heads/${branches[$i]}"
+            printf '%s %s\n' "${branches[$i]}" "${commits[$i]}" | tee -a /tmp/backend-portal-manifest.txt
+          done
+
+      - name: Upload validation manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-portal-validation-manifest
+          path: /tmp/backend-portal-manifest.txt
+          if-no-files-found: error
+          retention-days: 30
