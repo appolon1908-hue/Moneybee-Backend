@@ -15,9 +15,18 @@ from app.services import effective_capabilities
 
 
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
+TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def external_delivery_enabled() -> bool:
+    """Require an explicit runtime gate before leasing or sending any event."""
+    return os.getenv("ENABLE_EXTERNAL_DELIVERY", "false").strip().lower() in TRUE_VALUES
 
 
 async def claim() -> str | None:
+    if not external_delivery_enabled():
+        return None
+
     now = datetime.now(UTC)
     async with SessionLocal() as db, db.begin():
         event = await db.scalar(
@@ -49,6 +58,13 @@ async def deliver(event_id: str) -> None:
         event = await db.get(OutboxEvent, event_id)
         if not event or event.lease_owner != WORKER_ID:
             return
+        if not external_delivery_enabled():
+            event.status = OutboxStatus.PENDING
+            event.lease_owner = None
+            event.lease_expires_at = None
+            await db.commit()
+            return
+
         try:
             capabilities = await effective_capabilities(db)
             if not capabilities.get("crm.write", False):
@@ -61,7 +77,7 @@ async def deliver(event_id: str) -> None:
             result = await adapter.publish(
                 event_id=str(event.id),
                 event_type=canonical_type,
-                aggregate_type=canonical_type.split(".", 1)[0],
+                aggregate_type=event.aggregate_type,
                 aggregate_id=str(event.aggregate_id),
                 aggregate_version=event.aggregate_version,
                 tenant_id=event.tenant_id,
@@ -134,6 +150,9 @@ async def deliver(event_id: str) -> None:
 
 async def run() -> None:
     while True:
+        if not external_delivery_enabled():
+            await asyncio.sleep(5)
+            continue
         event_id = await claim()
         if event_id:
             await deliver(event_id)
