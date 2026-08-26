@@ -78,6 +78,7 @@ jobs:
               sed -i 's/return "MONEYBEE"/return "ADMIN"/' app/portal/common.py
               sed -i 's/== "MONEYBEE"/== "ADMIN"/' tests/test_portal_foundation.py
             fi
+            find tests -type f -name 'test_*_portal.py' -exec sed -i 's/"marketing": {},/"marketing": {"landing_page": "portal-tests"},/' {} +
 
             python scripts/export_openapi.py
             git add -A
