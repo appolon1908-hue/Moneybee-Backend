@@ -66,10 +66,7 @@ jobs:
         run: |
           alembic downgrade 20260823_0012
           alembic upgrade head
-      - name: Verify OpenAPI contract
-        run: |
-          cp openapi.json /tmp/openapi.before.json
-          python scripts/export_openapi.py
-          diff -u /tmp/openapi.before.json openapi.json
+      - name: Verify OpenAPI contract and additive manifests
+        run: python scripts/verify_openapi_contract.py
       - name: Build backend image
         run: docker build -t moneybee-backend:test .
