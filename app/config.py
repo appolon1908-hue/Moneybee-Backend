@@ -1,4 +1,5 @@
 from functools import lru_cache
+import json
 from typing import Literal
 
 from pydantic import model_validator
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
     codestra_middleware_webhook_tolerance_seconds: int = 300
+    provider_webhook_allowlist_csv: str = "lender,docusign,sendgrid,twilio"
+    provider_webhook_secrets_json: str = "{}"
+    provider_webhook_tolerance_seconds: int = 300
 
     field_encryption_key: str | None = None
     provider_timeout_seconds: float = 30.0
@@ -133,6 +137,27 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [item.strip() for item in self.cors_origins_csv.split(",") if item.strip()]
+
+    @property
+    def provider_webhook_allowlist(self) -> set[str]:
+        return {
+            item.strip().lower()
+            for item in self.provider_webhook_allowlist_csv.split(",")
+            if item.strip()
+        }
+
+    @property
+    def provider_webhook_secrets(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.provider_webhook_secrets_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("PROVIDER_WEBHOOK_SECRETS_JSON must be valid JSON") from exc
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(secret, str)
+            for key, secret in value.items()
+        ):
+            raise ValueError("PROVIDER_WEBHOOK_SECRETS_JSON must be a string map")
+        return {key.lower(): secret for key, secret in value.items() if secret}
 
     @property
     def oidc_algorithms(self) -> list[str]:
