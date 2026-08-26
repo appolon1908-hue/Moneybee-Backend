@@ -7182,6 +7182,161 @@
         ]
       }
     },
+    "/api/v2/admin/webhook-receipts": {
+      "get": {
+        "operationId": "webhook_receipts_api_v2_admin_webhook_receipts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Webhook Receipts",
+        "tags": [
+          "admin",
+          "integrations"
+        ]
+      }
+    },
+    "/api/v2/admin/webhook-receipts/{receipt_id}/requeue": {
+      "post": {
+        "operationId": "requeue_webhook_receipt_api_v2_admin_webhook_receipts__receipt_id__requeue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receipt_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Receipt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Requeue Webhook Receipt",
+        "tags": [
+          "admin",
+          "integrations"
+        ]
+      }
+    },
+    "/api/v2/admin/webhooks/configuration": {
+      "get": {
+        "operationId": "webhook_configuration_api_v2_admin_webhooks_configuration_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Webhook Configuration",
+        "tags": [
+          "admin",
+          "integrations"
+        ]
+      }
+    },
     "/api/v2/applications": {
       "post": {
         "operationId": "create_application_api_v2_applications_post",
@@ -10967,6 +11122,95 @@
           }
         },
         "summary": "Plaid Webhook",
+        "tags": [
+          "provider-webhooks"
+        ]
+      }
+    },
+    "/api/v2/webhooks/providers/{provider}": {
+      "post": {
+        "description": "Authenticate and durably enqueue an external event without mutating lending state.",
+        "operationId": "provider_webhook_api_v2_webhooks_providers__provider__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-MoneyBee-Signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Moneybee-Signature"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-MoneyBee-Timestamp",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Moneybee-Timestamp"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Provider-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Provider-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Provider Webhook",
         "tags": [
           "provider-webhooks"
         ]
