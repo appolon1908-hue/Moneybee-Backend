@@ -1,0 +1,209 @@
+name: Admin operations API hardening v3
+
+on:
+  push:
+    branches:
+      - feature/admin-operations-api
+
+permissions:
+  contents: write
+
+concurrency:
+  group: admin-api-hardening-v3
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://moneybee:moneybee@localhost:5432/moneybee_test
+      ENVIRONMENT: test
+      MONEYBEE_ALLOW_TEST_AUTH: "true"
+      LIVE_WRITES: "false"
+      ODOO_WRITE: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      N8N_DELIVERY_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/admin-operations-api
+          fetch-depth: 0
+
+      - name: Wait for hardened lender API and merge it
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "moneybee-automation"
+          git config user.email "actions@users.noreply.github.com"
+          ready=0
+          for attempt in $(seq 1 80); do
+            git fetch origin feature/lender-bank-portal-api
+            if git show origin/feature/lender-bank-portal-api:docs/evidence/lender-bank-portal-api-validation-v3.json > /tmp/lender-v3.json 2>/dev/null; then
+              if [ "$(jq -r '.status // ""' /tmp/lender-v3.json)" = "PASS" ]; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 15
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Hardened lender API was not available" >&2
+            exit 1
+          fi
+          git merge -X theirs --no-edit origin/feature/lender-bank-portal-api
+
+      - name: Constrain operations assignees
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/admin_portal.py")
+          text = path.read_text()
+          old = '''    if payload.assignee_user_id is not None:
+        assignee = db.scalar(
+            select(identity_models.User).where(
+                identity_models.User.id == payload.assignee_user_id,
+                identity_models.User.active.is_(True),
+            )
+        )
+        if assignee is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "INVALID_ASSIGNEE",
+                    "message": "The selected assignee is not an active MoneyBee user.",
+                },
+            )
+        task.assignee_user_id = payload.assignee_user_id
+'''
+          new = '''    if payload.assignee_user_id is not None:
+        assignee = db.scalar(
+            select(identity_models.User)
+            .join(
+                identity_models.OrganizationMembership,
+                identity_models.OrganizationMembership.user_id
+                == identity_models.User.id,
+            )
+            .join(
+                identity_models.Organization,
+                identity_models.Organization.id
+                == identity_models.OrganizationMembership.organization_id,
+            )
+            .where(
+                identity_models.User.id == payload.assignee_user_id,
+                identity_models.User.active.is_(True),
+                identity_models.OrganizationMembership.active.is_(True),
+                or_(
+                    identity_models.OrganizationMembership.organization_id
+                    == task.organization_id,
+                    identity_models.Organization.organization_type == "MONEYBEE",
+                ),
+            )
+        )
+        if assignee is None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "INVALID_ASSIGNEE",
+                    "message": (
+                        "The assignee must be active in the task organization or in "
+                        "an active MoneyBee operations organization."
+                    ),
+                },
+            )
+        task.assignee_user_id = payload.assignee_user_id
+'''
+          if old not in text:
+              raise SystemExit("Operations assignee marker not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Install and validate
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          status=0
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]' || status=$?
+          if python -m ruff --version >/dev/null 2>&1; then
+            python -m ruff check --fix app/admin_portal.py tests/test_admin_portal_contract.py || status=$?
+            python -m ruff format app/admin_portal.py tests/test_admin_portal_contract.py || status=$?
+          fi
+          python -m compileall -q app migrations tests || status=$?
+          pytest -q \
+            tests/test_portal_foundation.py \
+            tests/test_borrower_portal_contract.py \
+            tests/test_lender_portal_contract.py \
+            tests/test_admin_portal_contract.py || status=$?
+          alembic upgrade 20260826_0014 || status=$?
+          python scripts/export_openapi.py || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Record and publish hardened result
+        env:
+          VALIDATION_STATUS: ${{ steps.validate.outputs.status }}
+        run: |
+          mkdir -p docs/evidence
+          python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          code = int(os.environ.get("VALIDATION_STATUS", "1"))
+          Path("docs/evidence/admin-operations-api-validation-v3.json").write_text(
+              json.dumps(
+                  {
+                      "work_package": "feature/admin-operations-api",
+                      "revision": 3,
+                      "status": "PASS" if code == 0 else "FAIL",
+                      "validation_exit_code": code,
+                      "base_validation": "lender-bank-portal-api-v3=PASS",
+                      "assignee_membership": "TASK_ORGANIZATION_OR_MONEYBEE_REQUIRED",
+                      "tenant_scope": "BACKEND_AUTHORITATIVE",
+                      "postgres_migration_upgrade": "EXECUTED",
+                      "live_capabilities_enabled": [],
+                      "production_deployed": False,
+                      "recorded_at": datetime.now(UTC).isoformat(),
+                  },
+                  indent=2,
+              )
+              + "\n"
+          )
+          PY
+          rm -f .github/workflows/admin-api-finalize-v2.yml
+          rm -f .github/workflows/admin-api-hardening-v3.yml
+          git add \
+            app/admin_portal.py openapi.json \
+            docs/evidence/admin-operations-api-validation-v3.json \
+            .github/workflows/admin-api-finalize-v2.yml \
+            .github/workflows/admin-api-hardening-v3.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(admin): constrain operations task assignment"
+          fi
+          git fetch origin feature/admin-operations-api
+          if ! git merge-base --is-ancestor origin/feature/admin-operations-api HEAD; then
+            git rebase origin/feature/admin-operations-api
+          fi
+          git push origin HEAD:feature/admin-operations-api
+
+      - name: Fail if validation failed
+        if: steps.validate.outputs.status != '0'
+        run: exit 1
