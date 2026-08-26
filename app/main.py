@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app import identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
 from app.config import settings
-from app.db import SessionLocal, initialize_local_schema
+from app.db import SessionLocal, engine, initialize_local_schema
 from app.integration_routes import router as integration_router
 from app.portal import router as portal_router
 from app.routers import router
@@ -19,7 +19,11 @@ from app.routers import router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await initialize_local_schema()
-    yield
+    try:
+        yield
+    finally:
+        if settings.app_env == "test":
+            await engine.dispose()
 
 
 app = FastAPI(
@@ -91,4 +95,7 @@ async def ready():
             await db.execute(text("SELECT 1"))
         return {"status": "ready", "environment": settings.app_env}
     except Exception:
-        return JSONResponse(status_code=503, content={"status": "not_ready", "environment": settings.app_env})
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "environment": settings.app_env},
+        )
