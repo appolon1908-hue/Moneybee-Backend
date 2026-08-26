@@ -3,18 +3,12 @@ name: Portal stack CI
 on:
   push:
     branches:
-      - "feature/portal-foundation"
-      - "feature/borrower-portal-api"
-      - "feature/lender-bank-portal-api"
-      - "feature/admin-operations-api"
-      - "feature/provider-webhook-gateway"
+      - "release/portal-stack-consolidated"
+      - "feature/business-lender-crm-delivery"
   pull_request:
     branches:
       - "auth/local-identity-tenancy"
-      - "feature/portal-foundation"
-      - "feature/borrower-portal-api"
-      - "feature/lender-bank-portal-api"
-      - "feature/admin-operations-api"
+      - "release/portal-stack-consolidated"
 
 permissions:
   contents: read
@@ -22,10 +16,10 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: moneybee
           POSTGRES_PASSWORD: moneybee
@@ -40,9 +34,12 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_test
       APP_ENV: test
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
       CREDIT_LIVE_PULL: "false"
       LENDERS_LIVE_SUBMISSION: "false"
       ESIGN_LIVE_SEND: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
       MONEYBEE_DOCUMENT_BUCKET: test-private-bucket
       MONEYBEE_WEBHOOK_SECRET_TEST_PROVIDER: test-secret
     steps:
@@ -65,7 +62,7 @@ jobs:
         run: alembic upgrade head
       - name: Test
         run: python -m pytest -q
-      - name: Verify reversible portal migration
+      - name: Verify reversible migrations
         run: |
           alembic downgrade 20260823_0012
           alembic upgrade head
@@ -74,3 +71,5 @@ jobs:
           cp openapi.json /tmp/openapi.before.json
           python scripts/export_openapi.py
           diff -u /tmp/openapi.before.json openapi.json
+      - name: Build backend image
+        run: docker build -t moneybee-backend:test .
