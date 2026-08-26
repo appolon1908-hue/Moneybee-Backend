@@ -47,6 +47,37 @@ class S3ObjectStorageAdapter:
             "object_key": object_key,
         }
 
+    async def presigned_upload(
+        self,
+        *,
+        object_key: str,
+        content_type: str,
+        expires_seconds: int = 600,
+    ) -> str:
+        client = self._client()
+        return await asyncio.to_thread(
+            client.generate_presigned_url,
+            "put_object",
+            Params={
+                "Bucket": settings.object_storage_bucket,
+                "Key": object_key,
+                "ContentType": content_type,
+                "ServerSideEncryption": "AES256",
+            },
+            ExpiresIn=min(max(expires_seconds, 60), 900),
+        )
+
+    async def head_private(self, *, object_key: str) -> dict:
+        client = self._client()
+        try:
+            return await asyncio.to_thread(
+                client.head_object,
+                Bucket=settings.object_storage_bucket,
+                Key=object_key,
+            )
+        except Exception as exc:
+            raise ProviderError("s3", "Uploaded object could not be verified") from exc
+
     async def presigned_download(
         self,
         *,

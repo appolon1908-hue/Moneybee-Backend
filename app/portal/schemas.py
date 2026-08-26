@@ -174,3 +174,37 @@ class PageMeta(BaseModel):
     limit: int
     offset: int
     total: int
+
+
+class BorrowerOverview(BaseModel):
+    active_application: dict | None
+    applications: list[dict]
+    requirements: dict | None
+    open_tasks: int
+    unread_notifications: int
+    open_conditions: int
+    available_offers: int
+    recent_activity: list[dict]
+
+
+class DocumentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    owner_id: uuid.UUID | None
+    condition_id: uuid.UUID | None
+    document_type: str
+    original_file_name: str
+    mime_type: str | None
+    size_bytes: int
+    sha256: str
+    status: str
+    uploaded_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentDownload(BaseModel):
+    download_url: str
+    expires_seconds: int
