@@ -687,6 +687,102 @@
         "title": "BankExchangeInput",
         "type": "object"
       },
+      "BankTransactionRead": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "authorized_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized At"
+          },
+          "categories": {
+            "items": {},
+            "title": "Categories",
+            "type": "array"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "merchant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merchant Name"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "boolean"
+          },
+          "posted_at": {
+            "format": "date-time",
+            "title": "Posted At",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "account_id",
+          "posted_at",
+          "authorized_at",
+          "name",
+          "merchant_name",
+          "amount",
+          "currency",
+          "pending",
+          "removed",
+          "categories"
+        ],
+        "title": "BankTransactionRead",
+        "type": "object"
+      },
       "BorrowerOverview": {
         "properties": {
           "active_application": {
@@ -2004,6 +2100,287 @@
         "title": "LeadAccepted",
         "type": "object"
       },
+      "LenderDashboard": {
+        "properties": {
+          "active_programs": {
+            "title": "Active Programs",
+            "type": "integer"
+          },
+          "conditions_pending": {
+            "title": "Conditions Pending",
+            "type": "integer"
+          },
+          "funded_deals": {
+            "title": "Funded Deals",
+            "type": "integer"
+          },
+          "lender_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lender Id"
+          },
+          "needs_review": {
+            "title": "Needs Review",
+            "type": "integer"
+          },
+          "offers_out": {
+            "title": "Offers Out",
+            "type": "integer"
+          },
+          "programs": {
+            "title": "Programs",
+            "type": "integer"
+          },
+          "submissions": {
+            "title": "Submissions",
+            "type": "integer"
+          },
+          "total_funded": {
+            "title": "Total Funded",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lender_id",
+          "programs",
+          "active_programs",
+          "submissions",
+          "needs_review",
+          "conditions_pending",
+          "offers_out",
+          "funded_deals",
+          "total_funded"
+        ],
+        "title": "LenderDashboard",
+        "type": "object"
+      },
+      "LenderDecisionInput": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "APPROVE",
+              "DECLINE",
+              "CONDITIONS",
+              "FRAUD_REVIEW",
+              "COMPLIANCE_REVIEW"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Reason Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_version",
+          "decision"
+        ],
+        "title": "LenderDecisionInput",
+        "type": "object"
+      },
+      "LenderDecisionRead": {
+        "properties": {
+          "application_id": {
+            "format": "uuid",
+            "title": "Application Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "submission_id": {
+            "format": "uuid",
+            "title": "Submission Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "review_id",
+          "submission_id",
+          "application_id",
+          "decision",
+          "status",
+          "version",
+          "created_at"
+        ],
+        "title": "LenderDecisionRead",
+        "type": "object"
+      },
+      "LenderProgramUpdate": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "excluded_industries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded Industries"
+          },
+          "max_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Amount"
+          },
+          "min_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Amount"
+          },
+          "minimum_monthly_revenue": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Monthly Revenue"
+          },
+          "minimum_time_in_business_months": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Time In Business Months"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "product_type": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Type"
+          },
+          "states": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "States"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "LenderProgramUpdate",
+        "type": "object"
+      },
       "LenderSubmissionRead": {
         "properties": {
           "application_id": {
@@ -2075,6 +2452,92 @@
           "created_at"
         ],
         "title": "LenderSubmissionRead",
+        "type": "object"
+      },
+      "LenderWorkspace": {
+        "properties": {
+          "application": {
+            "additionalProperties": true,
+            "title": "Application",
+            "type": "object"
+          },
+          "bank_analysis": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Analysis"
+          },
+          "business": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business"
+          },
+          "conditions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "documents": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "financial_profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Financial Profile"
+          },
+          "offers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Offers",
+            "type": "array"
+          },
+          "submission": {
+            "additionalProperties": true,
+            "title": "Submission",
+            "type": "object"
+          }
+        },
+        "required": [
+          "submission",
+          "application",
+          "business",
+          "financial_profile",
+          "bank_analysis",
+          "conditions",
+          "offers",
+          "documents"
+        ],
+        "title": "LenderWorkspace",
         "type": "object"
       },
       "MatchRead": {
@@ -7962,6 +8425,38 @@
         ]
       }
     },
+    "/api/v2/lender/bank-review-queue": {
+      "get": {
+        "operationId": "lender_bank_review_queue_api_v2_lender_bank_review_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Lender Bank Review Queue Api V2 Lender Bank Review Queue Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Bank Review Queue",
+        "tags": [
+          "lender",
+          "banking"
+        ]
+      }
+    },
     "/api/v2/lender/conditions/{condition_id}/approve": {
       "post": {
         "operationId": "approve_condition_api_v2_lender_conditions__condition_id__approve_post",
@@ -8109,6 +8604,180 @@
         ]
       }
     },
+    "/api/v2/lender/dashboard": {
+      "get": {
+        "operationId": "lender_dashboard_api_v2_lender_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LenderDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Dashboard",
+        "tags": [
+          "lender",
+          "portal"
+        ]
+      }
+    },
+    "/api/v2/lender/fundings": {
+      "get": {
+        "operationId": "lender_fundings_api_v2_lender_fundings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Lender Fundings Api V2 Lender Fundings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Fundings",
+        "tags": [
+          "lender",
+          "funding"
+        ]
+      }
+    },
+    "/api/v2/lender/programs": {
+      "get": {
+        "operationId": "lender_programs_api_v2_lender_programs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Lender Programs Api V2 Lender Programs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Programs",
+        "tags": [
+          "lender",
+          "programs"
+        ]
+      }
+    },
+    "/api/v2/lender/programs/{program_id}": {
+      "patch": {
+        "operationId": "update_lender_program_api_v2_lender_programs__program_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "program_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Program Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LenderProgramUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Lender Program Api V2 Lender Programs  Program Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Lender Program",
+        "tags": [
+          "lender",
+          "programs"
+        ]
+      }
+    },
     "/api/v2/lender/submissions": {
       "get": {
         "operationId": "lender_submissions_api_v2_lender_submissions_get",
@@ -8136,6 +8805,71 @@
         "summary": "Lender Submissions",
         "tags": [
           "lender"
+        ]
+      }
+    },
+    "/api/v2/lender/submissions/{submission_id}/bank-transactions": {
+      "get": {
+        "operationId": "lender_bank_transactions_api_v2_lender_submissions__submission_id__bank_transactions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "submission_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Submission Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BankTransactionRead"
+                  },
+                  "title": "Response Lender Bank Transactions Api V2 Lender Submissions  Submission Id  Bank Transactions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Bank Transactions",
+        "tags": [
+          "lender",
+          "banking"
         ]
       }
     },
@@ -8198,6 +8932,76 @@
         ]
       }
     },
+    "/api/v2/lender/submissions/{submission_id}/decisions": {
+      "post": {
+        "operationId": "lender_decision_api_v2_lender_submissions__submission_id__decisions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "submission_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Submission Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LenderDecisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LenderDecisionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Decision",
+        "tags": [
+          "lender",
+          "underwriting"
+        ]
+      }
+    },
     "/api/v2/lender/submissions/{submission_id}/offers": {
       "post": {
         "operationId": "create_submission_offer_api_v2_lender_submissions__submission_id__offers_post",
@@ -8254,6 +9058,55 @@
         "tags": [
           "lender",
           "offers"
+        ]
+      }
+    },
+    "/api/v2/lender/submissions/{submission_id}/workspace": {
+      "get": {
+        "operationId": "lender_submission_workspace_api_v2_lender_submissions__submission_id__workspace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "submission_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Submission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LenderWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lender Submission Workspace",
+        "tags": [
+          "lender",
+          "portal"
         ]
       }
     },

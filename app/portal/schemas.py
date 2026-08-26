@@ -208,3 +208,94 @@ class DocumentRead(BaseModel):
 class DocumentDownload(BaseModel):
     download_url: str
     expires_seconds: int
+
+
+class LenderDashboard(BaseModel):
+    lender_id: uuid.UUID | None
+    programs: int
+    active_programs: int
+    submissions: int
+    needs_review: int
+    conditions_pending: int
+    offers_out: int
+    funded_deals: int
+    total_funded: str
+
+
+class LenderProgramUpdate(BaseModel):
+    version: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=2, max_length=200)
+    product_type: str | None = Field(default=None, min_length=2, max_length=80)
+    min_amount: float | None = Field(default=None, gt=0)
+    max_amount: float | None = Field(default=None, gt=0)
+    minimum_monthly_revenue: float | None = Field(default=None, ge=0)
+    minimum_time_in_business_months: int | None = Field(default=None, ge=0)
+    states: list[str] | None = None
+    excluded_industries: list[str] | None = None
+    active: bool | None = None
+
+
+class LenderSubmissionPortalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    lender_id: uuid.UUID
+    program_id: uuid.UUID
+    program_version: int
+    external_submission_id: str | None
+    status: str
+    version: int
+    submitted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LenderDecisionInput(BaseModel):
+    expected_version: int = Field(ge=1)
+    decision: Literal[
+        "APPROVE",
+        "DECLINE",
+        "CONDITIONS",
+        "FRAUD_REVIEW",
+        "COMPLIANCE_REVIEW",
+    ]
+    reason_codes: list[str] = Field(default_factory=list, max_length=50)
+    notes: str | None = Field(default=None, max_length=10_000)
+
+
+class LenderDecisionRead(BaseModel):
+    review_id: uuid.UUID
+    submission_id: uuid.UUID
+    application_id: uuid.UUID
+    decision: str
+    status: str
+    version: int
+    created_at: datetime
+
+
+class BankTransactionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    account_id: uuid.UUID | None
+    posted_at: datetime
+    authorized_at: datetime | None
+    name: str
+    merchant_name: str | None
+    amount: float
+    currency: str | None
+    pending: bool
+    removed: bool
+    categories: list
+
+
+class LenderWorkspace(BaseModel):
+    submission: dict
+    application: dict
+    business: dict | None
+    financial_profile: dict | None
+    bank_analysis: dict | None
+    conditions: list[dict]
+    offers: list[dict]
+    documents: list[dict]
