@@ -75,22 +75,8 @@ jobs:
             git am "${patches[$i]}"
 
             if [[ "$i" -eq 0 ]]; then
-              python - <<'PY'
-from pathlib import Path
-
-common = Path("app/portal/common.py")
-content = common.read_text()
-content = content.replace('return "MONEYBEE"', 'return "ADMIN"')
-common.write_text(content)
-
-test = Path("tests/test_portal_foundation.py")
-content = test.read_text()
-content = content.replace(
-    'assert context.json()["portal"] == "MONEYBEE"',
-    'assert context.json()["portal"] == "ADMIN"',
-)
-test.write_text(content)
-PY
+              sed -i 's/return "MONEYBEE"/return "ADMIN"/' app/portal/common.py
+              sed -i 's/== "MONEYBEE"/== "ADMIN"/' tests/test_portal_foundation.py
             fi
 
             python scripts/export_openapi.py
