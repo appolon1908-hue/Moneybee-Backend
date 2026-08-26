@@ -1,7 +1,8 @@
-import os
-import uuid
 import hashlib
 import hmac
+import json
+import os
+import uuid
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
@@ -10,13 +11,20 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.integrations.registry import provider_statuses
 from app.integration_routes import verify_codestra_signature
 from app.integrations.mapping import get_path, map_payload
+from app.integrations.middleware import (
+    MIDDLEWARE_CONTRACT,
+    canonical_event_type,
+    middleware_event_url,
+    serialize_event_envelope,
+    sign_outbound_event,
+)
 from app.integrations.middesk import MiddeskAdapter
-from app.integrations.middleware import canonical_event_type
+from app.integrations.registry import provider_statuses
 from app.main import app
 from app.notification_policy import channels_for_event
+from app.worker import external_delivery_enabled
 
 
 def test_provider_registry_is_disabled_and_secret_free_by_default():
@@ -52,6 +60,50 @@ def test_integration_event_names_are_versioned():
     assert canonical_event_type("LeadSubmitted") == "lead.created.v1"
     assert canonical_event_type("FundingConfirmed") == "funding_confirmed.v1"
     assert canonical_event_type("offer.accepted.v1") == "offer.accepted.v1"
+
+
+def test_codestra_outbound_envelope_is_canonical_and_signed():
+    envelope = {
+        "schema_version": 1,
+        "source": "moneybee",
+        "contract": MIDDLEWARE_CONTRACT,
+        "event_id": "event-1",
+        "event_type": "public.contact_request.received.v1",
+        "payload": {"reference": "MB-CONTACT-1", "amount": "10000.00"},
+    }
+    raw_body = serialize_event_envelope(envelope)
+    timestamp = "1700000000"
+    secret = "integration-signing-secret"
+    expected_digest = hmac.new(
+        secret.encode(),
+        timestamp.encode() + b"." + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    assert raw_body == json.dumps(
+        envelope,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
+    assert sign_outbound_event(raw_body, timestamp, secret) == (
+        f"sha256={expected_digest}"
+    )
+    assert middleware_event_url(
+        "https://moneybee-events.codestra.co/",
+        "/v1/events",
+    ) == "https://moneybee-events.codestra.co/v1/events"
+
+
+def test_external_delivery_gate_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("ENABLE_EXTERNAL_DELIVERY", raising=False)
+    assert external_delivery_enabled() is False
+
+    monkeypatch.setenv("ENABLE_EXTERNAL_DELIVERY", "true")
+    assert external_delivery_enabled() is True
+
+    monkeypatch.setenv("ENABLE_EXTERNAL_DELIVERY", "false")
+    assert external_delivery_enabled() is False
 
 
 def test_codestra_signature_is_fail_closed_and_constant_time_compatible():
