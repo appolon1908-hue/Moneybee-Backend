@@ -1,0 +1,41 @@
+name: moneybee-edge
+
+services:
+  caddy:
+    image: ${MONEYBEE_CADDY_IMAGE:?set an immutable Caddy image digest}
+    environment:
+      MONEYBEE_MARKETING_HOST: ${MONEYBEE_MARKETING_HOST:-staging.moneybeeloan.com}
+      MONEYBEE_BORROWER_HOST: ${MONEYBEE_BORROWER_HOST:-app-staging.moneybeeloan.com}
+      MONEYBEE_LENDER_HOST: ${MONEYBEE_LENDER_HOST:-lenders-staging.moneybeeloan.com}
+      MONEYBEE_ADMIN_HOST: ${MONEYBEE_ADMIN_HOST:-admin-staging.moneybeeloan.com}
+      MONEYBEE_API_HOST: ${MONEYBEE_API_HOST:-api-staging.moneybeeloan.com}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?set an ACME contact email}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - type: bind
+        source: ${MONEYBEE_CADDY_DATA_PATH:?runtime path is not verified}
+        target: /data
+      - type: bind
+        source: ${MONEYBEE_CADDY_CONFIG_PATH:?runtime path is not verified}
+        target: /config
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    restart: unless-stopped
+    networks:
+      - moneybee_edge
+
+networks:
+  moneybee_edge:
+    external: true
+    name: ${MONEYBEE_EDGE_NETWORK:-moneybee_edge}

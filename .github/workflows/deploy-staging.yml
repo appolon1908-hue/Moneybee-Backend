@@ -1,0 +1,97 @@
+name: staging-deployment-readiness-packet
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type PREPARE-STAGING-PACKET-49.12.145.107"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moneybee-staging-readiness-packet
+  cancel-in-progress: false
+
+jobs:
+  packet:
+    if: >-
+      github.ref == 'refs/heads/release/staging' &&
+      inputs.confirmation == 'PREPARE-STAGING-PACKET-49.12.145.107'
+    environment: staging-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout backend release configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: backend
+      - name: Require reviewed runtime and release locks
+        id: locks
+        run: |
+          python backend/ops/validate-release-lock.py \
+            --runtime-lock backend/deploy/runtime-paths.lock.json \
+            --release-lock backend/deploy/release.lock.json
+          echo "frontend_sha=$(jq -r '.source.frontend_sha' backend/deploy/release.lock.json)" >>"$GITHUB_OUTPUT"
+          echo "backend_sha=$(jq -r '.source.backend_sha' backend/deploy/release.lock.json)" >>"$GITHUB_OUTPUT"
+      - name: Checkout exact frontend release configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: appolon1908-hue/Moneybee-frontend-
+          ref: ${{ steps.locks.outputs.frontend_sha }}
+          path: frontend
+      - name: Verify reviewed configuration checksum
+        run: |
+          set -euo pipefail
+          expected="$(jq -r '.configuration_checksum' backend/deploy/release.lock.json)"
+          actual="$(
+            {
+              for file in \
+                backend/deploy/Caddyfile.staging \
+                backend/deploy/compose.backend.yml \
+                backend/deploy/compose.data.yml \
+                backend/deploy/compose.edge.yml \
+                frontend/deploy/compose.frontend.yml; do
+                printf '%s  ' "$file"
+                sha256sum "$file" | awk '{print $1}'
+              done
+            } | sha256sum | awk '{print $1}'
+          )"
+          test "$actual" = "$expected"
+      - name: Assemble review-only deployment packet
+        run: |
+          set -euo pipefail
+          backend_sha="${{ steps.locks.outputs.backend_sha }}"
+          frontend_sha="${{ steps.locks.outputs.frontend_sha }}"
+          packet="moneybee-staging-${backend_sha:0:12}-${frontend_sha:0:12}"
+          mkdir -p "$RUNNER_TEMP/$packet/backend" "$RUNNER_TEMP/$packet/frontend"
+          cp -R backend/deploy backend/docker backend/ops "$RUNNER_TEMP/$packet/backend/"
+          cp -R frontend/deploy "$RUNNER_TEMP/$packet/frontend/"
+          cat >"$RUNNER_TEMP/$packet/DEPLOYMENT_STATUS.txt" <<'STATUS'
+          REMOTE_DEPLOYMENT=NOT_PERFORMED
+          LIVE_SERVER_CHANGED=NO
+          TARGET_HOST=49.12.145.107
+          PACKET_PURPOSE=REVIEW_ONLY
+          STATUS
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$packet.tgz" "$packet"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$packet.tgz" >"$packet.tgz.sha256"
+          )
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: moneybee-staging-readiness-packet-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/moneybee-staging-*.tgz
+            ${{ runner.temp }}/moneybee-staging-*.tgz.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Confirm no remote action
+        run: |
+          echo "REMOTE_DEPLOYMENT=NOT_PERFORMED"
+          echo "LIVE_SERVER_CHANGED=NO"
+          echo "RUNTIME_PATHS_REQUIRED=VERIFIED"
+          echo "SEPARATE_DEPLOYMENT_EXECUTOR_REVIEW=REQUIRED"

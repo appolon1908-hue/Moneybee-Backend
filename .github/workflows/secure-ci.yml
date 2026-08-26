@@ -1,0 +1,198 @@
+name: secure-scaffold-ci
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "migrations/**"
+      - "docker/**"
+      - "deploy/**"
+      - "ops/**"
+      - "pyproject.toml"
+      - "openapi.json"
+      - ".github/workflows/secure-ci.yml"
+  push:
+    branches:
+      - "ops/secure-staging-scaffold"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: secure-scaffold-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_test
+      APP_ENV: test
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      CREDIT_LIVE_PULL: "false"
+      LENDERS_LIVE_SUBMISSION: "false"
+      ESIGN_LIVE_SEND: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+      - name: Static and test gates
+        run: |
+          python -m compileall -q app tests migrations ops
+          python -m ruff check app tests migrations
+          python -m pytest -q
+      - name: Migration and OpenAPI gates
+        run: |
+          alembic upgrade head
+          alembic downgrade 20260823_0012
+          alembic upgrade head
+          cp openapi.json /tmp/openapi.before.json
+          python scripts/export_openapi.py
+          diff -u /tmp/openapi.before.json openapi.json
+
+  deployment-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Validate scripts and fail-closed locks
+        run: |
+          bash -n ops/runtime-path-preflight.sh
+          bash -n ops/deploy-staging.sh
+          python -m py_compile ops/validate-release-lock.py ops/render-compose-env.py ops/verify-runtime-env.py
+          python ops/validate-release-lock.py \
+            --runtime-lock deploy/runtime-paths.lock.json \
+            --release-lock deploy/release.lock.json \
+            --allow-unverified
+      - name: Exercise fail-closed runtime environment gate
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/moneybee-env-gate
+          python - <<'PY'
+          import json
+          lock = {
+              "source": {"backend_sha": "1" * 40},
+              "images": {
+                  "api": "ghcr.io/appolon1908-hue/moneybee-api@sha256:" + "2" * 64
+              },
+              "migration_head": "20260826_0015",
+              "configuration_checksum": "3" * 64,
+              "backup_reference": "staging-backup-test",
+          }
+          open("/tmp/moneybee-env-gate/release.json", "w").write(json.dumps(lock))
+          PY
+          cat >/tmp/moneybee-env-gate/backend.env <<'ENV'
+          APP_ENV=staging
+          DATABASE_URL=postgresql+asyncpg://moneybee:password@moneybee-postgres:5432/moneybee
+          REDIS_URL=redis://moneybee-redis:6379/0
+          AUTO_CREATE_SCHEMA=false
+          LOCAL_AUTH_BYPASS=false
+          LOCAL_IDENTITY_ENFORCEMENT=true
+          CORS_ORIGINS_CSV=https://staging.moneybeeloan.com,https://app-staging.moneybeeloan.com,https://lenders-staging.moneybeeloan.com,https://admin-staging.moneybeeloan.com
+          OIDC_ISSUER=https://auth.codestra.co/realms/codestra
+          OIDC_AUDIENCE=moneybee-api
+          OIDC_ALGORITHMS_CSV=RS256
+          MIDDLEWARE_PROVIDER=disabled
+          BANK_PROVIDER=disabled
+          CRM_PROVIDER=disabled
+          KYB_PROVIDER=disabled
+          CREDIT_PROVIDER=disabled
+          LENDER_PROVIDER=disabled
+          ESIGN_PROVIDER=disabled
+          EMAIL_PROVIDER=disabled
+          SMS_PROVIDER=disabled
+          OBJECT_STORAGE_MODE=disabled
+          ENABLE_EXTERNAL_DELIVERY=false
+          FIELD_ENCRYPTION_KEY=ci-only-non-placeholder-key
+          SOURCE_SHA=1111111111111111111111111111111111111111
+          API_IMAGE_DIGEST=ghcr.io/appolon1908-hue/moneybee-api@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          MIGRATION_HEAD=20260826_0015
+          CONFIGURATION_CHECKSUM=3333333333333333333333333333333333333333333333333333333333333333
+          BACKUP_REFERENCE=staging-backup-test
+          BACKUP_STATUS=PASS
+          RESTORE_STATUS=PASS
+          STAGING_STATUS=NOT_CONFIGURED
+          ENV
+          chmod 600 /tmp/moneybee-env-gate/backend.env
+          python ops/verify-runtime-env.py \
+            --env-file /tmp/moneybee-env-gate/backend.env \
+            --release-lock /tmp/moneybee-env-gate/release.json
+          sed -i 's/CRM_PROVIDER=disabled/CRM_PROVIDER=odoo/' /tmp/moneybee-env-gate/backend.env
+          if python ops/verify-runtime-env.py \
+            --env-file /tmp/moneybee-env-gate/backend.env \
+            --release-lock /tmp/moneybee-env-gate/release.json; then
+            echo "Runtime environment gate accepted a live provider." >&2
+            exit 1
+          fi
+      - name: Enforce split, digest-only deployment manifests
+        run: |
+          if grep -R -nE '^[[:space:]]*build:' deploy/compose.*.yml; then
+            echo "Deployment Compose files must never build source on the server." >&2
+            exit 1
+          fi
+          if grep -R -nE '(\.\./)+Moneybee-frontend-' deploy docker ops; then
+            echo "Backend release files may not use a sibling frontend checkout." >&2
+            exit 1
+          fi
+      - name: Validate Compose models without touching a server
+        env:
+          ZERO: "0000000000000000000000000000000000000000000000000000000000000000"
+        run: |
+          mkdir -p /tmp/moneybee/postgres /tmp/moneybee/redis \
+            /tmp/moneybee/caddy-data /tmp/moneybee/caddy-config
+          printf 'test-password' >/tmp/moneybee/postgres_password
+          printf 'user health on >test-password +ping ~*\nuser default off\n' >/tmp/moneybee/redis.acl
+          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/backend.env
+          export MONEYBEE_API_IMAGE="ghcr.io/appolon1908-hue/moneybee-api@sha256:$ZERO"
+          export MONEYBEE_WORKER_IMAGE="ghcr.io/appolon1908-hue/moneybee-worker@sha256:$ZERO"
+          export MONEYBEE_MIGRATE_IMAGE="ghcr.io/appolon1908-hue/moneybee-migrate@sha256:$ZERO"
+          export MONEYBEE_POSTGRES_IMAGE="postgres@sha256:$ZERO"
+          export MONEYBEE_REDIS_IMAGE="redis@sha256:$ZERO"
+          export MONEYBEE_CADDY_IMAGE="caddy@sha256:$ZERO"
+          export MONEYBEE_BACKEND_ENV_FILE=/tmp/moneybee/backend.env
+          export MONEYBEE_POSTGRES_DATA_PATH=/tmp/moneybee/postgres
+          export MONEYBEE_REDIS_DATA_PATH=/tmp/moneybee/redis
+          export MONEYBEE_POSTGRES_PASSWORD_FILE=/tmp/moneybee/postgres_password
+          export MONEYBEE_REDIS_ACL_FILE=/tmp/moneybee/redis.acl
+          export MONEYBEE_CADDY_DATA_PATH=/tmp/moneybee/caddy-data
+          export MONEYBEE_CADDY_CONFIG_PATH=/tmp/moneybee/caddy-config
+          export CADDY_ACME_EMAIL=ci@example.invalid
+          docker compose -f deploy/compose.data.yml config --quiet
+          docker compose -f deploy/compose.backend.yml config --quiet
+          docker compose -f deploy/compose.edge.yml config --quiet
+      - name: Build all backend release targets
+        run: |
+          for target in api worker migrate; do
+            docker buildx build \
+              --file docker/Dockerfile.release \
+              --target "$target" \
+              --build-arg PYTHON_BASE_IMAGE=python:3.13-slim \
+              --load \
+              --tag "moneybee-$target:ci" \
+              .
+          done

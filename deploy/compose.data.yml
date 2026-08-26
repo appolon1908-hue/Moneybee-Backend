@@ -1,0 +1,87 @@
+name: moneybee-data
+
+services:
+  postgres:
+    image: ${MONEYBEE_POSTGRES_IMAGE:?set an immutable PostgreSQL image digest}
+    environment:
+      POSTGRES_DB: moneybee
+      POSTGRES_USER: moneybee
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - type: bind
+        source: ${MONEYBEE_POSTGRES_DATA_PATH:?runtime path is not verified}
+        target: /var/lib/postgresql/data
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /var/run/postgresql:rw,nosuid,size=16m
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 300
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moneybee -d moneybee"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      moneybee_internal:
+        aliases:
+          - moneybee-postgres
+
+  redis:
+    image: ${MONEYBEE_REDIS_IMAGE:?set an immutable Redis image digest}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --aclfile
+      - /run/secrets/redis_acl
+    secrets:
+      - redis_acl
+    volumes:
+      - type: bind
+        source: ${MONEYBEE_REDIS_DATA_PATH:?runtime path is not verified}
+        target: /data
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          password="$$(sed -n 's/^user health .*>\([^ ]*\).*/\1/p' /run/secrets/redis_acl)";
+          test -n "$$password" &&
+          redis-cli --user health --pass "$$password" --no-auth-warning ping | grep -qx PONG
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      moneybee_internal:
+        aliases:
+          - moneybee-redis
+
+secrets:
+  postgres_password:
+    file: ${MONEYBEE_POSTGRES_PASSWORD_FILE:?runtime path is not verified}
+  redis_acl:
+    file: ${MONEYBEE_REDIS_ACL_FILE:?runtime path is not verified}
+
+networks:
+  moneybee_internal:
+    external: true
+    name: ${MONEYBEE_INTERNAL_NETWORK:-moneybee_internal}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MoneyBee staging release lock",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "status",
+    "target_environment",
+    "target_host",
+    "source",
+    "images",
+    "urls",
+    "caddy_acme_email",
+    "runtime_paths_evidence_sha256",
+    "configuration_checksum",
+    "capabilities",
+    "backup_reference",
+    "backup_restore_tested",
+    "migration_head"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "UNVERIFIED",
+        "VERIFIED"
+      ]
+    },
+    "target_environment": {
+      "const": "staging"
+    },
+    "target_host": {
+      "const": "49.12.145.107"
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "approved_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": "object"
+    },
+    "images": {
+      "type": "object"
+    },
+    "urls": {
+      "type": "object"
+    },
+    "runtime_paths_evidence_sha256": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "configuration_checksum": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilities": {
+      "type": "object"
+    },
+    "backup_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "backup_restore_tested": {
+      "type": "boolean"
+    },
+    "migration_head": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "caddy_acme_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}
