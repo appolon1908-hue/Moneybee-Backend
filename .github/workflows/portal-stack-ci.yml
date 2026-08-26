@@ -5,10 +5,12 @@ on:
     branches:
       - "release/portal-stack-consolidated"
       - "feature/business-lender-crm-delivery"
+      - "feature/forms-codestra-middleware-delivery"
   pull_request:
     branches:
       - "auth/local-identity-tenancy"
       - "release/portal-stack-consolidated"
+      - "feature/business-lender-crm-delivery"
 
 permissions:
   contents: read
