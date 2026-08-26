@@ -60,19 +60,19 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           python -m pip install -e ".[dev]"
           python -m pip check
-      - name: Static and test gates
+      - name: Static gates
         run: |
           python -m compileall -q app tests migrations ops
           python -m ruff check app tests migrations
-          python -m pytest -q
+      - name: Upgrade application test database
+        run: alembic upgrade head
+      - name: Application tests
+        run: python -m pytest -q
       - name: Migration and OpenAPI gates
         run: |
-          alembic upgrade head
           alembic downgrade 20260823_0012
           alembic upgrade head
-          cp openapi.json /tmp/openapi.before.json
-          python scripts/export_openapi.py
-          diff -u /tmp/openapi.before.json openapi.json
+          python scripts/verify_openapi_contract.py
 
   deployment-policy:
     runs-on: ubuntu-latest
