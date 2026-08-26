@@ -1,0 +1,160 @@
+name: Provider webhook gateway hardening v3
+
+on:
+  push:
+    branches:
+      - feature/provider-webhook-gateway
+
+permissions:
+  contents: write
+
+concurrency:
+  group: webhook-gateway-hardening-v3
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://moneybee:moneybee@localhost:5432/moneybee_test
+      ENVIRONMENT: test
+      MONEYBEE_ALLOW_TEST_AUTH: "true"
+      LIVE_WRITES: "false"
+      ODOO_WRITE: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      N8N_DELIVERY_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/provider-webhook-gateway
+          fetch-depth: 0
+
+      - name: Wait for hardened admin API and merge it
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "moneybee-automation"
+          git config user.email "actions@users.noreply.github.com"
+          ready=0
+          for attempt in $(seq 1 80); do
+            git fetch origin feature/admin-operations-api
+            if git show origin/feature/admin-operations-api:docs/evidence/admin-operations-api-validation-v3.json > /tmp/admin-v3.json 2>/dev/null; then
+              if [ "$(jq -r '.status // ""' /tmp/admin-v3.json)" = "PASS" ]; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 15
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Hardened admin API was not available" >&2
+            exit 1
+          fi
+          git merge -X theirs --no-edit origin/feature/admin-operations-api
+
+      - name: Install and normalize gateway code
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          if python -m ruff --version >/dev/null 2>&1; then
+            python -m ruff check --fix \
+              app/webhook_gateway.py app/webhook_worker.py app/webhook_worker_cli.py \
+              tests/test_webhook_gateway_contract.py tests/test_webhook_worker_contract.py
+            python -m ruff format \
+              app/webhook_gateway.py app/webhook_worker.py app/webhook_worker_cli.py \
+              tests/test_webhook_gateway_contract.py tests/test_webhook_worker_contract.py
+          fi
+
+      - name: Validate hardened complete backend stack
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          status=0
+          python -m compileall -q app migrations tests || status=$?
+          pytest -q \
+            tests/test_portal_foundation.py \
+            tests/test_borrower_portal_contract.py \
+            tests/test_lender_portal_contract.py \
+            tests/test_admin_portal_contract.py \
+            tests/test_webhook_gateway_contract.py \
+            tests/test_webhook_worker_contract.py || status=$?
+          alembic upgrade head || status=$?
+          alembic downgrade 20260823_0012 || status=$?
+          alembic upgrade head || status=$?
+          python scripts/export_openapi.py || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Record and publish hardened final result
+        env:
+          VALIDATION_STATUS: ${{ steps.validate.outputs.status }}
+        run: |
+          mkdir -p docs/evidence
+          python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          code = int(os.environ.get("VALIDATION_STATUS", "1"))
+          Path("docs/evidence/provider-webhook-gateway-validation-v3.json").write_text(
+              json.dumps(
+                  {
+                      "work_package": "feature/provider-webhook-gateway",
+                      "revision": 3,
+                      "status": "PASS" if code == 0 else "FAIL",
+                      "validation_exit_code": code,
+                      "base_validation": "admin-operations-api-v3=PASS",
+                      "signature_verification": "PROVIDER_OR_TIMESTAMPED_HMAC",
+                      "replay_window_seconds": 300,
+                      "deduplication": "PROVIDER_EVENT_ID_PLUS_PAYLOAD_HASH",
+                      "translator_registry": "EXPLICIT_FAIL_CLOSED",
+                      "worker_entry_point": "python -m app.webhook_worker_cli",
+                      "postgres_migration_cycle": "EXECUTED",
+                      "live_capabilities_enabled": [],
+                      "production_deployed": False,
+                      "recorded_at": datetime.now(UTC).isoformat(),
+                  },
+                  indent=2,
+              )
+              + "\n"
+          )
+          PY
+          rm -f .github/workflows/portal-stack-finalize-trigger.yml
+          rm -f .github/workflows/webhook-gateway-finalize-v2.yml
+          rm -f .github/workflows/webhook-gateway-hardening-v3.yml
+          git add \
+            app/webhook_gateway.py app/webhook_worker.py app/webhook_worker_cli.py \
+            tests/test_webhook_gateway_contract.py tests/test_webhook_worker_contract.py \
+            openapi.json docs/evidence/provider-webhook-gateway-validation-v3.json \
+            .github/workflows/portal-stack-finalize-trigger.yml \
+            .github/workflows/webhook-gateway-finalize-v2.yml \
+            .github/workflows/webhook-gateway-hardening-v3.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(webhooks): validate hardened backend stack"
+          fi
+          git fetch origin feature/provider-webhook-gateway
+          if ! git merge-base --is-ancestor origin/feature/provider-webhook-gateway HEAD; then
+            git rebase origin/feature/provider-webhook-gateway
+          fi
+          git push origin HEAD:feature/provider-webhook-gateway
+
+      - name: Fail if validation failed
+        if: steps.validate.outputs.status != '0'
+        run: exit 1
