@@ -450,7 +450,7 @@ async def codestra_receipt(
     )
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
         duplicate = await db.scalar(
             select(IntegrationInboxMessage).where(
@@ -460,5 +460,8 @@ async def codestra_receipt(
         )
         if duplicate and duplicate.payload_hash == payload_hash:
             return {"received": True, "duplicate": True, "message_id": message_id}
-        raise HTTPException(status_code=409, detail="Codestra receipt collision")
+        raise HTTPException(
+            status_code=409,
+            detail="Codestra receipt collision",
+        ) from exc
     return {"received": True, "duplicate": False, "message_id": message_id}
