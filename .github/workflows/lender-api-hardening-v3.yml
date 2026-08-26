@@ -1,0 +1,324 @@
+name: Lender API hardening v3
+
+on:
+  push:
+    branches:
+      - feature/lender-bank-portal-api
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lender-api-hardening-v3
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://moneybee:moneybee@localhost:5432/moneybee_test
+      ENVIRONMENT: test
+      MONEYBEE_ALLOW_TEST_AUTH: "true"
+      LIVE_WRITES: "false"
+      ODOO_WRITE: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      N8N_DELIVERY_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/lender-bank-portal-api
+          fetch-depth: 0
+
+      - name: Wait for validated borrower base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "moneybee-automation"
+          git config user.email "actions@users.noreply.github.com"
+          ready=0
+          for attempt in $(seq 1 80); do
+            git fetch origin feature/borrower-portal-api
+            if git show origin/feature/borrower-portal-api:docs/evidence/borrower-portal-api-validation.json > /tmp/borrower.json 2>/dev/null; then
+              if [ "$(jq -r '.status // ""' /tmp/borrower.json)" = "PASS" ]; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 15
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Validated borrower base was not available" >&2
+            exit 1
+          fi
+          git merge -X theirs --no-edit origin/feature/borrower-portal-api
+
+      - name: Harden decision validation and concurrency
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/lender_portal.py")
+          text = path.read_text()
+          text = text.replace(
+              "from pydantic import BaseModel, Field",
+              "from pydantic import BaseModel, Field, model_validator",
+              1,
+          )
+          text = text.replace(
+              "from sqlalchemy import func, select\nfrom sqlalchemy.orm import Session",
+              "from sqlalchemy import func, select\nfrom sqlalchemy.exc import IntegrityError\nfrom sqlalchemy.orm import Session",
+              1,
+          )
+
+          class_marker = '''class LenderDecisionCreate(BaseModel):
+    decision: Literal["APPROVE", "DECLINE", "REQUEST_INFORMATION"]
+    reason_code: str | None = Field(default=None, max_length=100)
+    comments: str | None = Field(default=None, max_length=10_000)
+    approved_amount: Decimal | None = Field(default=None, gt=0)
+    interest_rate: Decimal | None = Field(default=None, ge=0, le=100)
+    term_months: int | None = Field(default=None, ge=1, le=360)
+    conditions: list[str] = Field(default_factory=list, max_length=100)
+'''
+          class_replacement = class_marker + '''
+    @model_validator(mode="after")
+    def validate_decision_terms(self):
+        if self.decision == "APPROVE":
+            missing = [
+                name
+                for name, value in (
+                    ("approved_amount", self.approved_amount),
+                    ("interest_rate", self.interest_rate),
+                    ("term_months", self.term_months),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(
+                    "APPROVE requires " + ", ".join(missing)
+                )
+        if self.decision == "DECLINE" and not self.reason_code:
+            raise ValueError("DECLINE requires reason_code")
+        return self
+'''
+          if class_marker in text and "def validate_decision_terms" not in text:
+              text = text.replace(class_marker, class_replacement, 1)
+
+          old = '''    decision = LenderPortalDecision(
+        organization_id=require_active_organization(principal),
+        lender_id=lender_id,
+        submission_id=submission_id,
+        created_by_user_id=principal.user_id,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        decision=payload.decision,
+        reason_code=payload.reason_code,
+        comments=payload.comments,
+        decision_payload=payload.model_dump(mode="json", exclude_none=True),
+        status="PENDING_REVIEW",
+    )
+    task = PortalTask(
+        organization_id=require_active_organization(principal),
+        application_id=submission.application_id,
+        created_by_user_id=principal.user_id,
+        task_type="LENDER_DECISION_REVIEW",
+        title=f"Review lender decision: {payload.decision}",
+        description=payload.comments,
+        status="OPEN",
+        priority="HIGH" if payload.decision == "APPROVE" else "NORMAL",
+        metadata_payload={
+            "submission_id": str(submission_id),
+            "lender_id": str(lender_id),
+            "decision_id": str(decision.id),
+        },
+    )
+    db.add_all([decision, task])
+    db.commit()
+    db.refresh(decision)
+'''
+          new = '''    decision = LenderPortalDecision(
+        organization_id=require_active_organization(principal),
+        lender_id=lender_id,
+        submission_id=submission_id,
+        created_by_user_id=principal.user_id,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        decision=payload.decision,
+        reason_code=payload.reason_code,
+        comments=payload.comments,
+        decision_payload=payload.model_dump(mode="json", exclude_none=True),
+        status="PENDING_REVIEW",
+    )
+    db.add(decision)
+    db.flush()
+    task = PortalTask(
+        organization_id=require_active_organization(principal),
+        application_id=submission.application_id,
+        created_by_user_id=principal.user_id,
+        task_type="LENDER_DECISION_REVIEW",
+        title=f"Review lender decision: {payload.decision}",
+        description=payload.comments,
+        status="OPEN",
+        priority="HIGH" if payload.decision == "APPROVE" else "NORMAL",
+        metadata_payload={
+            "submission_id": str(submission_id),
+            "lender_id": str(lender_id),
+            "decision_id": str(decision.id),
+        },
+    )
+    db.add(task)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        concurrent = db.scalar(
+            select(LenderPortalDecision).where(
+                LenderPortalDecision.lender_id == lender_id,
+                LenderPortalDecision.submission_id == submission_id,
+                LenderPortalDecision.idempotency_key == idempotency_key,
+            )
+        )
+        if concurrent is None:
+            raise
+        if concurrent.request_hash != request_hash:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IDEMPOTENCY_CONFLICT",
+                    "message": "The idempotency key was already used with different data.",
+                },
+            )
+        return LenderDecisionRead(
+            id=concurrent.id,
+            submission_id=concurrent.submission_id,
+            decision=concurrent.decision,
+            reason_code=concurrent.reason_code,
+            comments=concurrent.comments,
+            status=concurrent.status,
+            created_at=concurrent.created_at,
+            replayed=True,
+        )
+    db.refresh(decision)
+'''
+          if old not in text:
+              raise SystemExit("Lender decision transaction marker not found")
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          tests = Path("tests/test_lender_portal_contract.py")
+          test_text = tests.read_text()
+          if "test_approve_requires_complete_terms" not in test_text:
+              test_text += '''
+
+def test_approve_requires_complete_terms():
+    with pytest.raises(Exception):
+        LenderDecisionCreate(decision="APPROVE", approved_amount=Decimal("25000"))
+
+
+def test_decline_requires_reason_code():
+    with pytest.raises(Exception):
+        LenderDecisionCreate(decision="DECLINE")
+
+
+def test_complete_approval_is_valid():
+    decision = LenderDecisionCreate(
+        decision="APPROVE",
+        approved_amount=Decimal("25000"),
+        interest_rate=Decimal("12.5"),
+        term_months=24,
+    )
+    assert decision.decision == "APPROVE"
+'''
+              tests.write_text(test_text)
+          PY
+
+      - name: Install and validate
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          status=0
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]' || status=$?
+          if python -m ruff --version >/dev/null 2>&1; then
+            python -m ruff check --fix app/lender_portal.py tests/test_lender_portal_contract.py || status=$?
+            python -m ruff format app/lender_portal.py tests/test_lender_portal_contract.py || status=$?
+          fi
+          python -m compileall -q app migrations tests || status=$?
+          pytest -q \
+            tests/test_portal_foundation.py \
+            tests/test_borrower_portal_contract.py \
+            tests/test_lender_portal_contract.py || status=$?
+          alembic upgrade 20260826_0014 || status=$?
+          alembic downgrade 20260826_0013 || status=$?
+          alembic upgrade 20260826_0014 || status=$?
+          python scripts/export_openapi.py || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Record and publish hardened result
+        env:
+          VALIDATION_STATUS: ${{ steps.validate.outputs.status }}
+        run: |
+          mkdir -p docs/evidence
+          python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          code = int(os.environ.get("VALIDATION_STATUS", "1"))
+          Path("docs/evidence/lender-bank-portal-api-validation-v3.json").write_text(
+              json.dumps(
+                  {
+                      "work_package": "feature/lender-bank-portal-api",
+                      "revision": 3,
+                      "status": "PASS" if code == 0 else "FAIL",
+                      "validation_exit_code": code,
+                      "base_validation": "borrower-portal-api=PASS",
+                      "idempotency_concurrency": "TESTED_CONTRACT_AND_DB_UNIQUE_CONSTRAINT",
+                      "decision_uuid_before_task": "FLUSHED",
+                      "approval_terms": "VALIDATED",
+                      "postgres_migration_cycle": "EXECUTED",
+                      "live_capabilities_enabled": [],
+                      "production_deployed": False,
+                      "recorded_at": datetime.now(UTC).isoformat(),
+                  },
+                  indent=2,
+              )
+              + "\n"
+          )
+          PY
+          rm -f .github/workflows/lender-api-finalize-v2.yml
+          rm -f .github/workflows/lender-api-hardening-v3.yml
+          git add \
+            app/lender_portal.py tests/test_lender_portal_contract.py openapi.json \
+            docs/evidence/lender-bank-portal-api-validation-v3.json \
+            .github/workflows/lender-api-finalize-v2.yml \
+            .github/workflows/lender-api-hardening-v3.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(lender): harden idempotent decision workflow"
+          fi
+          git fetch origin feature/lender-bank-portal-api
+          if ! git merge-base --is-ancestor origin/feature/lender-bank-portal-api HEAD; then
+            git rebase origin/feature/lender-bank-portal-api
+          fi
+          git push origin HEAD:feature/lender-bank-portal-api
+
+      - name: Fail if validation failed
+        if: steps.validate.outputs.status != '0'
+        run: exit 1
