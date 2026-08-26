@@ -1828,6 +1828,45 @@
         "title": "MatchRead",
         "type": "object"
       },
+      "NavigationItem": {
+        "properties": {
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "required_permission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Permission"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "path",
+          "group"
+        ],
+        "title": "NavigationItem",
+        "type": "object"
+      },
       "NotificationPreferenceInput": {
         "properties": {
           "email_enabled": {
@@ -2328,6 +2367,114 @@
           "application_id"
         ],
         "title": "OwnerRead",
+        "type": "object"
+      },
+      "PortalContext": {
+        "properties": {
+          "active_organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Organization Id"
+          },
+          "capabilities": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "membership_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Membership Types",
+            "type": "array"
+          },
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/PortalOrganization"
+            },
+            "title": "Organizations",
+            "type": "array"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "portal": {
+            "enum": [
+              "BORROWER",
+              "LENDER",
+              "ADMIN",
+              "AFFILIATE",
+              "UNKNOWN"
+            ],
+            "title": "Portal",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "subject",
+          "active_organization_id",
+          "organizations",
+          "roles",
+          "permissions",
+          "membership_types",
+          "portal",
+          "capabilities"
+        ],
+        "title": "PortalContext",
+        "type": "object"
+      },
+      "PortalOrganization": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_type": {
+            "title": "Organization Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "organization_type"
+        ],
+        "title": "PortalOrganization",
         "type": "object"
       },
       "PrequalificationInput": {
@@ -6095,6 +6242,61 @@
         ]
       }
     },
+    "/api/v2/auth/context": {
+      "get": {
+        "operationId": "auth_context_api_v2_auth_context_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Auth Context",
+        "tags": [
+          "identity",
+          "portal"
+        ]
+      }
+    },
+    "/api/v2/auth/me": {
+      "get": {
+        "description": "Canonical portal identity alias backed by local MoneyBee authorization.",
+        "operationId": "auth_me_api_v2_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Auth Me",
+        "tags": [
+          "identity",
+          "portal"
+        ]
+      }
+    },
     "/api/v2/borrower/applications": {
       "get": {
         "operationId": "borrower_applications_api_v2_borrower_applications_get",
@@ -6822,6 +7024,36 @@
         "summary": "Accept Offer",
         "tags": [
           "offers"
+        ]
+      }
+    },
+    "/api/v2/portal/navigation": {
+      "get": {
+        "operationId": "portal_navigation_api_v2_portal_navigation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NavigationItem"
+                  },
+                  "title": "Response Portal Navigation Api V2 Portal Navigation Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Portal Navigation",
+        "tags": [
+          "portal"
         ]
       }
     },
