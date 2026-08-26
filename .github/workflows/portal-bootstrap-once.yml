@@ -1,0 +1,84 @@
+name: Portal bootstrap once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/portal-foundation
+          fetch-depth: 0
+
+      - name: Patch application bootstrap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/main.py")
+          text = path.read_text()
+
+          if "portal_models" not in text:
+              candidates = (
+                  "from app import identity_models, models",
+                  "from app import models, identity_models",
+              )
+              for marker in candidates:
+                  if marker in text:
+                      replacement = marker + ", portal_models"
+                      text = text.replace(marker, replacement, 1)
+                      break
+              else:
+                  raise SystemExit("Could not locate model import marker in app/main.py")
+
+          if "from app.portal_router import router as portal_router" not in text:
+              marker = "from app.integration_routes import router as integration_router"
+              if marker not in text:
+                  raise SystemExit("Could not locate integration router import marker")
+              text = text.replace(
+                  marker,
+                  marker + "\nfrom app.portal_router import router as portal_router",
+                  1,
+              )
+
+          if "app.include_router(portal_router, prefix=\"/api/v2\")" not in text:
+              candidates = (
+                  'app.include_router(integration_router, prefix="/api/v2")',
+                  "app.include_router(integration_router, prefix='/api/v2')",
+              )
+              for marker in candidates:
+                  if marker in text:
+                      text = text.replace(
+                          marker,
+                          marker + '\napp.include_router(portal_router, prefix="/api/v2")',
+                          1,
+                      )
+                      break
+              else:
+                  raise SystemExit("Could not locate /api/v2 integration router registration")
+
+          path.write_text(text)
+          PY
+
+      - name: Install and validate
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m compileall -q app migrations tests
+          pytest -q tests/test_portal_foundation.py
+
+      - name: Commit bootstrap and remove one-time workflow
+        run: |
+          rm .github/workflows/portal-bootstrap-once.yml
+          git config user.name "moneybee-automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/main.py .github/workflows/portal-bootstrap-once.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "feat(portal): register shared portal router"
+            git push origin HEAD:feature/portal-foundation
+          fi
