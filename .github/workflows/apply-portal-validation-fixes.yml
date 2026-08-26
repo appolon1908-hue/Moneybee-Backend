@@ -1,0 +1,654 @@
+name: Apply backend portal validation fixes
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - automation/portal-stack-validation-20260826
+    paths:
+      - .github/workflows/apply-portal-validation-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_test
+      APP_ENV: test
+      CREDIT_LIVE_PULL: "false"
+      LENDERS_LIVE_SUBMISSION: "false"
+      ESIGN_LIVE_SEND: "false"
+      MONEYBEE_DOCUMENT_BUCKET: test-private-bucket
+      MONEYBEE_WEBHOOK_SECRET_TEST_PROVIDER: test-secret
+      MONEYBEE_WEBHOOK_TOLERANCE_SECONDS: "300"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]" boto3
+      - name: Configure Git
+        run: |
+          git config user.name "moneybee-validation-bot"
+          git config user.email "moneybee-validation-bot@users.noreply.github.com"
+      - name: Create deterministic backend correction script
+        run: |
+          cat > /tmp/fix_backend_portal.py <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              if not file.exists():
+                  return
+              text = file.read_text()
+              if old in text:
+                  file.write_text(text.replace(old, new))
+
+          pyproject = Path("pyproject.toml")
+          if pyproject.exists():
+              text = pyproject.read_text()
+              if "boto3" not in text and "dependencies = [" in text:
+                  text = text.replace(
+                      "dependencies = [",
+                      'dependencies = [\n  "boto3>=1.35,<2",',
+                      1,
+                  )
+                  pyproject.write_text(text)
+
+          security = Path("app/portal_security.py")
+          if security.exists():
+              text = security.read_text()
+              old = '''def is_moneybee_admin(principal: Principal) -> bool:
+              return (
+                  "*" in principal.permissions
+                  or "MONEYBEE" in principal.membership_types
+                  or any(role.startswith("MONEYBEE_") for role in principal.roles)
+              )
+          '''
+              new = '''MONEYBEE_ADMIN_ROLES = {
+              "MONEYBEE_ADMIN",
+              "MONEYBEE_OPS",
+              "MONEYBEE_COMPLIANCE",
+          }
+
+
+          def is_moneybee_admin(principal: Principal) -> bool:
+              return "*" in principal.permissions or bool(
+                  MONEYBEE_ADMIN_ROLES.intersection(principal.roles)
+              )
+          '''
+              if old in text:
+                  security.write_text(text.replace(old, new))
+
+          upload = Path("app/upload_service.py")
+          if upload.exists():
+              text = upload.read_text()
+              text = text.replace(
+                  "from pathlib import PurePath",
+                  "from pathlib import PurePosixPath, PureWindowsPath",
+              )
+              text = text.replace(
+                  '''    if PurePath(payload.original_file_name).name != payload.original_file_name:
+                  raise _problem(
+                      "INVALID_FILE_NAME",
+                      "The original file name must not contain a path.",
+                      422,
+                  )
+          ''',
+                  '''    name = payload.original_file_name
+              if (
+                  "\\x00" in name
+                  or name in {".", ".."}
+                  or PurePosixPath(name).name != name
+                  or PureWindowsPath(name).name != name
+              ):
+                  raise _problem(
+                      "INVALID_FILE_NAME",
+                      "The original file name must not contain a path.",
+                      422,
+                  )
+          ''',
+              )
+              upload.write_text(text)
+
+          shared = Path("app/shared_portal_routes.py")
+          if shared.exists():
+              text = shared.read_text()
+              text = text.replace(
+                  '''    task = await db.get(PortalTask, task_id)
+              if task is None:
+          ''',
+                  '''    result = await db.execute(
+                  select(PortalTask).where(PortalTask.id == task_id).with_for_update()
+              )
+              task = result.scalar_one_or_none()
+              if task is None:
+          ''',
+              )
+              shared.write_text(text)
+
+          borrower = Path("app/borrower_portal_routes.py")
+          if borrower.exists():
+              text = borrower.read_text()
+              helper_anchor = '''    await services.authorize_application(db, application, user, write=write)
+              return application
+
+
+          def _application_fields() -> tuple[str, ...]:
+          '''
+              helper = '''    await services.authorize_application(db, application, user, write=write)
+              return application
+
+
+          async def _validate_upload_links(
+              *,
+              application: models.Application,
+              payload: UploadSessionCreate,
+              db: AsyncSession,
+          ) -> None:
+              if payload.owner_id is not None:
+                  owner = await db.get(models.Owner, payload.owner_id)
+                  if owner is None:
+                      raise _problem("OWNER_NOT_FOUND", "Application owner was not found.", 404)
+                  owner_application_id = getattr(owner, "application_id", None)
+                  owner_borrower_id = getattr(owner, "borrower_id", None)
+                  application_borrower_id = getattr(application, "borrower_id", None)
+                  if owner_application_id is not None:
+                      valid_owner = owner_application_id == application.id
+                  elif owner_borrower_id is not None and application_borrower_id is not None:
+                      valid_owner = owner_borrower_id == application_borrower_id
+                  else:
+                      valid_owner = False
+                  if not valid_owner:
+                      raise _problem(
+                          "OWNER_APPLICATION_MISMATCH",
+                          "The selected owner does not belong to this application.",
+                          422,
+                      )
+              if payload.condition_id is not None:
+                  condition = await db.get(
+                      models.UnderwritingCondition,
+                      payload.condition_id,
+                  )
+                  if (
+                      condition is None
+                      or condition.application_id != application.id
+                  ):
+                      raise _problem(
+                          "CONDITION_APPLICATION_MISMATCH",
+                          "The selected condition does not belong to this application.",
+                          422,
+                      )
+
+
+          def _application_fields() -> tuple[str, ...]:
+          '''
+              if helper_anchor in text:
+                  text = text.replace(helper_anchor, helper)
+              text = text.replace(
+                  '''    validate_upload(payload)
+              session_id = uuid.uuid4()
+          ''',
+                  '''    await _validate_upload_links(
+                  application=application,
+                  payload=payload,
+                  db=db,
+              )
+              validate_upload(payload)
+              session_id = uuid.uuid4()
+          ''',
+              )
+              text = text.replace(
+                  '''    session = await db.get(PortalUploadSession, session_id)
+              if session is None:
+          ''',
+                  '''    session_result = await db.execute(
+                  select(PortalUploadSession)
+                  .where(PortalUploadSession.id == session_id)
+                  .with_for_update()
+              )
+              session = session_result.scalar_one_or_none()
+              if session is None:
+          ''',
+              )
+              text = text.replace(
+                  '''    session.provider_etag = payload.provider_etag or verified.etag
+          ''',
+                  '''    if (
+                  payload.provider_etag
+                  and verified.etag
+                  and payload.provider_etag.strip('"') != verified.etag
+              ):
+                  raise _problem(
+                      "DOCUMENT_ETAG_MISMATCH",
+                      "The object ETag does not match the completed upload.",
+                      409,
+                  )
+              session.provider_etag = verified.etag
+          ''',
+              )
+              borrower.write_text(text)
+
+          lender = Path("app/lender_portal_routes.py")
+          if lender.exists():
+              text = lender.read_text()
+              text = text.replace(
+                  '''    borrower = None
+              if application is not None:
+                  borrower = await db.get(models.Borrower, application.borrower_id)
+              if payload.decision == "REQUEST_INFORMATION" and application is not None:
+                  db.add(
+                      PortalTask(
+                          tenant_id=active_tenant(principal),
+          ''',
+                  '''    borrower = None
+              if application is not None:
+                  borrower = await db.get(models.Borrower, application.borrower_id)
+              borrower_subject = getattr(borrower, "subject", None)
+              borrower_tenant_id = getattr(borrower, "organization_id", None)
+              if (
+                  payload.decision == "REQUEST_INFORMATION"
+                  and application is not None
+                  and borrower_subject
+                  and borrower_tenant_id
+              ):
+                  db.add(
+                      PortalTask(
+                          tenant_id=borrower_tenant_id,
+          ''',
+              )
+              text = text.replace(
+                  '''                    assigned_to_subject=getattr(borrower, "subject", None),
+          ''',
+                  '''                    assigned_to_subject=borrower_subject,
+          ''',
+              )
+              text = text.replace(
+                  '''    borrower_subject = getattr(borrower, "subject", None)
+              if borrower_subject:
+                  db.add(
+                      PortalNotification(
+                          tenant_id=active_tenant(principal),
+          ''',
+                  '''    if borrower_subject and borrower_tenant_id:
+                  db.add(
+                      PortalNotification(
+                          tenant_id=borrower_tenant_id,
+          ''',
+              )
+              text = text.replace(
+                  '''        "live_submission_triggered": False,
+                  "recorded_at": datetime.now(UTC).isoformat(),
+          ''',
+                  '''        "live_submission_triggered": False,
+                  "borrower_notification_created": bool(
+                      borrower_subject and borrower_tenant_id
+                  ),
+                  "recorded_at": datetime.now(UTC).isoformat(),
+          ''',
+              )
+              lender.write_text(text)
+
+          admin = Path("app/admin_portal_routes.py")
+          if admin.exists():
+              text = admin.read_text()
+              old = '''    for membership in membership_result.scalars().all():
+                  user_row = await db.get(identity_models.User, membership.user_id)
+                  external_result = await db.execute(
+                      select(identity_models.ExternalIdentity).where(
+                          identity_models.ExternalIdentity.user_id == membership.user_id
+                      )
+                  )
+                  active_subjects.update(
+                      identity.subject for identity in external_result.scalars().all()
+                  )
+                  if user_row is not None and not bool(getattr(user_row, "active", True)):
+                      active_subjects.clear()
+          '''
+              new = '''    for membership in membership_result.scalars().all():
+                  user_row = await db.get(identity_models.User, membership.user_id)
+                  if user_row is None or not bool(getattr(user_row, "active", True)):
+                      continue
+                  external_result = await db.execute(
+                      select(identity_models.ExternalIdentity).where(
+                          identity_models.ExternalIdentity.user_id == membership.user_id
+                      )
+                  )
+                  active_subjects.update(
+                      identity.subject for identity in external_result.scalars().all()
+                  )
+          '''
+              if old in text:
+                  admin.write_text(text.replace(old, new))
+
+          webhook = Path("app/webhook_gateway_routes.py")
+          if webhook.exists():
+              text = webhook.read_text()
+              text = text.replace(
+                  '''def _signature_digest(
+              *,
+              secret: str,
+              timestamp: int,
+              event_id: str,
+              body: bytes,
+          ) -> str:
+              signed = str(timestamp).encode("ascii") + b"." + event_id.encode("utf-8") + b"." + body
+              return hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
+          ''',
+                  '''def _signature_digest(
+              *,
+              secret: str,
+              provider: str,
+              timestamp: int,
+              event_id: str,
+              event_type: str,
+              organization_id: uuid.UUID | None,
+              body: bytes,
+          ) -> str:
+              tenant = str(organization_id) if organization_id else "-"
+              prefix = (
+                  f"{timestamp}.{provider}.{event_id}.{event_type}.{tenant}."
+              ).encode("utf-8")
+              return hmac.new(
+                  secret.encode("utf-8"),
+                  prefix + body,
+                  hashlib.sha256,
+              ).hexdigest()
+          ''',
+              )
+              text = text.replace(
+                  '''    timestamp: int,
+              event_id: str,
+              body: bytes,
+              supplied_signature: str | None,
+          ''',
+                  '''    timestamp: int,
+              event_id: str,
+              event_type: str,
+              organization_id: uuid.UUID | None,
+              body: bytes,
+              supplied_signature: str | None,
+          ''',
+                  1,
+              )
+              text = text.replace(
+                  '''        expected = _signature_digest(
+                      secret=secret,
+                      timestamp=timestamp,
+                      event_id=event_id,
+                      body=body,
+                  )
+          ''',
+                  '''        expected = _signature_digest(
+                      secret=secret,
+                      provider=provider,
+                      timestamp=timestamp,
+                      event_id=event_id,
+                      event_type=event_type,
+                      organization_id=organization_id,
+                      body=body,
+                  )
+          ''',
+              )
+              text = text.replace(
+                  '''    _verify_signature(
+                  provider=provider,
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  body=body,
+                  supplied_signature=signature,
+              )
+          ''',
+                  '''    _verify_signature(
+                  provider=provider,
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  event_type=event_type,
+                  organization_id=organization_id,
+                  body=body,
+                  supplied_signature=signature,
+              )
+          ''',
+              )
+              webhook.write_text(text)
+
+          webhook_test = Path("tests/test_webhook_gateway_contract.py")
+          if webhook_test.exists():
+              text = webhook_test.read_text()
+              text = text.replace(
+                  '''        secret="current-secret",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  body=body,
+          ''',
+                  '''        secret="current-secret",
+                  provider="test-provider",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  event_type="decision.updated",
+                  organization_id=None,
+                  body=body,
+          ''',
+              )
+              text = text.replace(
+                  '''        provider="test-provider",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  body=body,
+                  supplied_signature=f"v1={signature}",
+          ''',
+                  '''        provider="test-provider",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  event_type="decision.updated",
+                  organization_id=None,
+                  body=body,
+                  supplied_signature=f"v1={signature}",
+          ''',
+              )
+              text = re.sub(
+                  r'''    tampered = hmac\.new\(.*?\n    \)\.hexdigest\(\)\n''',
+                  '''    tampered = _signature_digest(
+                  secret="current-secret",
+                  provider="test-provider",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  event_type="decision.updated",
+                  organization_id=None,
+                  body=body + b"x",
+              )
+          ''',
+                  text,
+                  flags=re.DOTALL,
+              )
+              text = text.replace(
+                  '''            provider="test-provider",
+                      timestamp=timestamp,
+                      event_id=event_id,
+                      body=body,
+                      supplied_signature=tampered,
+          ''',
+                  '''            provider="test-provider",
+                      timestamp=timestamp,
+                      event_id=event_id,
+                      event_type="decision.updated",
+                      organization_id=None,
+                      body=body,
+                      supplied_signature=tampered,
+          ''',
+              )
+              text = text.replace(
+                  '''        secret="previous-secret",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  body=body,
+          ''',
+                  '''        secret="previous-secret",
+                  provider="rotating",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  event_type="test.event",
+                  organization_id=None,
+                  body=body,
+          ''',
+              )
+              text = text.replace(
+                  '''        provider="rotating",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  body=body,
+                  supplied_signature=signature,
+          ''',
+                  '''        provider="rotating",
+                  timestamp=timestamp,
+                  event_id=event_id,
+                  event_type="test.event",
+                  organization_id=None,
+                  body=body,
+                  supplied_signature=signature,
+          ''',
+              )
+              webhook_test.write_text(text)
+
+          security_test = Path("tests/test_portal_security_contract.py")
+          if Path("app/portal_security.py").exists() and not security_test.exists():
+              security_test.write_text(
+                  '''import uuid
+
+          from app.auth import Principal
+          from app.portal_security import is_moneybee_admin
+
+
+          def _principal(*, roles: set[str], membership_types: set[str]) -> Principal:
+              organization_id = uuid.uuid4()
+              return Principal(
+                  user_id=uuid.uuid4(),
+                  issuer="https://auth.codestra.co/realms/moneybee",
+                  subject="security-test",
+                  organization_ids=[organization_id],
+                  active_organization_id=organization_id,
+                  roles=roles,
+                  permissions=set(),
+                  membership_types=membership_types,
+                  borrower_id=None,
+                  lender_id=None,
+                  is_active=True,
+              )
+
+
+          def test_moneybee_membership_alone_does_not_grant_admin_access() -> None:
+              principal = _principal(roles={"MEMBER"}, membership_types={"MONEYBEE"})
+              assert is_moneybee_admin(principal) is False
+
+
+          def test_explicit_moneybee_operations_role_grants_admin_access() -> None:
+              principal = _principal(
+                  roles={"MONEYBEE_OPS"},
+                  membership_types={"MONEYBEE"},
+              )
+              assert is_moneybee_admin(principal) is True
+          '''
+              )
+          PY
+      - name: Prepare hardened branch commits and OpenAPI contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          branches=(
+            feature/portal-foundation
+            feature/borrower-portal-api
+            feature/lender-bank-portal-api
+            feature/admin-operations-api
+            feature/provider-webhook-gateway
+          )
+          for branch in "${branches[@]}"; do
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+            python /tmp/fix_backend_portal.py
+            python -m ruff format app tests migrations
+            python scripts/export_openapi.py
+            if ! git diff --quiet; then
+              git add -A
+              git commit -m "fix(portal): close authorization and concurrency gaps"
+            fi
+          done
+      - name: Validate complete backend stack
+        run: |
+          git checkout feature/provider-webhook-gateway
+          python -m compileall -q app tests migrations
+          python -m ruff check app tests migrations
+          alembic upgrade head
+          python -m pytest -q
+          alembic downgrade 20260823_0012
+          alembic upgrade head
+          python scripts/export_openapi.py
+          git diff --exit-code -- openapi.json
+      - name: Record validation evidence
+        run: |
+          mkdir -p docs/evidence
+          python - <<'PY'
+          import json
+          import subprocess
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          evidence = {
+              "work_package": "backend-portal-stack",
+              "status": "PASS",
+              "validated_at": datetime.now(UTC).isoformat(),
+              "source_sha": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], text=True
+              ).strip(),
+              "python_compile": "PASS",
+              "ruff": "PASS",
+              "postgres_migration_upgrade": "PASS",
+              "postgres_migration_downgrade_reupgrade": "PASS",
+              "tests": "PASS",
+              "openapi": "PASS",
+              "production_deployed": False,
+              "live_capabilities_enabled": [],
+              "branches": [
+                  "feature/portal-foundation",
+                  "feature/borrower-portal-api",
+                  "feature/lender-bank-portal-api",
+                  "feature/admin-operations-api",
+                  "feature/provider-webhook-gateway",
+              ],
+          }
+          Path("docs/evidence/backend-portal-stack-validation.json").write_text(
+              json.dumps(evidence, indent=2) + "\n"
+          )
+          PY
+          git add docs/evidence/backend-portal-stack-validation.json
+          git commit -m "test(portal): record backend stack validation [skip ci]"
+      - name: Push hardened feature branches
+        run: |
+          git push origin feature/portal-foundation
+          git push origin feature/borrower-portal-api
+          git push origin feature/lender-bank-portal-api
+          git push origin feature/admin-operations-api
+          git push origin feature/provider-webhook-gateway
