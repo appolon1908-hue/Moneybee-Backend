@@ -1,30 +1,28 @@
-import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 
-from app import identity_models, models  # noqa: F401
+from app import identity_models, integration_models, models, portal_models
 from app.config import settings
-from app.db import SessionLocal, initialize_local_schema
+from app.db import engine
 from app.integration_routes import router as integration_router
+from app.portal import router as portal_router
 from app.routers import router
+from app.schemas import ProblemDetail
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await initialize_local_schema()
+    del app
     yield
+    await engine.dispose()
 
 
 app = FastAPI(
-    title="MoneyBeeLoans API",
-    version="0.2.0",
-    openapi_url="/openapi.json",
-    docs_url="/docs" if settings.app_env != "production" else None,
+    title=settings.app_name,
+    version="2.0.0",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -37,54 +35,70 @@ app.add_middleware(
         "Content-Type",
         "Idempotency-Key",
         "If-Match",
-        "X-Correlation-ID",
-        "X-Request-ID",
         "X-Organization-ID",
+        "X-Request-ID",
     ],
 )
 app.include_router(router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
+app.include_router(portal_router, prefix="/api/v2")
 app.include_router(router, prefix="/api/v1", include_in_schema=False)
 app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
 
 
 @app.middleware("http")
-async def request_context(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    request_id = request.headers.get("X-Request-ID")
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    )
+    response.headers.setdefault("Cache-Control", "no-store")
     return response
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_problem(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        media_type="application/problem+json",
-        content={
-            "type": "https://api.moneybeeloan.com/problems/validation",
-            "title": "Request validation failed",
-            "status": 422,
-            "detail": "One or more fields are invalid.",
-            "instance": request.url.path,
-            "errors": exc.errors(),
-            "request_id": request.headers.get("X-Request-ID"),
-        },
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    if settings.app_env.lower() not in {"production", "prod"}:
+        raise exc
+    problem = ProblemDetail(
+        type="https://moneybee.example/problems/internal-server-error",
+        title="Internal Server Error",
+        status=500,
+        detail="The request could not be completed.",
+        instance=str(request.url.path),
+        code="INTERNAL_SERVER_ERROR",
     )
+    return JSONResponse(status_code=500, content=problem.model_dump(mode="json"))
 
 
-@app.get("/health/live", tags=["health"])
-async def live():
-    return {"status": "ok", "environment": settings.app_env}
+@app.get("/health", tags=["system"])
+async def health():
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "version": "2.0.0",
+        "environment": settings.app_env,
+    }
 
 
-@app.get("/health/ready", tags=["health"])
+@app.get("/ready", tags=["system"])
 async def ready():
-    try:
-        async with SessionLocal() as db:
-            await db.execute(text("SELECT 1"))
-        return {"status": "ready", "environment": settings.app_env}
-    except Exception:
-        return JSONResponse(status_code=503, content={"status": "not_ready", "environment": settings.app_env})
+    return {
+        "status": "ready",
+        "capability_policy": {
+            "credit_live_pull": settings.credit_live_pull,
+            "lenders_live_submission": settings.lenders_live_submission,
+            "esign_live_send": settings.esign_live_send,
+        },
+    }
