@@ -1,0 +1,28 @@
+{
+  "name": "public-intake-crm-delivery",
+  "paths": {
+    "/api/v2/admin/crm-deliveries": "a8a87bd6a4c98068e30cbbef368b324176b318d2a7cc1f6c7667a5e79f56b4ef",
+    "/api/v2/admin/crm-deliveries/{delivery_id}": "c2c02f8b1cbe7442a13f0a7f9c3acaff67675a5801f0969526dc6f9ad0d8b832",
+    "/api/v2/admin/crm-deliveries/{delivery_id}/requeue": "e4b64c2c56296bf69e5e42b7bd26471ec2836ddb3987fd7aa01652a7620f37df",
+    "/api/v2/admin/public-intakes": "225cff6769b1c1ef1612506dbf0d3a2781928f4b1125f93eece87d6bc9f7862e",
+    "/api/v2/admin/public-intakes/{intake_id}": "e24b4a395c9d5476bd0166001e2db49fc52fe355bf4c1bba5438a6668999b9c2",
+    "/api/v2/public/callback-requests": "24b05fb4d566b94615bb38f25478b7b2d46e5df84e3684631ef1af00fceaa81a",
+    "/api/v2/public/contact-requests": "62fbc343a583b7a32164568eaa95b49ad79ae0a32e67ab9a7dc9fe038ed935ff",
+    "/api/v2/public/deal-submission-inquiries": "1d5ebd29a5d7ed2acdaec429fe04943065212596c0a0aa04cef41b05e714d489",
+    "/api/v2/public/lender-partner-inquiries": "119986b9229dec90c05bbd32fc21bf564fdb4b33d933a3312bea7010777be605",
+    "/api/v2/public/referral-partner-inquiries": "b614110edb701d58a97309db6420aeaab8c47030a340f0d815f03336f181d79a",
+    "/api/v2/webhooks/codestra/receipts": "389d95617acfdd752feba5197ad8859821fefc94f17757438a9dbe48532f27dc"
+  },
+  "schemas": {
+    "CallbackRequestInput": "90fedfb2540b664bfb6cea32c9b8dcb42e135d36e41c8e5f63531a497734c5d5",
+    "ContactRequestInput": "428fcfb3aa92df132567f74192d6ba9a1d0dd44a94a3ed5b2179888493287464",
+    "DealSubmissionInquiryInput": "cc88cfde0c2f178930e233a37fc64d5d7310894cd8dfbb7fb0216550854eb273",
+    "DeliveryRequeue": "709b29ba571eaa0bed97dd990718dec18d11e1a6067c5494403de043c1706f0f",
+    "LenderPartnerInquiryInput": "b54f02ccbfa26f0371ec82df2912ccaf4ddd1dd3bc4cf40083db4ceaa945710e",
+    "MarketingAttribution": "c89407447738bcb09b385b9824c35cb2f52455760cf312cfcbde1edbdbb8fe5c",
+    "PublicConsentInput": "d93c0a18ddfd215393bca3478779368911abf278f48d4cb01442c72c3134deee",
+    "PublicIntakeAccepted": "67978531256de7f290fa366366b7100138e7f5368de767939e01a8a140a109d7",
+    "ReferralPartnerInquiryInput": "49a2f0d0760582c0458dda97f1142d8ab2d3557b244cc3c5adcc2614c2278b8b"
+  },
+  "version": 1
+}
