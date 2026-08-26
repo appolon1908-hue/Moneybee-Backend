@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "status": "UNVERIFIED",
+  "target_host": "49.12.145.107",
+  "verified_hostname": null,
+  "verified_at": null,
+  "verified_by": null,
+  "evidence_sha256": null,
+  "data_mode": "UNVERIFIED",
+  "paths": {
+    "release_root": null,
+    "current_symlink": null,
+    "backend_env_file": null,
+    "postgres_data_path": null,
+    "redis_data_path": null,
+    "postgres_password_file": null,
+    "redis_acl_file": null,
+    "caddy_data_path": null,
+    "caddy_config_path": null,
+    "backup_root": null
+  },
+  "networks": {
+    "internal": "moneybee_internal",
+    "edge": "moneybee_edge"
+  },
+  "notes": [
+    "49.12.145.107 is the designated MoneyBee staging candidate but its runtime paths are not verified.",
+    "Deployment remains blocked until a reviewed preflight evidence SHA and absolute runtime paths are committed.",
+    "No workflow changes the server while this lock is UNVERIFIED."
+  ]
+}

@@ -1,0 +1,42 @@
+{
+    admin 127.0.0.1:2019
+    email {$CADDY_ACME_EMAIL}
+}
+
+(common) {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+}
+
+{$MONEYBEE_MARKETING_HOST} {
+    import common
+    reverse_proxy moneybee-marketing:8080
+}
+
+{$MONEYBEE_BORROWER_HOST} {
+    import common
+    reverse_proxy moneybee-borrower:8080
+}
+
+{$MONEYBEE_LENDER_HOST} {
+    import common
+    reverse_proxy moneybee-lender:8080
+}
+
+{$MONEYBEE_ADMIN_HOST} {
+    import common
+    reverse_proxy moneybee-admin:8080
+}
+
+{$MONEYBEE_API_HOST} {
+    import common
+    header Cache-Control "no-store"
+    reverse_proxy moneybee-api:8000
+}

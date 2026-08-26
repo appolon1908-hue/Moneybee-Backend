@@ -1,0 +1,75 @@
+name: moneybee-backend
+
+services:
+  migrate:
+    image: ${MONEYBEE_MIGRATE_IMAGE:?set an immutable migrate image digest}
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - ${MONEYBEE_BACKEND_ENV_FILE:?runtime path is not verified}
+    profiles: ["migrate"]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moneybee_internal
+    restart: "no"
+
+  api:
+    image: ${MONEYBEE_API_IMAGE:?set an immutable API image digest}
+    env_file:
+      - ${MONEYBEE_BACKEND_ENV_FILE:?runtime path is not verified}
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 300
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"
+      interval: 15s
+      timeout: 6s
+      retries: 10
+      start_period: 20s
+    networks:
+      moneybee_internal: {}
+      moneybee_edge:
+        aliases:
+          - moneybee-api
+
+  worker:
+    image: ${MONEYBEE_WORKER_IMAGE:?set an immutable worker image digest}
+    env_file:
+      - ${MONEYBEE_BACKEND_ENV_FILE:?runtime path is not verified}
+    profiles: ["external-delivery"]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    restart: unless-stopped
+    stop_grace_period: 45s
+    networks:
+      - moneybee_internal
+
+networks:
+  moneybee_internal:
+    external: true
+    name: ${MONEYBEE_INTERNAL_NETWORK:-moneybee_internal}
+  moneybee_edge:
+    external: true
+    name: ${MONEYBEE_EDGE_NETWORK:-moneybee_edge}

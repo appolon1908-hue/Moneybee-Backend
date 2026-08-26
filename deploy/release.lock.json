@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "status": "UNVERIFIED",
+  "target_environment": "staging",
+  "target_host": "49.12.145.107",
+  "created_at": null,
+  "approved_by": null,
+  "source": {
+    "backend_repository": "appolon1908-hue/Moneybee-Backend",
+    "backend_sha": null,
+    "frontend_repository": "appolon1908-hue/Moneybee-frontend-",
+    "frontend_sha": null
+  },
+  "images": {
+    "api": null,
+    "worker": null,
+    "migrate": null,
+    "marketing": null,
+    "borrower": null,
+    "lender": null,
+    "admin": null,
+    "postgres": null,
+    "redis": null,
+    "caddy": null
+  },
+  "urls": {
+    "marketing": "https://staging.moneybeeloan.com",
+    "borrower": "https://app-staging.moneybeeloan.com",
+    "lender": "https://lenders-staging.moneybeeloan.com",
+    "admin": "https://admin-staging.moneybeeloan.com",
+    "api": "https://api-staging.moneybeeloan.com"
+  },
+  "caddy_acme_email": null,
+  "runtime_paths_evidence_sha256": null,
+  "configuration_checksum": null,
+  "capabilities": {
+    "external_delivery": false,
+    "odoo_write": false,
+    "n8n_delivery": false,
+    "live_credit_pull": false,
+    "live_lender_submission": false,
+    "live_esign_send": false,
+    "live_funding": false,
+    "live_email": false,
+    "live_sms": false
+  },
+  "backup_reference": null,
+  "backup_restore_tested": false,
+  "migration_head": null
+}

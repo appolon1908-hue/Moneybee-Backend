@@ -1,0 +1,54 @@
+name: runtime-path-preflight-read-only
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_host:
+        description: "Approved MoneyBee staging candidate"
+        required: true
+        default: "49.12.145.107"
+        type: string
+      ssh_user:
+        description: "Read-only preflight SSH user"
+        required: true
+        default: "root"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moneybee-runtime-path-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    environment: staging-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install strict SSH material
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.MONEYBEE_STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MONEYBEE_STAGING_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+      - name: Capture read-only runtime evidence
+        env:
+          TARGET_HOST: ${{ inputs.target_host }}
+          SSH_USER: ${{ inputs.ssh_user }}
+          EVIDENCE_DIR: ${{ runner.temp }}/moneybee-runtime-evidence
+        run: |
+          export KNOWN_HOSTS_FILE="$HOME/.ssh/known_hosts"
+          bash ops/runtime-path-preflight.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: moneybee-runtime-path-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/moneybee-runtime-evidence/
+          if-no-files-found: error
+          retention-days: 30
