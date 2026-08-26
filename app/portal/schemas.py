@@ -299,3 +299,41 @@ class LenderWorkspace(BaseModel):
     conditions: list[dict]
     offers: list[dict]
     documents: list[dict]
+
+
+class AdminOverview(BaseModel):
+    leads: int
+    applications: int
+    applications_by_status: dict[str, int]
+    submissions_needing_review: int
+    open_tasks: int
+    overdue_tasks: int
+    unread_notifications: int
+    open_conversations: int
+    open_complaints: int
+    open_operational_exceptions: int
+    pending_outbox: int
+    failed_integrations: int
+    webhook_receipts_pending: int
+
+
+class AdminTaskUpdate(BaseModel):
+    status: Literal["OPEN", "IN_PROGRESS", "COMPLETED", "DISMISSED"] | None = None
+    priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] | None = None
+    assignee_user_id: uuid.UUID | None = None
+    assignee_subject: str | None = Field(default=None, max_length=255)
+    due_at: datetime | None = None
+
+
+class AdminConversationUpdate(BaseModel):
+    status: Literal["OPEN", "CLOSED"]
+
+
+class AdminSearchResult(BaseModel):
+    resource_type: str
+    resource_id: str
+    title: str
+    subtitle: str | None = None
+    status: str | None = None
+    path: str
+    updated_at: datetime | None = None

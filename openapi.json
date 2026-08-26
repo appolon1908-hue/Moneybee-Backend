@@ -1,6 +1,237 @@
 {
   "components": {
     "schemas": {
+      "AdminConversationUpdate": {
+        "properties": {
+          "status": {
+            "enum": [
+              "OPEN",
+              "CLOSED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "AdminConversationUpdate",
+        "type": "object"
+      },
+      "AdminOverview": {
+        "properties": {
+          "applications": {
+            "title": "Applications",
+            "type": "integer"
+          },
+          "applications_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Applications By Status",
+            "type": "object"
+          },
+          "failed_integrations": {
+            "title": "Failed Integrations",
+            "type": "integer"
+          },
+          "leads": {
+            "title": "Leads",
+            "type": "integer"
+          },
+          "open_complaints": {
+            "title": "Open Complaints",
+            "type": "integer"
+          },
+          "open_conversations": {
+            "title": "Open Conversations",
+            "type": "integer"
+          },
+          "open_operational_exceptions": {
+            "title": "Open Operational Exceptions",
+            "type": "integer"
+          },
+          "open_tasks": {
+            "title": "Open Tasks",
+            "type": "integer"
+          },
+          "overdue_tasks": {
+            "title": "Overdue Tasks",
+            "type": "integer"
+          },
+          "pending_outbox": {
+            "title": "Pending Outbox",
+            "type": "integer"
+          },
+          "submissions_needing_review": {
+            "title": "Submissions Needing Review",
+            "type": "integer"
+          },
+          "unread_notifications": {
+            "title": "Unread Notifications",
+            "type": "integer"
+          },
+          "webhook_receipts_pending": {
+            "title": "Webhook Receipts Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "leads",
+          "applications",
+          "applications_by_status",
+          "submissions_needing_review",
+          "open_tasks",
+          "overdue_tasks",
+          "unread_notifications",
+          "open_conversations",
+          "open_complaints",
+          "open_operational_exceptions",
+          "pending_outbox",
+          "failed_integrations",
+          "webhook_receipts_pending"
+        ],
+        "title": "AdminOverview",
+        "type": "object"
+      },
+      "AdminSearchResult": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "resource_type",
+          "resource_id",
+          "title",
+          "path"
+        ],
+        "title": "AdminSearchResult",
+        "type": "object"
+      },
+      "AdminTaskUpdate": {
+        "properties": {
+          "assignee_subject": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Subject"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "enum": [
+                  "LOW",
+                  "NORMAL",
+                  "HIGH",
+                  "URGENT"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "OPEN",
+                  "IN_PROGRESS",
+                  "COMPLETED",
+                  "DISMISSED"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "title": "AdminTaskUpdate",
+        "type": "object"
+      },
       "AffiliateInput": {
         "properties": {
           "active": {
@@ -3306,6 +3537,95 @@
         "title": "PortalContext",
         "type": "object"
       },
+      "PortalNotificationCreate": {
+        "properties": {
+          "action_path": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Path"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "body": {
+            "maxLength": 10000,
+            "minLength": 2,
+            "title": "Body",
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "Category",
+            "type": "string"
+          },
+          "metadata_payload": {
+            "additionalProperties": true,
+            "title": "Metadata Payload",
+            "type": "object"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Id"
+          },
+          "subject": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 255,
+            "minLength": 2,
+            "title": "Title",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "subject",
+          "category",
+          "title",
+          "body"
+        ],
+        "title": "PortalNotificationCreate",
+        "type": "object"
+      },
       "PortalNotificationRead": {
         "properties": {
           "action_path": {
@@ -3425,6 +3745,140 @@
           "organization_type"
         ],
         "title": "PortalOrganization",
+        "type": "object"
+      },
+      "PortalTaskCreate": {
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "assignee_subject": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Subject"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "metadata_payload": {
+            "additionalProperties": true,
+            "title": "Metadata Payload",
+            "type": "object"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Id"
+          },
+          "priority": {
+            "default": "NORMAL",
+            "enum": [
+              "LOW",
+              "NORMAL",
+              "HIGH",
+              "URGENT"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "source_reference": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Reference"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          },
+          "task_type": {
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "Task Type",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 255,
+            "minLength": 2,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_type",
+          "title"
+        ],
+        "title": "PortalTaskCreate",
         "type": "object"
       },
       "PortalTaskRead": {
@@ -4836,6 +5290,134 @@
         ]
       }
     },
+    "/api/v2/admin/audit-events": {
+      "get": {
+        "operationId": "admin_audit_events_api_v2_admin_audit_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Audit Events",
+        "tags": [
+          "admin",
+          "audit"
+        ]
+      }
+    },
     "/api/v2/admin/capabilities": {
       "get": {
         "operationId": "capabilities_api_v2_admin_capabilities_get",
@@ -5265,6 +5847,264 @@
         ]
       }
     },
+    "/api/v2/admin/conversations": {
+      "get": {
+        "operationId": "admin_conversations_api_v2_admin_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "application_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Application Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationRead"
+                  },
+                  "title": "Response Admin Conversations Api V2 Admin Conversations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Conversations",
+        "tags": [
+          "admin",
+          "messages"
+        ]
+      }
+    },
+    "/api/v2/admin/conversations/{conversation_id}": {
+      "patch": {
+        "operationId": "update_admin_conversation_api_v2_admin_conversations__conversation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminConversationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Admin Conversation",
+        "tags": [
+          "admin",
+          "messages"
+        ]
+      }
+    },
+    "/api/v2/admin/conversations/{conversation_id}/messages": {
+      "get": {
+        "operationId": "admin_conversation_messages_api_v2_admin_conversations__conversation_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MessageRead"
+                  },
+                  "title": "Response Admin Conversation Messages Api V2 Admin Conversations  Conversation Id  Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Conversation Messages",
+        "tags": [
+          "admin",
+          "messages"
+        ]
+      },
+      "post": {
+        "operationId": "admin_send_message_api_v2_admin_conversations__conversation_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Send Message",
+        "tags": [
+          "admin",
+          "messages"
+        ]
+      }
+    },
     "/api/v2/admin/crm/events": {
       "get": {
         "operationId": "crm_events_api_v2_admin_crm_events_get",
@@ -5460,6 +6300,53 @@
         ]
       }
     },
+    "/api/v2/admin/notifications": {
+      "post": {
+        "operationId": "create_admin_notification_api_v2_admin_notifications_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalNotificationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalNotificationRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Admin Notification",
+        "tags": [
+          "admin",
+          "communications"
+        ]
+      }
+    },
     "/api/v2/admin/operational-exceptions": {
       "get": {
         "operationId": "operational_exceptions_api_v2_admin_operational_exceptions_get",
@@ -5579,6 +6466,162 @@
         "tags": [
           "admin",
           "operations"
+        ]
+      }
+    },
+    "/api/v2/admin/organizations": {
+      "get": {
+        "operationId": "admin_organizations_api_v2_admin_organizations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Organization Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Organizations",
+        "tags": [
+          "admin",
+          "identity"
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{organization_id}/members": {
+      "get": {
+        "operationId": "admin_organization_members_api_v2_admin_organizations__organization_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Organization Members",
+        "tags": [
+          "admin",
+          "identity"
+        ]
+      }
+    },
+    "/api/v2/admin/overview": {
+      "get": {
+        "operationId": "admin_overview_api_v2_admin_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Overview",
+        "tags": [
+          "admin",
+          "portal"
         ]
       }
     },
@@ -5740,6 +6783,72 @@
         ]
       }
     },
+    "/api/v2/admin/search": {
+      "get": {
+        "operationId": "admin_search_api_v2_admin_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminSearchResult"
+                  },
+                  "title": "Response Admin Search Api V2 Admin Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Search",
+        "tags": [
+          "admin",
+          "portal"
+        ]
+      }
+    },
     "/api/v2/admin/sla-alerts": {
       "get": {
         "operationId": "sla_alerts_api_v2_admin_sla_alerts_get",
@@ -5793,6 +6902,221 @@
         "tags": [
           "admin",
           "system"
+        ]
+      }
+    },
+    "/api/v2/admin/tasks": {
+      "get": {
+        "operationId": "admin_tasks_api_v2_admin_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee_subject",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee Subject"
+            }
+          },
+          {
+            "in": "query",
+            "name": "application_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Application Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Admin Tasks",
+        "tags": [
+          "admin",
+          "portal"
+        ]
+      },
+      "post": {
+        "operationId": "create_admin_task_api_v2_admin_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalTaskCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Admin Task",
+        "tags": [
+          "admin",
+          "portal"
+        ]
+      }
+    },
+    "/api/v2/admin/tasks/{task_id}": {
+      "patch": {
+        "operationId": "update_admin_task_api_v2_admin_tasks__task_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTaskUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Admin Task",
+        "tags": [
+          "admin",
+          "portal"
         ]
       }
     },
