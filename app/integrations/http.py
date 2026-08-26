@@ -18,9 +18,13 @@ async def provider_request(
     headers: dict[str, str] | None = None,
     json: dict | None = None,
     data: dict | None = None,
+    content: bytes | str | None = None,
     auth: tuple[str, str] | None = None,
     retries: int = 2,
 ) -> Any:
+    if sum(value is not None for value in (json, data, content)) > 1:
+        raise ValueError("Only one of json, data, or content may be supplied")
+
     for attempt in range(retries + 1):
         try:
             async with httpx.AsyncClient(
@@ -32,6 +36,7 @@ async def provider_request(
                     headers=headers,
                     json=json,
                     data=data,
+                    content=content,
                     auth=auth,
                 )
         except httpx.HTTPError as exc:
