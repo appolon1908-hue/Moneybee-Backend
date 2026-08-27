@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import Principal
@@ -12,7 +13,17 @@ from app.financial_schemas import JournalEntryCreate, TrialBalanceLine, TrialBal
 
 
 def resolve_organization(principal: Principal, requested: uuid.UUID | None) -> uuid.UUID:
-    organization_id = requested or principal.active_organization_id
+    selected = principal.active_organization_id
+    if requested is not None and selected is not None and requested != selected:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ORGANIZATION_CONTEXT_MISMATCH",
+                "message": "The requested organization does not match X-Organization-ID.",
+            },
+        )
+
+    organization_id = requested or selected
     if organization_id is None:
         raise HTTPException(
             status_code=422,
@@ -34,6 +45,37 @@ def require_finance_permission(principal: Principal, permission: str) -> None:
         )
 
 
+def resolve_idempotency_key(body_key: str | None, header_key: str | None) -> str:
+    body_key = body_key.strip() if body_key else None
+    header_key = header_key.strip() if header_key else None
+    if body_key and header_key and body_key != header_key:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "IDEMPOTENCY_KEY_MISMATCH",
+                "message": "Idempotency-Key must match the legacy body idempotency_key when both are supplied.",
+            },
+        )
+    key = header_key or body_key
+    if not key:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "IDEMPOTENCY_KEY_REQUIRED",
+                "message": "Idempotency-Key is required for journal posting.",
+            },
+        )
+    if len(key) < 8 or len(key) > 160:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_IDEMPOTENCY_KEY",
+                "message": "Idempotency-Key must contain between 8 and 160 characters.",
+            },
+        )
+    return key
+
+
 async def period_for_date(
     db: AsyncSession,
     organization_id: uuid.UUID,
@@ -48,29 +90,45 @@ async def period_for_date(
     )
 
 
+async def _existing_journal(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    idempotency_key: str,
+) -> tuple[JournalEntry, list[JournalPosting]] | None:
+    existing = await db.scalar(
+        select(JournalEntry).where(
+            JournalEntry.organization_id == organization_id,
+            JournalEntry.idempotency_key == idempotency_key,
+        )
+    )
+    if existing is None:
+        return None
+    postings = list(
+        (
+            await db.scalars(
+                select(JournalPosting)
+                .where(JournalPosting.journal_entry_id == existing.id)
+                .order_by(JournalPosting.created_at, JournalPosting.id)
+            )
+        ).all()
+    )
+    return existing, postings
+
+
 async def post_journal(
     db: AsyncSession,
     principal: Principal,
     payload: JournalEntryCreate,
+    *,
+    idempotency_key: str | None = None,
 ) -> tuple[JournalEntry, list[JournalPosting]]:
     require_finance_permission(principal, "finance.post")
     organization_id = resolve_organization(principal, payload.organization_id)
+    canonical_idempotency_key = resolve_idempotency_key(payload.idempotency_key, idempotency_key)
 
-    existing = await db.scalar(
-        select(JournalEntry).where(
-            JournalEntry.organization_id == organization_id,
-            JournalEntry.idempotency_key == payload.idempotency_key,
-        )
-    )
-    if existing:
-        postings = list(
-            (
-                await db.scalars(
-                    select(JournalPosting).where(JournalPosting.journal_entry_id == existing.id)
-                )
-            ).all()
-        )
-        return existing, postings
+    existing = await _existing_journal(db, organization_id, canonical_idempotency_key)
+    if existing is not None:
+        return existing
 
     debit_total = sum((p.amount for p in payload.postings if p.side == "DEBIT"), Decimal("0"))
     credit_total = sum((p.amount for p in payload.postings if p.side == "CREDIT"), Decimal("0"))
@@ -83,23 +141,52 @@ async def post_journal(
     account_ids = {posting.account_id for posting in payload.postings}
     accounts = list((await db.scalars(select(LedgerAccount).where(LedgerAccount.id.in_(account_ids)))).all())
     if len(accounts) != len(account_ids):
-        raise HTTPException(status_code=422, detail={"code": "ACCOUNT_NOT_FOUND", "message": "A ledger account was not found."})
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "ACCOUNT_NOT_FOUND", "message": "A ledger account was not found."},
+        )
     for account in accounts:
         if account.organization_id != organization_id or not account.active:
-            raise HTTPException(status_code=403, detail={"code": "ACCOUNT_ACCESS_DENIED", "message": "Ledger account is unavailable for this organization."})
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "ACCOUNT_ACCESS_DENIED",
+                    "message": "Ledger account is unavailable for this organization.",
+                },
+            )
         if account.currency != payload.currency:
-            raise HTTPException(status_code=422, detail={"code": "CURRENCY_MISMATCH", "message": "Journal currency must match every ledger account."})
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "CURRENCY_MISMATCH",
+                    "message": "Journal currency must match every ledger account.",
+                },
+            )
 
     period = await period_for_date(db, organization_id, payload.effective_at)
-    if period and period.status != "OPEN":
-        raise HTTPException(status_code=409, detail={"code": "ACCOUNTING_PERIOD_CLOSED", "message": "The accounting period is closed or locked."})
+    if period is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ACCOUNTING_PERIOD_REQUIRED",
+                "message": "An open accounting period must cover the journal effective date.",
+            },
+        )
+    if period.status != "OPEN":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ACCOUNTING_PERIOD_CLOSED",
+                "message": "The accounting period is closed or locked.",
+            },
+        )
 
     posted_at = datetime.now(UTC)
     entry = JournalEntry(
         organization_id=organization_id,
-        period_id=period.id if period else None,
+        period_id=period.id,
         entry_number=f"JE-{posted_at:%Y%m%d}-{uuid.uuid4().hex[:10].upper()}",
-        idempotency_key=payload.idempotency_key,
+        idempotency_key=canonical_idempotency_key,
         source_type=payload.source_type,
         source_id=payload.source_id,
         description=payload.description,
@@ -110,28 +197,35 @@ async def post_journal(
         posted_by=principal.subject,
         metadata_payload=payload.metadata_payload,
     )
-    db.add(entry)
-    await db.flush()
 
     postings: list[JournalPosting] = []
-    for item in payload.postings:
-        posting = JournalPosting(
-            journal_entry_id=entry.id,
-            account_id=item.account_id,
-            side=item.side,
-            amount=item.amount,
-            currency=payload.currency,
-            application_id=item.application_id,
-            funding_id=item.funding_id,
-            commission_id=item.commission_id,
-            bank_transaction_id=item.bank_transaction_id,
-            memo=item.memo,
-            metadata_payload=item.metadata_payload,
-        )
-        db.add(posting)
-        postings.append(posting)
+    try:
+        db.add(entry)
+        await db.flush()
+        for item in payload.postings:
+            posting = JournalPosting(
+                journal_entry_id=entry.id,
+                account_id=item.account_id,
+                side=item.side,
+                amount=item.amount,
+                currency=payload.currency,
+                application_id=item.application_id,
+                funding_id=item.funding_id,
+                commission_id=item.commission_id,
+                bank_transaction_id=item.bank_transaction_id,
+                memo=item.memo,
+                metadata_payload=item.metadata_payload,
+            )
+            db.add(posting)
+            postings.append(posting)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = await _existing_journal(db, organization_id, canonical_idempotency_key)
+        if existing is not None:
+            return existing
+        raise
 
-    await db.commit()
     await db.refresh(entry)
     for posting in postings:
         await db.refresh(posting)
@@ -143,12 +237,13 @@ async def trial_balance(
     principal: Principal,
     organization_id: uuid.UUID | None,
     as_of: datetime | None,
+    currency: str | None = None,
 ) -> TrialBalanceRead:
     require_finance_permission(principal, "finance.read")
     organization_id = resolve_organization(principal, organization_id)
     as_of = as_of or datetime.now(UTC)
 
-    accounts = list(
+    all_accounts = list(
         (
             await db.scalars(
                 select(LedgerAccount)
@@ -157,35 +252,49 @@ async def trial_balance(
             )
         ).all()
     )
+    available_currencies = sorted({account.currency for account in all_accounts})
+    if currency is None:
+        if len(available_currencies) > 1:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "CURRENCY_REQUIRED",
+                    "message": "Select a currency when the chart of accounts contains multiple currencies.",
+                    "context": {"currencies": available_currencies},
+                },
+            )
+        currency = available_currencies[0] if available_currencies else "USD"
+    currency = currency.strip().upper()
+
+    accounts = [account for account in all_accounts if account.currency == currency]
     account_map = {account.id: account for account in accounts}
     totals = {account.id: [Decimal("0"), Decimal("0")] for account in accounts}
 
-    rows = (
-        await db.execute(
-            select(JournalPosting, JournalEntry)
-            .join(JournalEntry, JournalEntry.id == JournalPosting.journal_entry_id)
-            .where(
-                JournalEntry.organization_id == organization_id,
-                JournalEntry.status == "POSTED",
-                JournalEntry.effective_at <= as_of,
+    if account_map:
+        rows = (
+            await db.execute(
+                select(JournalPosting, JournalEntry)
+                .join(JournalEntry, JournalEntry.id == JournalPosting.journal_entry_id)
+                .where(
+                    JournalEntry.organization_id == organization_id,
+                    JournalEntry.currency == currency,
+                    JournalEntry.status == "POSTED",
+                    JournalEntry.effective_at <= as_of,
+                    JournalPosting.account_id.in_(account_map),
+                )
             )
-        )
-    ).all()
-    for posting, _entry in rows:
-        if posting.account_id not in totals:
-            continue
-        if posting.side == "DEBIT":
-            totals[posting.account_id][0] += posting.amount
-        else:
-            totals[posting.account_id][1] += posting.amount
+        ).all()
+        for posting, _entry in rows:
+            if posting.side == "DEBIT":
+                totals[posting.account_id][0] += posting.amount
+            else:
+                totals[posting.account_id][1] += posting.amount
 
     lines: list[TrialBalanceLine] = []
     debit_total = Decimal("0")
     credit_total = Decimal("0")
-    currency = "USD"
     for account_id, (debits, credits) in totals.items():
         account = account_map[account_id]
-        currency = account.currency
         debit_total += debits
         credit_total += credits
         lines.append(
