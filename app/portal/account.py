@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import identity_models as identity
 from app import schemas as application_schemas
 from app.auth import bearer, decode_access_token
 from app.db import get_db
@@ -66,10 +68,28 @@ async def account_bootstrap(
     enforce_portal_client(request.url.path, claims)
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     correlation_id = request.headers.get("X-Correlation-ID") or request_id
-    return await bootstrap_account(
+    result = await bootstrap_account(
         db,
         claims=claims,
         idempotency_key=idempotency_key,
         request_id=request_id,
         correlation_id=correlation_id,
     )
+
+    user = await db.get(identity.User, result.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ACCOUNT_BINDING_INCOMPLETE",
+                "message": "The local MoneyBee account record could not be loaded.",
+            },
+        )
+    now = datetime.now(UTC)
+    user.username = result.username
+    user.email = str(result.email).lower()
+    user.email_verified_at = user.email_verified_at or now
+    user.registration_source = result.registration_source
+    user.last_login_at = now
+    await db.commit()
+    return result
