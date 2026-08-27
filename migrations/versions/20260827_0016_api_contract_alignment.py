@@ -41,13 +41,14 @@ def upgrade() -> None:
             {"request_hash": legacy_hash, "entry_id": row.id},
         )
 
-    op.alter_column(
-        "journal_entries",
-        "request_hash",
-        existing_type=sa.String(length=64),
-        nullable=False,
-    )
+    with op.batch_alter_table("journal_entries") as batch_op:
+        batch_op.alter_column(
+            "request_hash",
+            existing_type=sa.String(length=64),
+            nullable=False,
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("journal_entries", "request_hash")
+    with op.batch_alter_table("journal_entries") as batch_op:
+        batch_op.drop_column("request_hash")
