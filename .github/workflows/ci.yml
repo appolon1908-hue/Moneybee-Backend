@@ -118,7 +118,7 @@ jobs:
           docker run --rm moneybee-${{ matrix.role }}:ci python -c \
             "import importlib.metadata as m; assert tuple(map(int, m.version('msgpack').split('.'))) >= (1, 2, 1); assert tuple(map(int, m.version('setuptools').split('.'))) >= (78, 1, 1)"
       - name: Enforce backend vulnerability policy
-        uses: aquasecurity/trivy-action@0.32.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: moneybee-${{ matrix.role }}:ci
           trivyignores: .trivyignore
