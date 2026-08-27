@@ -1,7 +1,14 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 
-from app.account_routes import BORROWER_PERMISSIONS, _claim_bool, _display_name
+from app.account_routes import (
+    BORROWER_PERMISSIONS,
+    _claim_bool,
+    _display_name,
+    _require_active_borrower_membership,
+)
 from app.config import settings
 from app.request_context import enforce_portal_client
 
@@ -39,6 +46,18 @@ def test_bootstrap_path_accepts_only_configured_borrower_client():
         )
     assert caught.value.status_code == 403
     assert caught.value.detail["code"] == "PORTAL_TOKEN_MISMATCH"
+
+
+def test_bootstrap_rejects_suspended_borrower_membership():
+    with pytest.raises(HTTPException) as caught:
+        _require_active_borrower_membership(SimpleNamespace(active=False))
+
+    assert caught.value.status_code == 403
+    assert caught.value.detail["code"] == "MEMBERSHIP_INACTIVE"
+
+
+def test_bootstrap_accepts_existing_active_borrower_membership():
+    _require_active_borrower_membership(SimpleNamespace(active=True))
 
 
 def test_bootstrap_role_is_least_privilege_borrower_scope():
