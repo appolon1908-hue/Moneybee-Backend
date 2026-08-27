@@ -65,6 +65,15 @@ def _display_name(claims: dict[str, Any], email: str) -> str:
     return (combined or email.split("@", 1)[0])[:255]
 
 
+def _require_active_borrower_membership(membership: identity.OrganizationMembership) -> None:
+    if not membership.active:
+        raise _problem(
+            "MEMBERSHIP_INACTIVE",
+            "The MoneyBee borrower membership is disabled.",
+            403,
+        )
+
+
 async def verified_borrower_claims(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -228,8 +237,7 @@ async def _provision(
             )
             db.add(membership)
         else:
-            if not membership.active:
-                membership.active = True
+            _require_active_borrower_membership(membership)
             organization = await db.get(identity.Organization, membership.organization_id)
             if organization is None:
                 raise _problem(
