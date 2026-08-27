@@ -65,15 +65,22 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install ".[dev]"
-      - name: Test current head to identity head
+      - name: Verify the historical identity migration boundary
         run: |
           alembic upgrade 20260823_0011
           alembic upgrade 20260823_0012
-      - run: pytest -q tests/test_auth_identity.py tests/test_identity_tenancy_postgres.py
-      - name: Test identity downgrade and forward-fix path
+      - name: Upgrade to the current ORM schema
+        run: alembic upgrade head
+      - name: Test identity, tenancy and verified account registration
+        run: |
+          pytest -q \
+            tests/test_auth_identity.py \
+            tests/test_identity_tenancy_postgres.py \
+            tests/test_account_registration.py
+      - name: Test identity downgrade and current forward-fix path
         run: |
           alembic downgrade 20260823_0011
-          alembic upgrade 20260823_0012
+          alembic upgrade head
       - name: Test empty database to head
         run: |
           alembic downgrade base
