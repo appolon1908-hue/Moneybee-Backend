@@ -13,7 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APP_ENV: test
-      AUTO_CREATE_SCHEMA: "false"
+      # Unit/API tests intentionally use isolated local schema creation. Production
+      # and migration verification remain fail-closed with AUTO_CREATE_SCHEMA=false.
+      AUTO_CREATE_SCHEMA: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
