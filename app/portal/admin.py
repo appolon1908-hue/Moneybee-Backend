@@ -19,6 +19,7 @@ from app.portal.schemas import (
     AdminOverview,
     AdminSearchResult,
     AdminTaskUpdate,
+    AdminWorkspace,
     ConversationRead,
     MessageCreate,
     MessageRead,
@@ -130,6 +131,78 @@ async def admin_overview(db: Db, user: User):
             models.WebhookReceipt,
             models.WebhookReceipt.status.in_(["RECEIVED", "RETRY"]),
         ),
+    )
+
+
+@router.get(
+    "/admin/workspace",
+    response_model=AdminWorkspace,
+    tags=["admin", "portal"],
+)
+async def admin_workspace(db: Db, user: User):
+    overview = await admin_overview(db, user)
+    tasks = list(
+        (
+            await db.scalars(
+                select(portal_models.PortalTask)
+                .where(portal_models.PortalTask.status.in_(["OPEN", "IN_PROGRESS"]))
+                .order_by(
+                    portal_models.PortalTask.due_at.asc().nulls_last(),
+                    portal_models.PortalTask.created_at.desc(),
+                )
+                .limit(100)
+            )
+        ).all()
+    )
+    exceptions = list(
+        (
+            await db.scalars(
+                select(OperationalException)
+                .where(OperationalException.status == "OPEN")
+                .order_by(OperationalException.created_at.desc())
+                .limit(100)
+            )
+        ).all()
+    )
+    return AdminWorkspace(
+        principal={
+            "global_scope": "*" in user.permissions
+            or "MONEYBEE" in user.membership_types,
+        },
+        metrics={
+            "lead_count": overview.leads,
+            "application_count": overview.applications,
+            "lender_submission_count": overview.submissions_needing_review,
+            "open_task_count": overview.open_tasks,
+            "overdue_task_count": overview.overdue_tasks,
+            "unread_notification_count": overview.unread_notifications,
+            "open_conversation_count": overview.open_conversations,
+            "open_complaint_count": overview.open_complaints,
+            "open_operational_exception_count": overview.open_operational_exceptions,
+            "pending_outbox_count": overview.pending_outbox,
+            "failed_integration_count": overview.failed_integrations,
+            "webhook_receipts_pending": overview.webhook_receipts_pending,
+            **overview.applications_by_status,
+        },
+        work_queue=[PortalTaskRead.model_validate(row) for row in tasks],
+        operational_exceptions=[
+            {
+                "id": str(row.id),
+                "code": row.code,
+                "severity": row.severity,
+                "status": row.status,
+                "owner_subject": row.owner_subject,
+                "sla_due_at": row.sla_due_at,
+                "resource_type": row.resource_type,
+                "resource_id": row.resource_id,
+                "correlation_id": row.correlation_id,
+                "retry_action": row.retry_action,
+                "resolution": row.resolution,
+                "created_at": row.created_at,
+                "resolved_at": row.resolved_at,
+            }
+            for row in exceptions
+        ],
     )
 
 

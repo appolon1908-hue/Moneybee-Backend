@@ -25,6 +25,10 @@ class Settings(BaseSettings):
         "https://auth.codestra.co/realms/codestra/protocol/openid-connect/certs"
     )
     oidc_algorithms_csv: str = "RS256"
+    borrower_oidc_client_ids_csv: str = "moneybee-borrower"
+    lender_oidc_client_ids_csv: str = "moneybee-lender"
+    admin_oidc_client_ids_csv: str = "moneybee-admin"
+
     codestra_middleware_base_url: str | None = None
     codestra_middleware_token_url: str | None = None
     codestra_middleware_client_id: str | None = None
@@ -134,9 +138,21 @@ class Settings(BaseSettings):
     object_storage_access_key: str | None = None
     object_storage_secret_key: str | None = None
 
+    @staticmethod
+    def _csv_set(value: str) -> frozenset[str]:
+        return frozenset(item.strip() for item in value.split(",") if item.strip())
+
     @property
     def cors_origins(self) -> list[str]:
         return [item.strip() for item in self.cors_origins_csv.split(",") if item.strip()]
+
+    @property
+    def portal_client_ids(self) -> dict[str, frozenset[str]]:
+        return {
+            "borrower": self._csv_set(self.borrower_oidc_client_ids_csv),
+            "lender": self._csv_set(self.lender_oidc_client_ids_csv),
+            "admin": self._csv_set(self.admin_oidc_client_ids_csv),
+        }
 
     @property
     def provider_webhook_allowlist(self) -> set[str]:
@@ -188,6 +204,17 @@ class Settings(BaseSettings):
         legacy = "auth.codestra.agency"
         if legacy in self.oidc_issuer or legacy in self.oidc_jwks_url:
             raise ValueError("Legacy identity host is forbidden")
+
+        portal_clients = self.portal_client_ids
+        if any(not values for values in portal_clients.values()):
+            raise ValueError("Every MoneyBee portal requires at least one OIDC client ID")
+        pairs = (("borrower", "lender"), ("borrower", "admin"), ("lender", "admin"))
+        for left, right in pairs:
+            if portal_clients[left] & portal_clients[right]:
+                raise ValueError(
+                    "Borrower, lender, and admin OIDC client IDs must be disjoint"
+                )
+
         if self.app_env in {"staging", "production"}:
             if self.local_auth_bypass or self.auto_create_schema:
                 raise ValueError("Local bypass/schema creation must be disabled")

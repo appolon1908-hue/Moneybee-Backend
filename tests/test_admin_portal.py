@@ -87,6 +87,11 @@ def test_admin_overview_tasks_notifications_and_conversation_reply():
         assert overview.json()["applications"] >= 1
         assert overview.json()["unread_notifications"] >= 1
 
+        workspace = client.get("/api/v2/admin/workspace")
+        assert workspace.status_code == 200
+        assert workspace.json()["metrics"]["application_count"] >= 1
+        assert workspace.json()["principal"]["global_scope"] is True
+
         audit = client.get("/api/v2/admin/audit-events?limit=20")
         assert audit.status_code == 200
         assert audit.json()["meta"]["total"] >= 3

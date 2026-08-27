@@ -1,0 +1,10 @@
+{
+  "name": "admin-workspace",
+  "paths": {
+    "/api/v2/admin/workspace": "d57e4c52a5dd4a78a2a0c318209f308f6379d68034fdb6365a85899def4cd1f7"
+  },
+  "schemas": {
+    "AdminWorkspace": "5d0dd88aa28cfbf463f2c0a71a4414e9103ac8e88e40b0fb7f3a53dec7adeac0"
+  },
+  "version": 1
+}

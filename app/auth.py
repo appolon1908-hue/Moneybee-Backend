@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 from app.identity import IdentityResolutionError, resolve_identity
-from app.portal_clients import enforce_portal_client
+from app.request_context import enforce_portal_client
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -126,18 +126,41 @@ def decode_access_token(token: str) -> dict[str, Any]:
         ) from exc
 
 
-def _local_bypass_principal() -> Principal:
+def _requested_organization_id(
+    request: Request,
+    claims: dict[str, Any] | None = None,
+) -> str | None:
+    return (
+        request.headers.get("X-Organization-ID")
+        or (claims or {}).get("organization_id")
+        or (claims or {}).get("org_id")
+    )
+
+
+def _local_bypass_principal(request: Request) -> Principal:
+    requested = _requested_organization_id(request)
+    selected: uuid.UUID | None = None
+    if requested:
+        try:
+            selected = uuid.UUID(str(requested))
+        except ValueError as exc:
+            raise _problem(
+                "INVALID_ORGANIZATION_CONTEXT",
+                "X-Organization-ID must be a UUID.",
+                422,
+            ) from exc
+    organizations = (selected,) if selected else ()
     return Principal(
         user_id=uuid.UUID(int=0),
         issuer="local-bypass",
         subject="local-admin",
-        organization_ids=(),
-        active_organization_id=None,
+        organization_ids=organizations,
+        active_organization_id=selected,
         roles=frozenset({"MONEYBEE_ADMIN"}),
         permissions=frozenset({"*"}),
         membership_types=frozenset({"MONEYBEE"}),
-        borrower_id=None,
-        lender_id=None,
+        borrower_id=selected,
+        lender_id=selected,
         is_active=True,
     )
 
@@ -180,17 +203,13 @@ async def current_principal(
     db: Db,
 ) -> Principal:
     if settings.local_auth_bypass and settings.app_env in {"local", "test"}:
-        return _local_bypass_principal()
+        return _local_bypass_principal(request)
     if credentials is None:
         raise _problem("AUTHENTICATION_REQUIRED", "Authentication is required.", 401)
 
     claims = decode_access_token(credentials.credentials)
     enforce_portal_client(request.url.path, claims)
-    requested_organization_id = (
-        request.headers.get("X-Organization-ID")
-        or claims.get("organization_id")
-        or claims.get("org_id")
-    )
+    requested_organization_id = _requested_organization_id(request, claims)
     try:
         resolved = await resolve_identity(
             db,

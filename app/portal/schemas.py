@@ -317,6 +317,13 @@ class AdminOverview(BaseModel):
     webhook_receipts_pending: int
 
 
+class AdminWorkspace(BaseModel):
+    principal: dict[str, bool]
+    metrics: dict[str, int]
+    work_queue: list[PortalTaskRead]
+    operational_exceptions: list[dict]
+
+
 class AdminTaskUpdate(BaseModel):
     status: Literal["OPEN", "IN_PROGRESS", "COMPLETED", "DISMISSED"] | None = None
     priority: Literal["LOW", "NORMAL", "HIGH", "URGENT"] | None = None
