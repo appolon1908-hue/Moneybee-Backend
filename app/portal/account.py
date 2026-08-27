@@ -12,6 +12,7 @@ from app.auth import bearer, decode_access_token
 from app.db import get_db
 from app.portal.account_schemas import AccountBootstrapRead
 from app.portal.account_service import bootstrap_account
+from app.portal_clients import enforce_portal_client
 
 
 router = APIRouter()
@@ -33,7 +34,7 @@ IdempotencyKey = Annotated[
         },
         403: {
             "model": application_schemas.ErrorResponse,
-            "description": "Email verification or invitation is required",
+            "description": "Email verification, invitation, or correct portal token is required",
         },
         409: {
             "model": application_schemas.ErrorResponse,
@@ -62,6 +63,7 @@ async def account_bootstrap(
             headers={"WWW-Authenticate": "Bearer"},
         )
     claims = decode_access_token(credentials.credentials)
+    enforce_portal_client(request.url.path, claims)
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     correlation_id = request.headers.get("X-Correlation-ID") or request_id
     return await bootstrap_account(
