@@ -1,4 +1,4 @@
-"""Seed the borrower role used by verified Keycloak self-registration.
+"""Add verified account metadata and seed the borrower self-registration role.
 
 Revision ID: 20260826_0016
 Revises: 20260826_0015
@@ -38,7 +38,43 @@ def _id(value: str) -> str:
 
 
 def upgrade() -> None:
+    op.add_column(
+        "users",
+        sa.Column("username", sa.String(length=255), nullable=True),
+    )
+    op.add_column(
+        "users",
+        sa.Column("email_verified_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.add_column(
+        "users",
+        sa.Column("registration_source", sa.String(length=40), nullable=True),
+    )
+    op.add_column(
+        "users",
+        sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.create_index("ix_users_username", "users", ["username"])
+    op.create_index("ix_users_last_login_at", "users", ["last_login_at"])
+
     connection = op.get_bind()
+    duplicate_email = connection.execute(
+        sa.text(
+            """
+            SELECT lower(email) AS normalized_email
+            FROM users
+            WHERE email IS NOT NULL
+            GROUP BY lower(email)
+            HAVING count(*) > 1
+            LIMIT 1
+            """
+        )
+    ).first()
+    if duplicate_email is not None:
+        raise RuntimeError(
+            "Cannot enable verified account registration while duplicate "
+            "case-insensitive user emails exist."
+        )
     connection.execute(
         sa.text(
             """
@@ -146,6 +182,10 @@ def downgrade() -> None:
             ),
             {"permission_code": code},
         )
-    connection.execute(
-        sa.text("DROP INDEX IF EXISTS uq_users_email_lower")
-    )
+    connection.execute(sa.text("DROP INDEX IF EXISTS uq_users_email_lower"))
+    op.drop_index("ix_users_last_login_at", table_name="users")
+    op.drop_index("ix_users_username", table_name="users")
+    op.drop_column("users", "last_login_at")
+    op.drop_column("users", "registration_source")
+    op.drop_column("users", "email_verified_at")
+    op.drop_column("users", "username")
