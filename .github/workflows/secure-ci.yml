@@ -5,6 +5,9 @@ on:
     paths:
       - "app/**"
       - "migrations/**"
+      - "scripts/**"
+      - "docs/security/**"
+      - "docs/identity/**"
       - "docker/**"
       - "deploy/**"
       - "ops/**"
@@ -60,10 +63,11 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           python -m pip install -e ".[dev]"
           python -m pip check
-      - name: Static gates
+      - name: Static and private-key gates
         run: |
-          python -m compileall -q app tests migrations ops
-          python -m ruff check app tests migrations
+          python scripts/check_no_private_keys.py
+          python -m compileall -q app tests migrations ops scripts
+          python -m ruff check app tests migrations scripts
       - name: Upgrade application test database
         run: alembic upgrade head
       - name: Application tests
