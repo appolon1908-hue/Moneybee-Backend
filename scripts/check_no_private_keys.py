@@ -4,15 +4,19 @@ import subprocess
 from pathlib import Path
 
 
-PRIVATE_KEY_MARKERS = (
-    "-----BEGIN PRIVATE KEY-----",
-    "-----BEGIN ENCRYPTED PRIVATE KEY-----",
-    "-----BEGIN RSA PRIVATE KEY-----",
-    "-----BEGIN EC PRIVATE KEY-----",
-    "-----BEGIN DSA PRIVATE KEY-----",
-    "-----BEGIN OPENSSH PRIVATE KEY-----",
-    "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+PRIVATE_KEY_KINDS = (
+    "PRIVATE KEY",
+    "ENCRYPTED PRIVATE KEY",
+    "RSA PRIVATE KEY",
+    "EC PRIVATE KEY",
+    "DSA PRIVATE KEY",
+    "OPENSSH PRIVATE KEY",
+    "PGP PRIVATE KEY BLOCK",
 )
+
+
+def private_key_markers() -> tuple[str, ...]:
+    return tuple(f"-----BEGIN {kind}-----" for kind in PRIVATE_KEY_KINDS)
 
 
 def tracked_files() -> list[Path]:
@@ -30,14 +34,15 @@ def tracked_files() -> list[Path]:
 
 def main() -> int:
     findings: list[str] = []
+    markers = private_key_markers()
     for path in tracked_files():
         try:
             content = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for marker in PRIVATE_KEY_MARKERS:
+        for marker in markers:
             if marker in content:
-                findings.append(f"{path}: contains {marker}")
+                findings.append(f"{path}: contains a private-key block")
 
     if findings:
         print("Private-key material must never be committed:")
