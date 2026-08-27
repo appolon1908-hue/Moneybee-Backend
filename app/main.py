@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app import financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
+from app.account_routes import router as account_router
 from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
@@ -30,7 +31,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MoneyBeeLoans API",
-    version="0.3.0",
+    version="0.4.0",
     openapi_url="/openapi.json",
     docs_url="/docs" if settings.app_env != "production" else None,
     lifespan=lifespan,
@@ -51,6 +52,7 @@ app.add_middleware(
     ],
 )
 app.include_router(router, prefix="/api/v2")
+app.include_router(account_router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
 app.include_router(portal_router, prefix="/api/v2")
 app.include_router(financial_router, prefix="/api/v2")
