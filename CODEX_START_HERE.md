@@ -2,15 +2,38 @@
 
 ## Current mission
 
-Execute:
+Read these files in order:
 
-`docs/codex/CODEX_MONEYBEE_STAGING_DEPLOYMENT_MISSION.md`
+1. `docs/codex/MONEYBEE_REPOSITORY_ALLOWLIST.md`
+2. `docs/codex/CODEX_MONEYBEE_STAGING_DEPLOYMENT_MISSION.md`
 
 Mission ID:
 
 ```text
 MB-CODE-AND-RELEASE-READINESS-20260827
 ```
+
+## Mandatory repository boundary
+
+Codex may use only these two exact repositories:
+
+```text
+BACKEND_REPOSITORY=appolon1908-hue/Moneybee-Backend
+FRONTEND_REPOSITORY=appolon1908-hue/Moneybee-frontend-
+ALLOWED_REPOSITORY_COUNT=2
+OTHER_REPOSITORIES_ALLOWED=NO
+```
+
+The detailed branch and file-path allowlist in `docs/codex/MONEYBEE_REPOSITORY_ALLOWLIST.md` is controlling. Stop before reading from, writing to, cloning, patching, or creating a pull request in any other repository.
+
+Application integration commits may be written only to:
+
+```text
+Backend: integration/staging-moneybee-20260827
+Frontend: integration/staging-moneybee-20260827
+```
+
+Do not mix source ownership: frontend remains in `Moneybee-frontend-`; backend, database and workers remain in `Moneybee-Backend`.
 
 ## Authorization boundary
 
@@ -33,11 +56,13 @@ PR #11 and issue #18 are task-definition and review artifacts only. They are not
 
 ```text
 Backend repository:
+appolon1908-hue/Moneybee-Backend
 integration/staging-moneybee-20260827
 starting SHA: fb2866b033811bcb1c5e2522dc23bd350866164b
 finance head to integrate: 07dda9c6c9b09c00d1c91ba545a5ef9bfc804dd3
 
 Frontend repository:
+appolon1908-hue/Moneybee-frontend-
 integration/staging-moneybee-20260827
 starting SHA: b7b0abb17a3325ba04941b60d548897a9bf7e93d
 finance head to integrate: 033e2190de4b9cf78f73c6d1a81f8668c5efef83
@@ -47,19 +72,25 @@ Frontend PR #18 is a separate design-system PR and is not part of this account/p
 
 ## Permitted execution order
 
-1. Verify every recorded source SHA and exact-head workflow result.
-2. Integrate the exact finance heads into the dedicated integration branches with reviewable commits.
-3. Resolve only genuine integration conflicts; preserve split frontend/backend Docker ownership, portal-specific tokens, tenant isolation, migrations, idempotency, audit and outbox controls.
-4. Run complete backend and frontend contract, PostgreSQL, migration, type, test, build and vulnerability gates.
-5. Repair failures on the integration branches and rerun exact-head checks.
-6. Open or update focused **draft** pull requests for review.
-7. Prepare release-lock templates, runtime-path questions, rollback instructions and a review-only readiness packet containing no secrets.
-8. Stop and report the exact remaining blockers.
+1. Verify both exact repository origins against the allowlist.
+2. Verify every recorded source SHA and exact-head workflow result.
+3. Integrate the exact finance heads into the dedicated integration branches with reviewable commits.
+4. Resolve only genuine integration conflicts; preserve split frontend/backend Docker ownership, portal-specific tokens, tenant isolation, migrations, idempotency, audit and outbox controls.
+5. Run complete backend and frontend contract, PostgreSQL, migration, type, test, build and vulnerability gates.
+6. Repair failures on the integration branches and rerun exact-head checks.
+7. Open or update focused **draft** pull requests for review in the same two repositories only.
+8. Prepare release-lock templates, runtime-path questions, rollback instructions and a review-only readiness packet containing no secrets.
+9. Stop and report the exact remaining blockers.
 
 ## Explicitly prohibited
 
 Codex must not:
 
+- use any repository other than `appolon1908-hue/Moneybee-Backend` and `appolon1908-hue/Moneybee-frontend-`;
+- copy frontend source into the backend repository;
+- copy backend, database or worker source into the frontend repository;
+- use a sibling-repository Docker build context;
+- modify `main`, `release/staging`, or `release/production`;
 - merge a protected or release pull request;
 - create or move a deployment tag;
 - publish or deploy an image as an approved release;
@@ -95,6 +126,10 @@ COMMUNICATIONS_LIVE_SMS=false
 
 ```text
 MISSION_ID=MB-CODE-AND-RELEASE-READINESS-20260827
+REPOSITORY_SCOPE_ENFORCED=YES
+BACKEND_REPOSITORY=appolon1908-hue/Moneybee-Backend
+FRONTEND_REPOSITORY=appolon1908-hue/Moneybee-frontend-
+OTHER_REPOSITORIES_USED=NO
 BACKEND_INTEGRATION_SHA=<sha or BLOCKED>
 FRONTEND_INTEGRATION_SHA=<sha or BLOCKED>
 BACKEND_EXACT_HEAD_CI=<PASS|FAIL|PENDING>
