@@ -38,7 +38,7 @@ async def test_verified_keycloak_account_bootstrap_is_idempotent(monkeypatch):
     monkeypatch.setenv("ACCOUNT_SELF_REGISTRATION_CLIENT_IDS", "moneybee-borrower")
     suffix = uuid.uuid4().hex
     subject = f"account-{suffix}"
-    email = f"account-{suffix}@example.test"
+    email = f"account-{suffix}@example.com"
     key = f"bootstrap-{suffix}"
 
     async with SessionLocal() as db:
@@ -109,7 +109,7 @@ async def test_verified_keycloak_account_bootstrap_is_idempotent(monkeypatch):
 async def test_verified_email_cannot_bind_to_a_second_subject(monkeypatch):
     monkeypatch.setenv("ACCOUNT_SELF_REGISTRATION_CLIENT_IDS", "moneybee-borrower")
     suffix = uuid.uuid4().hex
-    email = f"collision-{suffix}@example.test"
+    email = f"collision-{suffix}@example.com"
 
     async with SessionLocal() as db:
         await bootstrap_account(
@@ -144,7 +144,7 @@ async def test_unverified_email_and_unapproved_portal_fail_closed(monkeypatch):
                 db,
                 claims=claims(
                     subject=f"unverified-{suffix}",
-                    email=f"unverified-{suffix}@example.test",
+                    email=f"unverified-{suffix}@example.com",
                     verified=False,
                 ),
                 idempotency_key=f"unverified-{suffix}",
@@ -159,7 +159,7 @@ async def test_unverified_email_and_unapproved_portal_fail_closed(monkeypatch):
                 db,
                 claims=claims(
                     subject=f"lender-{suffix}",
-                    email=f"lender-{suffix}@example.test",
+                    email=f"lender-{suffix}@example.com",
                     client_id="moneybee-lender",
                 ),
                 idempotency_key=f"lender-{suffix}",
