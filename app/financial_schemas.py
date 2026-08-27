@@ -5,6 +5,13 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+def _currency(value: str) -> str:
+    value = value.strip().upper()
+    if len(value) != 3 or not value.isalpha():
+        raise ValueError("currency must be a three-letter ISO code")
+    return value
+
+
 class LedgerAccountCreate(BaseModel):
     organization_id: uuid.UUID | None = None
     code: str = Field(min_length=1, max_length=40)
@@ -15,7 +22,7 @@ class LedgerAccountCreate(BaseModel):
     @field_validator("account_type")
     @classmethod
     def validate_account_type(cls, value: str) -> str:
-        value = value.upper()
+        value = value.strip().upper()
         if value not in {"ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"}:
             raise ValueError("unsupported account type")
         return value
@@ -23,10 +30,7 @@ class LedgerAccountCreate(BaseModel):
     @field_validator("currency")
     @classmethod
     def validate_currency(cls, value: str) -> str:
-        value = value.upper()
-        if len(value) != 3 or not value.isalpha():
-            raise ValueError("currency must be a three-letter ISO code")
-        return value
+        return _currency(value)
 
 
 class LedgerAccountRead(BaseModel):
@@ -82,7 +86,7 @@ class PostingInput(BaseModel):
     @field_validator("side")
     @classmethod
     def validate_side(cls, value: str) -> str:
-        value = value.upper()
+        value = value.strip().upper()
         if value not in {"DEBIT", "CREDIT"}:
             raise ValueError("side must be DEBIT or CREDIT")
         return value
@@ -90,7 +94,8 @@ class PostingInput(BaseModel):
 
 class JournalEntryCreate(BaseModel):
     organization_id: uuid.UUID | None = None
-    idempotency_key: str = Field(min_length=8, max_length=160)
+    # Transitional body field for older clients. The Idempotency-Key header is canonical.
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=160)
     source_type: str = Field(min_length=1, max_length=80)
     source_id: str | None = Field(default=None, max_length=255)
     description: str = Field(min_length=1, max_length=2000)
@@ -102,10 +107,12 @@ class JournalEntryCreate(BaseModel):
     @field_validator("currency")
     @classmethod
     def validate_currency(cls, value: str) -> str:
-        value = value.upper()
-        if len(value) != 3 or not value.isalpha():
-            raise ValueError("currency must be a three-letter ISO code")
-        return value
+        return _currency(value)
+
+    @field_validator("source_type")
+    @classmethod
+    def normalize_source_type(cls, value: str) -> str:
+        return value.strip().upper()
 
     @model_validator(mode="after")
     def balanced(self):
