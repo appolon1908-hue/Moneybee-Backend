@@ -18,8 +18,20 @@ from app.models import Record
 class User(Base, Record):
     __tablename__ = "users"
 
+    username: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
     email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    registration_source: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
