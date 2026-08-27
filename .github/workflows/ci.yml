@@ -11,6 +11,9 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      AUTO_CREATE_SCHEMA: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
