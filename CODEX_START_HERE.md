@@ -9,10 +9,25 @@ Execute:
 Mission ID:
 
 ```text
-MB-STAGING-SERVER-UPDATE-20260827
+MB-CODE-AND-RELEASE-READINESS-20260827
 ```
 
-The current objective is to integrate the reviewed authentication, portal-contract, finance-ledger, and secure staging-scaffold work; create protected staging release SHAs; prove the candidate host and runtime paths; publish immutable digest-pinned images; and update the approved **staging** server through the protected deployment boundary.
+## Authorization boundary
+
+This mission authorizes **repository code work, integration-branch updates, automated validation, draft pull requests, release-plan preparation, and non-secret evidence generation only**.
+
+It does **not** authorize a staging-server update, production change, SSH execution, workflow dispatch that contacts a host, DNS/firewall/proxy change, server-side migration, container rollout, secret injection, Keycloak/SMTP configuration, middleware/Odoo activation, or any external/live financial capability.
+
+```text
+STAGING_SERVER_UPDATE_AUTHORIZED=NO
+PRODUCTION_CHANGE_AUTHORIZED=NO
+SSH_EXECUTION_AUTHORIZED=NO
+READ_ONLY_PREFLIGHT_AUTHORIZED=NO
+DEPLOYMENT_WORKFLOW_DISPATCH_AUTHORIZED=NO
+AUTO_MERGE_AUTHORIZED=NO
+```
+
+PR #11 and issue #18 are task-definition and review artifacts only. They are not execution authority for a server or production environment.
 
 ## Integration branches
 
@@ -28,28 +43,39 @@ starting SHA: b7b0abb17a3325ba04941b60d548897a9bf7e93d
 finance head to integrate: 033e2190de4b9cf78f73c6d1a81f8668c5efef83
 ```
 
-Frontend PR #18 is a separate design-system PR and is not part of this server-update mission.
+Frontend PR #18 is a separate design-system PR and is not part of this account/portal/finance integration mission.
 
-## Execution order
+## Permitted execution order
 
-1. Verify every recorded source SHA and exact-head workflow.
-2. Integrate the finance heads into the dedicated integration branches without unrelated feature work.
-3. Run full backend and frontend validation at the resulting exact heads.
-4. Create and protect `release/staging` in both repositories.
-5. Merge only through reviewed protected pull requests.
-6. Build, sign, scan, attest, and publish images from the protected merged SHAs.
-7. Run the read-only runtime-path preflight for candidate host `49.12.145.107`.
-8. Stop if host identity, workload ownership, paths, backup storage, secrets, or branch protection are unresolved.
-9. Generate and review the release/runtime locks and readiness packet.
-10. Use a separately reviewed protected staging deployment executor to apply the immutable digest tuple.
-11. Verify health, release identity, tenant isolation, separate portal tokens, finance flows, restart behavior, and rollback.
-12. Return the exact evidence record required by the mission.
+1. Verify every recorded source SHA and exact-head workflow result.
+2. Integrate the exact finance heads into the dedicated integration branches with reviewable commits.
+3. Resolve only genuine integration conflicts; preserve split frontend/backend Docker ownership, portal-specific tokens, tenant isolation, migrations, idempotency, audit and outbox controls.
+4. Run complete backend and frontend contract, PostgreSQL, migration, type, test, build and vulnerability gates.
+5. Repair failures on the integration branches and rerun exact-head checks.
+6. Open or update focused **draft** pull requests for review.
+7. Prepare release-lock templates, runtime-path questions, rollback instructions and a review-only readiness packet containing no secrets.
+8. Stop and report the exact remaining blockers.
 
-## Non-negotiable safety boundary
+## Explicitly prohibited
+
+Codex must not:
+
+- merge a protected or release pull request;
+- create or move a deployment tag;
+- publish or deploy an image as an approved release;
+- dispatch `runtime-path-preflight-read-only`, `staging-deployment-readiness-packet`, or any SSH/deployment workflow;
+- contact or modify `49.12.145.107`;
+- create, chmod, chown, move, delete or overwrite server paths;
+- run migrations against a staging or production database;
+- pull, start, stop or restart remote containers;
+- change Caddy, Nginx, Kong, DNS, firewall, Keycloak, Klyrow/Postal, Codestra, Odoo or n8n;
+- enable external delivery, email, SMS, credit, lender submission, e-sign, funding, payment or payout capabilities;
+- place credentials, access tokens, refresh tokens, SMTP passwords or DKIM private keys in Git, comments, artifacts or logs;
+- report `SERVER_UPDATED=YES`, `STAGING_DEPLOYED=YES` or `PRODUCTION_CHANGED=YES`.
+
+## Capability freeze
 
 ```text
-PRODUCTION_AUTHORIZATION=NOT_GRANTED
-PRODUCTION_CHANGED=NO
 ENABLE_EXTERNAL_DELIVERY=false
 MIDDLEWARE_PROVIDER=disabled
 LIVE_WRITES=false
@@ -65,6 +91,25 @@ COMMUNICATIONS_LIVE_EMAIL=false
 COMMUNICATIONS_LIVE_SMS=false
 ```
 
-The existing `staging-deployment-readiness-packet` workflow does not update a remote server. Never report deployment success from that workflow alone.
+## Required final Codex record
 
-Do not auto-merge. Do not force-push. Do not deploy feature branches. Do not store credentials in Git or artifacts. Do not weaken host, identity, tenant, migration, image, backup, or rollback gates.
+```text
+MISSION_ID=MB-CODE-AND-RELEASE-READINESS-20260827
+BACKEND_INTEGRATION_SHA=<sha or BLOCKED>
+FRONTEND_INTEGRATION_SHA=<sha or BLOCKED>
+BACKEND_EXACT_HEAD_CI=<PASS|FAIL|PENDING>
+FRONTEND_EXACT_HEAD_CI=<PASS|FAIL|PENDING>
+CONTRACT_ALIGNMENT=<PASS|FAIL>
+POSTGRES_AND_MIGRATIONS=<PASS|FAIL>
+FRONTEND_IMAGE_SECURITY=<PASS|FAIL>
+DRAFT_PRS_READY=<YES|NO>
+RELEASE_PLAN_READY=<YES|NO>
+READ_ONLY_PREFLIGHT_RUN=NOT_AUTHORIZED
+SERVER_UPDATED=NO
+STAGING_DEPLOYED=NO
+PRODUCTION_CHANGED=NO
+GO_NO_GO=NO_GO
+BLOCKERS=<exact blockers>
+```
+
+A separate explicit authorization must be issued before any read-only host contact or staging-server mutation.
