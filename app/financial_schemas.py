@@ -12,8 +12,11 @@ def _currency(value: str) -> str:
     return value
 
 
-class LedgerAccountCreate(BaseModel):
-    organization_id: uuid.UUID | None = None
+class StrictCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class LedgerAccountCreate(StrictCommand):
     code: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=200)
     account_type: str
@@ -46,8 +49,7 @@ class LedgerAccountRead(BaseModel):
     system_managed: bool
 
 
-class AccountingPeriodCreate(BaseModel):
-    organization_id: uuid.UUID | None = None
+class AccountingPeriodCreate(StrictCommand):
     name: str = Field(min_length=1, max_length=80)
     starts_at: datetime
     ends_at: datetime
@@ -72,7 +74,7 @@ class AccountingPeriodRead(BaseModel):
     closed_by: str | None
 
 
-class PostingInput(BaseModel):
+class PostingInput(StrictCommand):
     account_id: uuid.UUID
     side: str
     amount: Decimal = Field(gt=0, max_digits=20, decimal_places=2)
@@ -92,10 +94,7 @@ class PostingInput(BaseModel):
         return value
 
 
-class JournalEntryCreate(BaseModel):
-    organization_id: uuid.UUID | None = None
-    # Transitional body field for older clients. The Idempotency-Key header is canonical.
-    idempotency_key: str | None = Field(default=None, min_length=8, max_length=160)
+class JournalEntryCreate(StrictCommand):
     source_type: str = Field(min_length=1, max_length=80)
     source_id: str | None = Field(default=None, max_length=255)
     description: str = Field(min_length=1, max_length=2000)
@@ -116,10 +115,18 @@ class JournalEntryCreate(BaseModel):
 
     @model_validator(mode="after")
     def balanced(self):
-        debits = sum((item.amount for item in self.postings if item.side == "DEBIT"), Decimal("0"))
-        credits = sum((item.amount for item in self.postings if item.side == "CREDIT"), Decimal("0"))
+        debits = sum(
+            (item.amount for item in self.postings if item.side == "DEBIT"),
+            Decimal("0"),
+        )
+        credits = sum(
+            (item.amount for item in self.postings if item.side == "CREDIT"),
+            Decimal("0"),
+        )
         if debits != credits:
-            raise ValueError("journal entry must balance: total debits must equal total credits")
+            raise ValueError(
+                "journal entry must balance: total debits must equal total credits"
+            )
         return self
 
 
