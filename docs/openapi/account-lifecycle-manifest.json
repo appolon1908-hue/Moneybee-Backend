@@ -1,7 +1,7 @@
 {
   "name": "account-lifecycle",
   "paths": {
-    "/api/v2/auth/bootstrap": "3252faa77e2c2775040d2605888c155071400faa1b905a6c490949305f5c3acf"
+    "/api/v2/auth/bootstrap": "b3dcac470a991d4e6b488698c16f911fa395723fa64a71cb08970128d5829f53"
   },
   "schemas": {
     "AccountBootstrapRead": "b0dc44a7a3e3ba585b0cbdad08da4682dde45a41ba0c04c0b5186919371758de"
