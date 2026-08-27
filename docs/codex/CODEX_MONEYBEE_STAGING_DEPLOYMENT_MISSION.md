@@ -1,683 +1,412 @@
-# CODEX MISSION — MONEYBEE BUSINESS-LENDING PLATFORM
+# CODEX MISSION — MONEYBEE STAGING SERVER UPDATE
 
+**Mission ID:** `MB-STAGING-SERVER-UPDATE-20260827`  
 **Mission owner:** Ralph Appolon  
-**Execution mode:** staging-first, fail-closed, evidence-driven  
-**Date issued:** 2026-08-26  
-**Production authorization:** NOT GRANTED
+**Issued:** 2026-08-27  
+**Execution mode:** staging-first, fail-closed, exact-SHA, evidence-driven  
+**Production authorization:** **NOT GRANTED**
 
-## Mission statement
+## Mission outcome
 
-Prepare, validate, package, and deploy the MoneyBee business-lending platform to a controlled staging environment. Finish the customer, lender/bank, and administrator web surfaces; make all public forms submit to authoritative MoneyBee APIs; deliver accepted CRM projections through the Codestra middleware to Odoo using durable outbox/inbox processing; and make inbound provider and middleware webhooks authenticated, replay-safe, deduplicated, observable, and recoverable.
+Integrate the reviewed MoneyBee authentication, portal-contract, finance-ledger, and secure deployment-scaffold work; produce protected staging release SHAs and immutable image digests; verify the candidate host without modifying it; and then update the **approved MoneyBee staging server only** through a protected deployment environment.
 
-Do not deploy a feature branch directly to production. Do not enable live credit pulls, live lender submissions, e-sign sends, funding confirmations, payments, payouts, SMS, email, Odoo writes, n8n delivery, or any other external side effect merely because code or CI passes. A passing build is evidence, not production approval.
+A GitHub Actions run that merely builds images or assembles a readiness packet is not a server deployment. Do not report `SERVER_UPDATED=YES` unless the remote host was changed, the exact deployed digests were verified on that host, health and identity checks passed, and rollback evidence was captured.
 
-The first permitted deployment target is **staging with all external and financial capabilities disabled**.
+Do not deploy a feature branch directly. Do not deploy to production. Do not enable credit pulls, lender submission, e-sign, funding, payments, payouts, email, SMS, Odoo writes, n8n delivery, or any other external side effect.
 
-## Repositories and current consolidation heads
+## Verified source state
+
+The following state was verified on 2026-08-27.
 
 ### Backend
 
 Repository: `appolon1908-hue/Moneybee-Backend`
 
-Current consolidated branch:
+| Purpose | PR / branch | Exact head | Exact-head result |
+|---|---|---|---|
+| Secure split-image staging scaffold | PR #14, `ops/secure-staging-scaffold` | `c2f58171ef6e0c7816e9d362d8250ba6d4a61945` | backend and secure-scaffold CI passed |
+| Keycloak account lifecycle and local tenancy | PR #15, `feature/keycloak-account-lifecycle` | `fb2866b033811bcb1c5e2522dc23bd350866164b` | backend and secure-scaffold CI passed |
+| Finance ledger and normalized portal contracts | PR #16, `feature/financial-system-foundation` | `07dda9c6c9b09c00d1c91ba545a5ef9bfc804dd3` | backend and portal-stack CI passed |
 
-```text
-release/portal-stack-consolidated
-80e1129d5732b4f971e80849e33d51c971bafa3e
-```
-
-Consolidation PR:
-
-```text
-https://github.com/appolon1908-hue/Moneybee-Backend/pull/10
-```
-
-Required next backend feature branch:
-
-```text
-feature/business-lender-crm-delivery
-```
+The secure scaffold is a descendant of `release/portal-stack-consolidated`; it is not an unrelated root.
 
 ### Frontend
 
 Repository: `appolon1908-hue/Moneybee-frontend-`
 
-Current consolidated branch:
+| Purpose | PR / branch | Exact head | Exact-head result |
+|---|---|---|---|
+| Secure frontend image scaffold | PR #16, `ops/secure-staging-scaffold` | `21869ac4cbe16da2e59226717d202e441adf37d0` | superseded by the OpenSSL fix below |
+| Runtime OpenSSL repair | PR #17, `fix/frontend-runtime-openssl` | `7b67a2ed252de4c9e307933c3d2003502e2bc81c` | secure frontend CI passed |
+| Finance portal and organization context | PR #19, `feature/financial-system-foundation` | `033e2190de4b9cf78f73c6d1a81f8668c5efef83` | frontend and portal-stack CI passed |
+| Unified borrower/lender/admin/finance contracts and separate portal tokens | PR #20, `feature/keycloak-account-lifecycle` | `b7b0abb17a3325ba04941b60d548897a9bf7e93d` | secure frontend CI passed |
+
+Frontend PR #18, `feat/enterprise-design-system`, targets `main` and is **not part of this staging-server mission**. Do not merge or deploy it as an accidental substitute for PR #20.
+
+## Integration branches already created
+
+Use these branches for the staging integration work. Do not force-push them and do not move them to unrelated commits.
 
 ```text
-release/portal-stack-consolidated
-e2b5f79763111177b7d19894eb9710cea56c546f
+Backend:
+integration/staging-moneybee-20260827
+starts at fb2866b033811bcb1c5e2522dc23bd350866164b
+
+Frontend:
+integration/staging-moneybee-20260827
+starts at b7b0abb17a3325ba04941b60d548897a9bf7e93d
 ```
 
-Consolidation PR:
+## Required Git integration procedure
+
+### Backend integration
+
+1. Fetch all refs and confirm the integration branch still starts at the recorded SHA.
+2. Merge exact finance head `07dda9c6c9b09c00d1c91ba545a5ef9bfc804dd3` into `integration/staging-moneybee-20260827` with a normal, reviewable merge commit.
+3. Resolve only genuine integration conflicts. Do not remove the split-image scaffold, runtime-path locks, account bootstrap, portal-token checks, finance permissions, idempotency, audit, outbox, or migration safeguards.
+4. Regenerate OpenAPI only through the repository script and commit the reviewed snapshot.
+5. Run all backend gates at the exact resulting head.
+
+Required backend gates:
 
 ```text
-https://github.com/appolon1908-hue/Moneybee-frontend-/pull/13
+PYTHON_COMPILE=PASS
+RUFF=PASS
+PYTEST=PASS
+POSTGRES_INTEGRATION=PASS
+IDENTITY_TENANCY=PASS
+PORTAL_CONTRACT_VALIDATION=PASS
+OPENAPI_DRIFT=PASS
+MIGRATION_EMPTY_TO_HEAD=PASS
+MIGRATION_BASELINE_TO_HEAD=PASS
+MIGRATION_DOWNGRADE_UPGRADE=PASS
+BACKEND_API_IMAGE_BUILD=PASS
+BACKEND_WORKER_IMAGE_BUILD=PASS
+BACKEND_MIGRATE_IMAGE_BUILD=PASS
+VULNERABILITY_GATE=PASS
 ```
 
-Required next frontend feature branch:
+### Frontend integration
+
+1. Fetch all refs and confirm the integration branch still starts at the recorded SHA.
+2. Merge exact finance head `033e2190de4b9cf78f73c6d1a81f8668c5efef83` into `integration/staging-moneybee-20260827` with a normal, reviewable merge commit.
+3. Preserve the OpenSSL fix, separate borrower/lender/admin Keycloak client IDs, per-portal session storage, canonical API route builders, contract snapshot, and selected `X-Organization-ID` propagation.
+4. Resolve duplicate API clients in favor of one typed client pattern. Do not reintroduce legacy generic `/portal/*` transport paths or singular lender decision routes.
+5. Run all frontend gates at the exact resulting head.
+
+Required frontend gates:
 
 ```text
-feature/business-lender-site-forms
+PNPM_FROZEN_INSTALL=PASS
+CONTRACTS_CHECK=PASS
+TYPESCRIPT=PASS
+VITEST=PASS
+MARKETING_BUILD=PASS
+BORROWER_BUILD=PASS
+LENDER_BUILD=PASS
+ADMIN_BUILD=PASS
+MARKETING_IMAGE_BUILD=PASS
+BORROWER_IMAGE_BUILD=PASS
+LENDER_IMAGE_BUILD=PASS
+ADMIN_IMAGE_BUILD=PASS
+VULNERABILITY_GATE=PASS
 ```
 
-## Source-control rules
+### Protected staging release branches
 
-1. Work only in the repository that owns the code.
-2. Backend application, migrations, workers, integration contracts, webhooks, and deployment manifests belong in `Moneybee-Backend`.
-3. Vue pages, forms, route definitions, typed API clients, validation, UI tests, and frontend Docker assets belong in `Moneybee-frontend-`.
-4. Do not copy frontend source into the backend repository or backend source into the frontend repository.
-5. Do not use GitHub Actions workflows that rewrite branches or auto-commit generated fixes.
-6. Keep each PR focused and reviewable.
-7. Do not merge PR #10 or PR #13 until their exact current heads are green and independently reviewed.
-8. Do not close superseded PRs until their lineage is recorded in the replacement PRs.
-9. Create protected branches:
+After both integration heads are green:
+
+1. Create `release/staging` in both repositories from the approved consolidated baseline.
+2. Protect both branches before merging: pull requests required, exact-head checks required, independent approval required, conversations resolved, force pushes disabled, branch deletion disabled.
+3. Open one backend integration PR and one frontend integration PR into `release/staging`.
+4. Record the exact approved heads in both PR bodies.
+5. Merge only through the protected controls.
+6. Build release artifacts from the exact protected merged SHAs, never from the feature or integration branches.
+
+If branch protection cannot be configured with the available authority, stop with `GO_NO_GO=NO_GO` and report the missing control. Do not create an unprotected release and call it protected.
+
+## Canonical end-to-end request path to verify after deployment
+
+For borrower, lender, administrator, and finance flows, prove this path with request IDs and database evidence:
 
 ```text
-release/staging
-release/production
+Vue portal
+→ typed API client
+→ portal-specific Keycloak Authorization Code + PKCE session
+→ Authorization: Bearer <portal-specific token>
+→ X-Organization-ID
+→ X-Request-ID
+→ X-Correlation-ID
+→ Idempotency-Key for replay-sensitive mutations
+→ If-Match for version-controlled writes
+→ FastAPI /api/v2 route
+→ JWT signature/issuer/audience/expiry validation
+→ azp or client_id portal-token validation
+→ local issuer + subject identity resolution
+→ active organization, membership, permission and resource-scope enforcement
+→ service/domain command
+→ one PostgreSQL transaction
+→ authoritative domain rows + idempotency evidence + audit event + outbox event
+→ commit
+→ typed OpenAPI response
+→ frontend state
 ```
 
-10. Require pull requests, exact-head CI, independent approval, and no force pushes on release branches.
-11. Build release artifacts only from the exact protected merged SHA.
+A borrower token must fail on lender and administrator routes with the reviewed portal-token mismatch response. Cross-organization query/body attempts must fail closed.
 
-## Clean PR sequence
+## Server gate: no mutation before read-only evidence
 
-### Backend sequence
+The current candidate is `49.12.145.107`, but it is not approved merely because it appears in an old workflow default.
+
+Run the reviewed read-only preflight first, using the protected `staging-preflight` environment and strict known-host verification. The required script is:
 
 ```text
-auth/local-identity-tenancy
-    ↓
-PR #10: release/portal-stack-consolidated
-    ↓
-feature/business-lender-crm-delivery
-    ↓
-release/staging
+ops/runtime-path-preflight.sh
 ```
 
-The CRM-delivery PR must contain only:
-
-- public business-funding, contact, lender-partner, and referral-partner APIs;
-- consent and attribution evidence;
-- CRM projection models and migration;
-- transactional outbox creation;
-- Codestra delivery adapter;
-- signed Codestra receipt webhook;
-- inbox/outbox retry, replay, dead-letter, and requeue operations;
-- Odoo-ready versioned event contract;
-- integration and security tests;
-- OpenAPI update;
-- worker and deployment documentation.
-
-### Frontend sequence
+Capture and review:
 
 ```text
-frontend/keycloak-pkce
-    ↓
-PR #13: release/portal-stack-consolidated
-    ↓
-feature/business-lender-site-forms
-    ↓
-release/staging
+hostname and FQDN
+public/private IPs
+operating system and kernel
+CPU, memory and disk capacity
+Docker and Compose versions
+running containers, networks and volumes
+listening ports
+firewall state
+Caddy, Kong, Nginx and other edge ownership
+existing databases and persistent volumes
+backup destination
+DNS ownership
+SSH account and command restrictions
 ```
 
-The site/forms PR must contain only:
-
-- public business-lending and lender-partner pages;
-- customer-resource and legal routes;
-- accessible production forms;
-- typed clients for the reviewed backend contracts;
-- customer, lender, and admin navigation updates;
-- form unit, component, and browser tests;
-- production frontend builds and images.
-
-## Required public URLs
-
-### Production targets
+Expected MoneyBee candidate paths are:
 
 ```text
-https://moneybeeloan.com                 marketing and customer resources
-https://www.moneybeeloan.com             canonical redirect or marketing alias
-https://app.moneybeeloan.com             borrower/client portal
-https://lenders.moneybeeloan.com         lender and bank portal
-https://admin.moneybeeloan.com           MoneyBee admin/operations portal
-https://api.moneybeeloan.com/api/v2      authoritative API
-https://auth.codestra.co/realms/codestra canonical Keycloak authority
+/opt/moneybee/releases
+/opt/moneybee/current
+/etc/moneybee/backend.env
+/etc/moneybee/secrets/postgres_password
+/etc/moneybee/secrets/redis.acl
+/var/lib/moneybee/postgres
+/var/lib/moneybee/redis
+/var/lib/moneybee/caddy/data
+/var/lib/moneybee/caddy/config
+/var/backups/moneybee
 ```
 
-### Staging targets
+Do not create, chmod, chown, move, delete, restart, stop, or overwrite anything during preflight.
 
-Use approved DNS names, preferably:
+Abort if the candidate host is owned by another workload, the proposed paths collide with an existing system, resources are insufficient, edge ownership is unclear, or backup storage is unresolved.
 
-```text
-https://staging.moneybeeloan.com
-https://app-staging.moneybeeloan.com
-https://lenders-staging.moneybeeloan.com
-https://admin-staging.moneybeeloan.com
-https://api-staging.moneybeeloan.com/api/v2
-```
+Convert approved evidence into a reviewed `deploy/runtime-paths.lock.json` containing the raw-evidence SHA-256. Never fabricate a runtime lock from proposed values.
 
-Do not change production DNS until staging validation is complete.
+## Immutable release artifacts
 
-## Required marketing and customer-resource pages
-
-Keep the existing financing and industry pages and add the missing focused resources.
-
-### Financing and industry pages
-
-```text
-/business-loans
-/working-capital
-/business-line-of-credit
-/equipment-financing
-/sba-loans
-/fast-business-funding
-/restaurant-financing
-/trucking-business-loans
-/construction-business-loans
-/retail-business-loans
-```
-
-### Business-lender and partner pages
-
-```text
-/for-lenders
-/lender-partners
-/lender-programs
-/submit-a-deal
-/partner-with-us
-/referral-partners
-/brokers
-/brokers/apply
-```
-
-### Customer resources and legal pages
-
-```text
-/how-it-works
-/eligibility
-/required-documents
-/faq
-/contact
-/support
-/security
-/privacy
-/terms
-/consents-and-disclosures
-/accessibility
-/complaints
-```
-
-Legal, consent, disclosure, and privacy text must be presented as counsel-reviewable content and must not claim legal approval without evidence.
-
-## Required public forms
-
-Implement and validate these forms:
-
-1. Business-funding prequalification.
-2. General contact request.
-3. Callback request.
-4. Lender/bank partnership inquiry.
-5. Broker/referral-partner application.
-6. Deal-submission inquiry that creates a controlled intake record but does not submit to a live lender.
-
-Every public mutation must include:
-
-- `Idempotency-Key`;
-- canonical request hash;
-- duplicate-key replay returning the original result;
-- conflict response when the same key is reused with a different payload;
-- server-side validation and normalization;
-- email normalization;
-- phone normalization;
-- UTM/referrer/affiliate attribution;
-- consent type, document version, content hash, accepted timestamp, and source evidence;
-- request/correlation IDs;
-- rate limiting and bot-abuse controls;
-- accessible validation messages;
-- safe error responses without internal details;
-- one authoritative database record, audit event, and outbox event in the same transaction.
-
-## Required API endpoints
-
-Keep `/api/v2` canonical. Proposed endpoint names may be adjusted only if the final OpenAPI contract remains coherent and all clients are regenerated.
-
-### Public intake
-
-```text
-POST /api/v2/public/prequalifications
-POST /api/v2/public/contact-requests
-POST /api/v2/public/callback-requests
-POST /api/v2/public/lender-partner-inquiries
-POST /api/v2/public/referral-partner-inquiries
-POST /api/v2/public/deal-submission-inquiries
-```
-
-Do not expose intake records by predictable reference alone. Any public continuation or status URL must use an opaque, expiring, one-time or otherwise appropriately protected token.
-
-### CRM delivery administration
-
-```text
-GET  /api/v2/admin/crm-deliveries
-GET  /api/v2/admin/crm-deliveries/{delivery_id}
-POST /api/v2/admin/crm-deliveries/{delivery_id}/requeue
-GET  /api/v2/admin/integration-health
-GET  /api/v2/admin/integration-inbox
-GET  /api/v2/admin/operational-exceptions
-POST /api/v2/admin/operational-exceptions/{exception_id}/resolve
-```
-
-All admin routes require explicit local permissions, active MoneyBee membership, tenant/resource validation, optimistic versions where applicable, and audit records.
-
-### Webhooks
-
-```text
-POST /api/v2/webhooks/codestra/receipts
-POST /api/v2/webhooks/providers/{provider}
-POST /api/v2/webhooks/middesk
-POST /api/v2/webhooks/plaid
-```
-
-Each webhook must enforce:
-
-- provider allowlist;
-- JSON content type where applicable;
-- request-size ceiling;
-- timestamp/replay window;
-- constant-time signature verification;
-- secret rotation support;
-- provider event-ID uniqueness;
-- raw-body hash uniqueness and collision rejection;
-- durable receipt before acknowledgment;
-- bounded retry policy;
-- dead-letter state;
-- audited manual requeue;
-- raw payload hidden from normal portal responses;
-- no direct financial action from receipt intake.
-
-## MoneyBee → Codestra → Odoo delivery contract
-
-MoneyBee remains the lending system of record.
-
-The required path is:
-
-```text
-MoneyBee command transaction
-    → MoneyBee durable outbox
-    → Codestra authenticated middleware endpoint
-    → Codestra durable, deduplicated inbox
-    → allowlisted Odoo CRM projection command
-    → Odoo lead/contact/opportunity upsert
-    → signed Codestra receipt
-    → MoneyBee durable inbox
-    → delivery marked DELIVERED or FAILED with evidence
-```
-
-Do not allow Odoo, n8n, or Codestra to write directly to MoneyBee PostgreSQL.
-
-### Outbound authentication
-
-Use OAuth 2.0 client credentials for machine identity and add a versioned HMAC-signed event envelope when required by the approved Codestra contract.
-
-Each outbound event must contain at least:
-
-```text
-event_id
-event_type
-event_version
-occurred_at
-aggregate_type
-aggregate_id
-tenant_id
-correlation_id
-causation_id
-idempotency_key
-payload
-```
-
-### Odoo projection behavior
-
-The Odoo bridge must upsert by stable MoneyBee identifiers, not by fuzzy names or email alone.
-
-Project approved fields for:
-
-- business name;
-- contact name;
-- normalized email and phone;
-- requested amount;
-- use of funds;
-- time in business;
-- monthly revenue;
-- postal code;
-- source landing page;
-- UTM and affiliate attribution;
-- MoneyBee intake/reference ID;
-- intake type;
-- current MoneyBee status;
-- assigned MoneyBee owner where approved;
-- consent evidence reference, not unrestricted raw compliance payloads.
-
-Odoo must not overwrite MoneyBee application, underwriting, offer, funding, or compliance state.
-
-## Capability freeze for staging
-
-The following values must remain false or disabled during initial staging deployment:
-
-```text
-credit.live_pull=false
-lenders.live_submission=false
-esign.live_send=false
-funding.live_confirmation=false
-payments=false
-payouts=false
-ENABLE_EXTERNAL_DELIVERY=false
-LIVE_WRITES=false
-ODOO_WRITE=false
-N8N_DELIVERY_ENABLED=false
-communications.live_email=false
-communications.live_sms=false
-```
-
-Forms may create authoritative MoneyBee records and pending outbox events. Disabled workers must leave those events pending; they must not consume, retry, or dead-letter them while delivery is disabled.
-
-After staging validation, enable a **sandbox-only CRM delivery canary** through a separate approved change. Do not enable live lending or money movement.
-
-## Docker release requirements
-
-Keep frontend and backend releases separate.
-
-### Required images
+Publish and deploy separate images by digest:
 
 ```text
 ghcr.io/appolon1908-hue/moneybee-backend
 ghcr.io/appolon1908-hue/moneybee-worker
-ghcr.io/appolon1908-hue/moneybee-webhook-worker
+ghcr.io/appolon1908-hue/moneybee-migrate
 ghcr.io/appolon1908-hue/moneybee-marketing
 ghcr.io/appolon1908-hue/moneybee-borrower
 ghcr.io/appolon1908-hue/moneybee-lender
 ghcr.io/appolon1908-hue/moneybee-admin
 ```
 
-Build each image from the exact protected merged SHA. Publish and deploy by immutable digest, not by mutable tags.
-
-For every image produce:
-
-- image digest;
-- SBOM;
-- vulnerability scan;
-- provenance/attestation;
-- signature and verification evidence;
-- source SHA label;
-- build timestamp;
-- version endpoint or static release identity.
-
-The production/staging server must not run `docker compose build`. It must only pull reviewed images by digest.
-
-### Required release Compose services
+For every image record:
 
 ```text
-postgres
-redis
-migrate
-api
-worker
-webhook-worker
-marketing
-borrower
-lender
-admin
-caddy or approved edge proxy
+protected source SHA
+immutable image digest
+SBOM digest
+vulnerability result
+provenance/attestation
+signature verification
+build timestamp
+release identity label
 ```
 
-The `migrate` service must run once and complete successfully before API/worker rollout. PostgreSQL and Redis must be private-only.
+The target host must never run `docker compose build`. It may only pull the digests recorded in the reviewed `deploy/release.lock.json`.
 
-## Target-host gate
+## Readiness packet is not deployment
 
-Do not assume a deployment host from old notes. In particular, do not deploy to `49.12.145.107` without first proving that the host is approved for MoneyBee; it has previously been associated with another controlled workload.
-
-Before changing a server, record:
+The existing workflow named `staging-deployment-readiness-packet` only validates locks and assembles a review artifact. Its own output states:
 
 ```text
-hostname
-public and private IPs
-operating system
-CPU/RAM/disk
-running services
-Docker version
-listening ports
-firewall rules
-existing Caddy/Kong/Nginx ownership
-existing databases and volumes
-backup destination
-DNS ownership
-SSH access method
+REMOTE_DEPLOYMENT=NOT_PERFORMED
+LIVE_SERVER_CHANGED=NO
 ```
 
-Abort the deployment if the host identity, ownership, available resources, or network role is unresolved.
+Do not report a server update after running that workflow.
 
-## Keycloak requirements
+## Actual staging deployment executor
 
-Canonical authority:
+If no reviewed remote executor exists, add one in a focused, independently reviewed operations PR. It must:
+
+1. Run only from `refs/heads/release/staging`.
+2. Use the protected `staging-deploy` GitHub environment.
+3. Require the exact confirmation string `APPLY-MONEYBEE-STAGING-49.12.145.107`.
+4. Verify the backend SHA, frontend SHA, runtime-lock hash, release-lock hash, configuration checksum, and every image digest before SSH.
+5. Use strict known-host validation and a dedicated least-privilege deployment identity. Prefer a forced-command or allowlisted deployment wrapper; do not expose unrestricted root SSH merely for convenience.
+6. Refuse mutable image tags and refuse Compose files containing `build:`.
+7. Create a timestamped release directory beneath `/opt/moneybee/releases` and never edit the previous release in place.
+8. Capture the previous `/opt/moneybee/current` target and deployed digest tuple before applying changes.
+9. Take and verify a PostgreSQL backup before migrations.
+10. Run the one-shot migration image and require a single Alembic head.
+11. Start data services privately, then API, workers, and the four frontend services, then the reviewed edge service.
+12. Keep all external and live-finance capabilities disabled.
+13. Verify health, readiness, version identity, container digests, restart behavior, logs, and database connectivity.
+14. Switch `/opt/moneybee/current` atomically only after all checks pass.
+15. Roll back automatically to the previous reviewed release tuple when a post-deploy check fails.
+16. Upload non-secret deployment and rollback evidence as a GitHub artifact.
+
+Do not put SSH private keys, registry tokens, database passwords, Redis ACLs, Keycloak secrets, SMTP credentials, provider credentials, or DKIM private keys in Git, issue comments, workflow artifacts, Docker labels, or command output.
+
+## Required staging capability freeze
+
+The deployed environment must fail closed with all external effects disabled:
 
 ```text
-https://auth.codestra.co/realms/codestra
+ENABLE_EXTERNAL_DELIVERY=false
+MIDDLEWARE_PROVIDER=disabled
+LIVE_WRITES=false
+ODOO_WRITE=false
+N8N_DELIVERY_ENABLED=false
+CREDIT_LIVE_PULL=false
+LENDERS_LIVE_SUBMISSION=false
+ESIGN_LIVE_SEND=false
+FUNDING_LIVE_CONFIRMATION=false
+PAYMENTS_ENABLED=false
+PAYOUTS_ENABLED=false
+COMMUNICATIONS_LIVE_EMAIL=false
+COMMUNICATIONS_LIVE_SMS=false
+PRODUCTION_DIALING=DISABLED
 ```
 
-Use Authorization Code + PKCE S256 for browser portals. Do not put a client secret in a browser application.
+Use the repository's canonical variable names where they differ, but the effective capability state must remain false. Disabled workers must not consume pending external-delivery events.
 
-Configure exact staging and production redirect, silent-callback, logout, and web-origin allowlists for borrower, lender, and admin portals.
+## Database gate
 
-Run browser E2E for:
-
-- login;
-- callback;
-- logout;
-- refresh;
-- expired session;
-- deep link;
-- multi-organization selection;
-- borrower/lender/admin role separation;
-- denied tenant;
-- denied permission;
-- disabled user;
-- inactive membership.
-
-Frontend route guards are usability controls only. Backend local identity, memberships, permissions, tenant scope, and resource ownership remain authoritative.
-
-## Database and migration gates
-
-Use PostgreSQL 17 for staging and production-like evidence.
-
-Required evidence:
+Before rollout, record:
 
 ```text
-empty database → alembic head = PASS
-current baseline → new head = PASS
-head → controlled downgrade → head = PASS
-production-like restored copy → head = PASS
-backup = PASS
-restore = PASS
-RTO recorded
-RPO recorded
-single Alembic head confirmed
+BACKUP=PASS
+BACKUP_SHA256=<digest>
+RESTORE_TEST=PASS
+RPO=<recorded value>
+RTO=<recorded value>
+ALEMBIC_HEAD=<single revision>
+EMPTY_TO_HEAD=PASS
+BASELINE_TO_HEAD=PASS
+DOWNGRADE_UPGRADE=PASS
 ```
 
-Do not use runtime schema auto-creation in staging or production.
+Do not use `Base.metadata.create_all()` in staging. Do not use SQLite as migration or transaction evidence.
 
-## Validation matrix
+## Staging smoke and security validation
 
-### Backend
+Verify the approved staging hostnames or reviewed temporary host-header equivalents:
 
 ```text
-RUFF=PASS
-PYTHON_COMPILE=PASS
-PYTEST=PASS
-POSTGRES_INTEGRATION=PASS
-TENANT_ISOLATION=PASS
-RBAC_MATRIX=PASS
-IDEMPOTENCY=PASS
-CONCURRENCY=PASS
-OPENAPI_DRIFT=PASS
-MIGRATION_CYCLE=PASS
-BACKEND_IMAGE_BUILD=PASS
-WORKER_IMAGE_BUILD=PASS
-WEBHOOK_WORKER_IMAGE_BUILD=PASS
+staging.moneybeeloan.com
+app-staging.moneybeeloan.com
+lenders-staging.moneybeeloan.com
+admin-staging.moneybeeloan.com
+api-staging.moneybeeloan.com
 ```
 
-### Frontend
+Required checks:
 
 ```text
-PNPM_LOCKFILE_COMMITTED=YES
-PNPM_FROZEN_INSTALL=PASS
-TYPESCRIPT=PASS
-UNIT_TESTS=PASS
-COMPONENT_TESTS=PASS
-MARKETING_BUILD=PASS
-BORROWER_BUILD=PASS
-LENDER_BUILD=PASS
-ADMIN_BUILD=PASS
-ALL_FRONTEND_IMAGES=PASS
-PLAYWRIGHT_E2E=PASS
-ACCESSIBILITY_SMOKE=PASS
+DNS/TLS or approved temporary routing=PASS
+CORS exact origins=PASS
+security headers=PASS
+PostgreSQL private-only=PASS
+Redis private-only=PASS
+/api/v2/health=PASS
+/api/v2/ready=PASS
+/api/v2/version=PASS
+release SHA and digest identity=PASS
+borrower PKCE login and callback=PASS
+lender PKCE login and callback=PASS
+admin PKCE login and callback=PASS
+portal-token separation=PASS
+organization selection and tenant isolation=PASS
+borrower workspace=PASS
+lender workspace=PASS
+admin workspace=PASS
+finance accounts/periods/journals/trial balance=PASS
+idempotent replay=PASS
+idempotency collision rejection=PASS
+optimistic-concurrency rejection=PASS
+migration restart behavior=PASS
+container restart behavior=PASS
+rollback exercise=PASS
+external deliveries observed=0
+live financial actions observed=0
 ```
 
-### Forms and integrations
+The finance screen records accounting state only. It must not initiate ACH, wire, card, lender funding, credit, or provider calls.
 
-```text
-PREQUAL_FORM=PASS
-CONTACT_FORM=PASS
-CALLBACK_FORM=PASS
-LENDER_PARTNER_FORM=PASS
-REFERRAL_PARTNER_FORM=PASS
-DEAL_INQUIRY_FORM=PASS
-DUPLICATE_CLICK=PASS
-IDEMPOTENCY_COLLISION=PASS
-CONSENT_EVIDENCE=PASS
-RATE_LIMIT=PASS
-CODESRA_OUTBOX=PASS
-CODESRA_INBOX=PASS
-ODOO_SANDBOX_UPSERT=PASS
-ODOO_DUPLICATE_DELIVERY=PASS
-WEBHOOK_SIGNATURE=PASS
-WEBHOOK_REPLAY=PASS
-WEBHOOK_COLLISION=PASS
-DEAD_LETTER_REQUEUE=PASS
-```
+## Stop conditions
 
-### Infrastructure
+Stop immediately and report `GO_NO_GO=NO_GO` when any of these is true:
 
-```text
-DNS=PASS
-TLS=PASS
-CADDY_OR_EDGE_CONFIG=PASS
-CORS=PASS
-SECURITY_HEADERS=PASS
-POSTGRES_PRIVATE=PASS
-REDIS_PRIVATE=PASS
-FIREWALL=PASS
-HEALTH=PASS
-READY=PASS
-VERSION_IDENTITY=PASS
-MONITORING=PASS
-ALERTING=PASS
-BACKUP_RESTORE=PASS
-ROLLBACK=PASS
-RESTART_BEHAVIOR=PASS
-```
+- an exact source SHA moved or cannot be verified;
+- required CI is not green at the integration or protected merged head;
+- review or branch protection is missing;
+- the runtime host or path ownership is unresolved;
+- SSH known-host evidence or protected environment secrets are missing;
+- a release image is mutable, unsigned, unscanned, or not tied to the protected SHA;
+- backup or restore verification fails;
+- migration creates multiple heads or rollback is unproven;
+- any external/live capability resolves true;
+- a health, tenant-isolation, portal-token, finance, restart, or rollback test fails;
+- the deployment executor cannot prove the exact remote digest tuple.
 
-## Staging deployment sequence
-
-1. Reconcile PR #10 and PR #13 with their bases.
-2. Run exact-head CI and obtain independent review.
-3. Merge the consolidation PRs in dependency order.
-4. Create and complete the focused backend and frontend feature PRs.
-5. Regenerate and commit OpenAPI and typed clients.
-6. Merge reviewed feature PRs into protected `release/staging`.
-7. Build all images from the exact protected merged SHAs.
-8. Generate SBOM, scans, provenance, signatures, and digests.
-9. Inventory and approve the staging host.
-10. Configure secrets outside Git.
-11. Configure staging DNS, TLS, Caddy/edge routes, and Keycloak.
-12. Back up the staging database or confirm an empty staging database.
-13. Pull images by digest.
-14. Run the one-time migration service.
-15. Start API and workers with external delivery disabled.
-16. Start marketing, borrower, lender, and admin portals.
-17. Validate health, readiness, version identity, logs, metrics, and restart behavior.
-18. Run browser E2E and form E2E.
-19. Confirm forms create MoneyBee records and pending outbox events.
-20. Confirm disabled delivery workers leave events pending.
-21. Exercise rollback to the previous immutable release.
-22. Record an explicit staging acceptance packet.
-23. Only after separate approval, run one sandbox Codestra→Odoo canary.
-
-## Production gate
-
-Do not deploy production until all of the following are true:
-
-```text
-STAGING_ACCEPTANCE=PASS
-INDEPENDENT_REVIEW=PASS
-PROTECTED_MERGE=PASS
-EXACT_MERGED_SHA_VERIFIED=YES
-IMMUTABLE_IMAGES=YES
-IMAGE_SIGNATURES=PASS
-SBOM=PASS
-VULNERABILITY_GATE=PASS
-MIGRATION_REHEARSAL=PASS
-BACKUP_RESTORE=PASS
-KEYCLOAK_E2E=PASS
-FORM_E2E=PASS
-TENANT_ISOLATION=PASS
-WEBHOOK_SECURITY=PASS
-ODOO_SANDBOX_CANARY=PASS
-ROLLBACK=PASS
-PRODUCTION_CHANGE_APPROVAL=APPROVED
-```
-
-Even after a production web deployment, keep all live financial capabilities disabled until each capability receives its own provider-readiness, compliance, security, and operational approval.
+Do not weaken a gate, use a wildcard redirect, bypass Keycloak, manually edit production-like data, or run unreviewed commands to force a pass.
 
 ## Required final Codex report
 
-Codex must finish by posting an exact status record, not a general summary:
+Return one evidence record containing:
 
 ```text
-BACKEND_SOURCE_SHA=
-FRONTEND_SOURCE_SHA=
-BACKEND_PR=
-FRONTEND_PR=
-BACKEND_CI=
-FRONTEND_CI=
-OPENAPI_SHA256=
-BACKEND_IMAGE_DIGEST=
-WORKER_IMAGE_DIGEST=
-WEBHOOK_WORKER_IMAGE_DIGEST=
-MARKETING_IMAGE_DIGEST=
-BORROWER_IMAGE_DIGEST=
-LENDER_IMAGE_DIGEST=
-ADMIN_IMAGE_DIGEST=
-SBOM=PASS|FAIL
-SIGNATURE_VERIFICATION=PASS|FAIL
-MIGRATION=PASS|FAIL
-BACKUP_RESTORE=PASS|FAIL
-KEYCLOAK_E2E=PASS|FAIL
-FORM_E2E=PASS|FAIL
-CODESRA_OUTBOX=PASS|FAIL
-ODOO_SANDBOX_DELIVERY=PASS|FAIL|NOT_RUN
-WEBHOOK_SECURITY=PASS|FAIL
-STAGING_URLS=
-STAGING_DEPLOYED=YES|NO
-ROLLBACK_EXERCISED=YES|NO
-PRODUCTION_DEPLOYED=NO
-LIVE_CREDIT_PULL=DISABLED
-LIVE_LENDER_SUBMISSION=DISABLED
-LIVE_ESIGN=DISABLED
-LIVE_FUNDING=DISABLED
-LIVE_PAYMENTS=DISABLED
-LIVE_PAYOUTS=DISABLED
-LIVE_ODOO_WRITE=DISABLED
-FINAL_STATUS=PASS|PARTIAL|BLOCKED
-BLOCKERS=
+MISSION_ID=MB-STAGING-SERVER-UPDATE-20260827
+BACKEND_INTEGRATION_SHA=<sha>
+FRONTEND_INTEGRATION_SHA=<sha>
+BACKEND_RELEASE_SHA=<protected merged sha>
+FRONTEND_RELEASE_SHA=<protected merged sha>
+BACKEND_IMAGE_DIGESTS=<digests>
+FRONTEND_IMAGE_DIGESTS=<digests>
+RUNTIME_PREFLIGHT_RUN=<run or evidence reference>
+RUNTIME_EVIDENCE_SHA256=<digest>
+RELEASE_LOCK_SHA256=<digest>
+CONFIGURATION_CHECKSUM=<digest>
+BACKUP_REFERENCE=<reference>
+BACKUP_SHA256=<digest>
+MIGRATION_HEAD=<revision>
+DEPLOYMENT_RUN=<run or change reference>
+TARGET_HOST=<verified host>
+DEPLOYED_RELEASE_ROOT=<path>
+REMOTE_BACKEND_DIGEST=<digest>
+REMOTE_FRONTEND_DIGESTS=<digests>
+HEALTH=PASS|FAIL
+READY=PASS|FAIL
+VERSION_IDENTITY=PASS|FAIL
+TENANT_ISOLATION=PASS|FAIL
+PORTAL_TOKEN_SEPARATION=PASS|FAIL
+FINANCE_SMOKE=PASS|FAIL
+ROLLBACK=PASS|FAIL
+EXTERNAL_DELIVERIES=0
+LIVE_FINANCIAL_ACTIONS=0
+SERVER_UPDATED=YES|NO
+PRODUCTION_CHANGED=NO
+GO_NO_GO=GO|NO_GO
+BLOCKERS=<none or exact blockers>
 ```
 
-Never report `PASS`, `READY`, `DEPLOYED`, or `LIVE` without direct evidence for the exact source SHA and artifact digest.
+`SERVER_UPDATED=YES` is permitted only after remote digest and runtime evidence proves the staging host changed successfully. Otherwise report `SERVER_UPDATED=NO` without ambiguity.

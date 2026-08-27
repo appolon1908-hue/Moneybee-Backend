@@ -1,71 +1,70 @@
 # MoneyBee Codex Start Here
 
-This repository is governed by:
+## Current mission
 
-1. `docs/architecture/MONEYBEE_PRODUCTION_BLUEPRINT_V3.md`
-2. `docs/codex/PR_DELIVERY_GOVERNANCE.md`
-3. `docs/codex/MONEYBEE_12_STEP_IMPLEMENTATION.md`
-4. The individual work-package specification for the current step.
+Execute:
 
-These documents supersede earlier generic architecture or hardening documents where they conflict.
+`docs/codex/CODEX_MONEYBEE_STAGING_DEPLOYMENT_MISSION.md`
 
-## Current Status
+Mission ID:
 
-OVERALL_SYSTEM_STATUS = PARTIAL
-FINAL_STATUS = PARTIAL
+```text
+MB-STAGING-SERVER-UPDATE-20260827
+```
 
-MoneyBee is not production-ready.
+The current objective is to integrate the reviewed authentication, portal-contract, finance-ledger, and secure staging-scaffold work; create protected staging release SHAs; prove the candidate host and runtime paths; publish immutable digest-pinned images; and update the approved **staging** server through the protected deployment boundary.
 
-Do not infer production readiness from:
+## Integration branches
 
-- CI success
-- migrations passing
-- provider credentials existing
-- no failed outbox records
-- configuration completeness
-- an individual work package passing
+```text
+Backend repository:
+integration/staging-moneybee-20260827
+starting SHA: fb2866b033811bcb1c5e2522dc23bd350866164b
+finance head to integrate: 07dda9c6c9b09c00d1c91ba545a5ef9bfc804dd3
 
-## First Backend Work Package
+Frontend repository:
+integration/staging-moneybee-20260827
+starting SHA: b7b0abb17a3325ba04941b60d548897a9bf7e93d
+finance head to integrate: 033e2190de4b9cf78f73c6d1a81f8668c5efef83
+```
 
-Implement:
+Frontend PR #18 is a separate design-system PR and is not part of this server-update mission.
 
-`auth/local-identity-tenancy`
+## Execution order
 
-Read:
+1. Verify every recorded source SHA and exact-head workflow.
+2. Integrate the finance heads into the dedicated integration branches without unrelated feature work.
+3. Run full backend and frontend validation at the resulting exact heads.
+4. Create and protect `release/staging` in both repositories.
+5. Merge only through reviewed protected pull requests.
+6. Build, sign, scan, attest, and publish images from the protected merged SHAs.
+7. Run the read-only runtime-path preflight for candidate host `49.12.145.107`.
+8. Stop if host identity, workload ownership, paths, backup storage, secrets, or branch protection are unresolved.
+9. Generate and review the release/runtime locks and readiness packet.
+10. Use a separately reviewed protected staging deployment executor to apply the immutable digest tuple.
+11. Verify health, release identity, tenant isolation, separate portal tokens, finance flows, restart behavior, and rollback.
+12. Return the exact evidence record required by the mission.
 
-`docs/codex/STEP_01B_BACKEND_IDENTITY_TENANCY.md`
+## Non-negotiable safety boundary
 
-Do not begin Step 2 until the paired frontend Keycloak PKCE PR and this backend identity PR are independently reviewable and have passed their required tests.
+```text
+PRODUCTION_AUTHORIZATION=NOT_GRANTED
+PRODUCTION_CHANGED=NO
+ENABLE_EXTERNAL_DELIVERY=false
+MIDDLEWARE_PROVIDER=disabled
+LIVE_WRITES=false
+ODOO_WRITE=false
+N8N_DELIVERY_ENABLED=false
+CREDIT_LIVE_PULL=false
+LENDERS_LIVE_SUBMISSION=false
+ESIGN_LIVE_SEND=false
+FUNDING_LIVE_CONFIRMATION=false
+PAYMENTS_ENABLED=false
+PAYOUTS_ENABLED=false
+COMMUNICATIONS_LIVE_EMAIL=false
+COMMUNICATIONS_LIVE_SMS=false
+```
 
-## Mandatory Rules
+The existing `staging-deployment-readiness-packet` workflow does not update a remote server. Never report deployment success from that workflow alone.
 
-Do not auto-merge.
-
-Do not deploy production.
-
-Do not enable live financial capabilities.
-
-Do not modify production data manually.
-
-Do not use `Base.metadata.create_all()` as a production migration.
-
-Do not rely on SQLite as proof of PostgreSQL transactional behavior.
-
-Do not allow Odoo or n8n to write directly to MoneyBee PostgreSQL.
-
-Do not route all external events through one generic CRM capability.
-
-Do not automatically retry unsafe provider POST operations unless the provider supplies stable idempotency semantics.
-
-## Final Authority
-
-MoneyBee owns lending truth.
-
-Odoo Community is a CRM projection.
-
-Codestra is an integration/control plane.
-
-n8n executes allowlisted workflows.
-
-External providers integrate through adapters and durable events.
-
+Do not auto-merge. Do not force-push. Do not deploy feature branches. Do not store credentials in Git or artifacts. Do not weaken host, identity, tenant, migration, image, backup, or rollback gates.
