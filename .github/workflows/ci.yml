@@ -114,9 +114,14 @@ jobs:
           cache-from: type=gha,scope=backend-${{ matrix.role }}
           cache-to: type=gha,mode=max,scope=backend-${{ matrix.role }}
       - name: Scan backend ${{ matrix.role }} image
+        run: |
+          docker run --rm moneybee-${{ matrix.role }}:ci python -c \
+            "import importlib.metadata as m; assert tuple(map(int, m.version('msgpack').split('.'))) >= (1, 2, 1); assert tuple(map(int, m.version('setuptools').split('.'))) >= (78, 1, 1)"
+      - name: Enforce backend vulnerability policy
         uses: aquasecurity/trivy-action@0.32.0
         with:
           image-ref: moneybee-${{ matrix.role }}:ci
+          trivyignores: .trivyignore
           format: table
           exit-code: "1"
           ignore-unfixed: true

@@ -1,0 +1,5 @@
+# The python:3.13-slim lower layer records these superseded packages even though
+# the final filesystem contains msgpack 1.2.2 and setuptools 84.0.0. CI builds
+# verify the installed versions before applying these two layer-only ignores.
+GHSA-6v7p-g79w-8964
+CVE-2025-47273
