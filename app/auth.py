@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_db
 from app.identity import IdentityResolutionError, resolve_identity
+from app.portal_clients import enforce_portal_client
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -184,6 +185,7 @@ async def current_principal(
         raise _problem("AUTHENTICATION_REQUIRED", "Authentication is required.", 401)
 
     claims = decode_access_token(credentials.credentials)
+    enforce_portal_client(request.url.path, claims)
     requested_organization_id = (
         request.headers.get("X-Organization-ID")
         or claims.get("organization_id")
