@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moneybeeloan.com/contracts/account-registered-v1.schema.json",
+  "title": "MoneyBee account.registered.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user_id",
+    "organization_id",
+    "membership_type",
+    "username",
+    "email",
+    "display_name",
+    "email_verified",
+    "registration_source",
+    "identity",
+    "delivery_intent"
+  ],
+  "properties": {
+    "user_id": { "type": "string", "format": "uuid" },
+    "organization_id": { "type": "string", "format": "uuid" },
+    "membership_type": { "const": "BORROWER" },
+    "username": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "email": { "type": "string", "format": "email", "maxLength": 320 },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "email_verified": { "const": true },
+    "registration_source": {
+      "enum": ["KEYCLOAK_PASSWORD", "GOOGLE", "BROKERED"]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "subject"],
+      "properties": {
+        "issuer": { "type": "string", "format": "uri", "maxLength": 500 },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 255 }
+      }
+    },
+    "delivery_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["welcome_email", "crm_projection"],
+      "properties": {
+        "welcome_email": { "const": "KLYROW_VIA_CODESTRA" },
+        "crm_projection": { "const": "ODOO_VIA_CODESTRA" }
+      }
+    }
+  }
+}
