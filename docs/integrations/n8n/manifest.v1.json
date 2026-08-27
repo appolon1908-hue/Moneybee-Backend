@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "system": "moneybee-api",
+  "repository": "appolon1908-hue/Moneybee-Backend",
+  "base_branch": "feature/financial-system-foundation",
+  "branch": "integration/n8n-automation-contract-v2-20260827",
+  "authority": "lending-domain-system-of-record",
+  "integration_boundary": "codestra-middleware-only",
+  "n8n": {
+    "role": "allowlisted-orchestration-only",
+    "direct_database_access": false,
+    "direct_provider_access": false,
+    "financial_decision_authority": false,
+    "credentials_allowed": false
+  },
+  "events": [
+    "moneybee.application.submitted",
+    "moneybee.application.status_changed",
+    "moneybee.documents.missing",
+    "moneybee.documents.completed",
+    "moneybee.identity.review_required",
+    "moneybee.credit.review_required",
+    "moneybee.lender.route_requested",
+    "moneybee.lender.response_received",
+    "moneybee.esign.status_changed",
+    "moneybee.funding.status_changed",
+    "moneybee.payment.status_changed",
+    "moneybee.operational_exception.created"
+  ],
+  "commands": [
+    "moneybee.application.create_task",
+    "moneybee.application.update_projection",
+    "moneybee.document.reminder_request",
+    "moneybee.identity.review_task",
+    "moneybee.credit.review_task",
+    "moneybee.lender.route_plan",
+    "moneybee.lender.submit_approved",
+    "moneybee.esign.send_approved",
+    "moneybee.funding.reconcile",
+    "moneybee.notification.request",
+    "moneybee.exception.assign"
+  ],
+  "workflows": [
+    "moneybee.application.intake.v1",
+    "moneybee.documents.missing-reminder.v1",
+    "moneybee.lender-route-approval.v1",
+    "moneybee.status-notification.v1",
+    "moneybee.funding-reconcile.v1"
+  ],
+  "capabilities": {
+    "MONEYBEE_WRITE": false,
+    "CREDIT_LIVE_PULL": false,
+    "LENDERS_LIVE_SUBMISSION": false,
+    "ESIGN_LIVE_SEND": false,
+    "FUNDING_EXECUTION": false,
+    "PAYMENT_EXECUTION": false,
+    "ENABLE_EXTERNAL_DELIVERY": false,
+    "DEAD_LETTER_REPLAY": false
+  },
+  "invariants": {
+    "transactional_outbox_required": true,
+    "provider_timeout_is_unknown": true,
+    "unsafe_provider_post_auto_retry": false,
+    "keycloak_subject_is_identity_key": true,
+    "odoo_is_projection_only": true,
+    "workflows_active_in_git": false,
+    "production_changed": false
+  }
+}
