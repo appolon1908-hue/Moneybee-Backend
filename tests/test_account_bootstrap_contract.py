@@ -5,9 +5,13 @@ from fastapi import HTTPException
 
 from app.account_routes import (
     BORROWER_PERMISSIONS,
+    CANONICAL_ACCOUNT_PROVISIONED_EVENT,
     _claim_bool,
     _display_name,
     _require_active_borrower_membership,
+    _require_active_borrower_role,
+    _require_active_borrower_role_binding,
+    _select_active_borrower_membership,
 )
 from app.config import settings
 from app.request_context import enforce_portal_client
@@ -60,6 +64,40 @@ def test_bootstrap_accepts_existing_active_borrower_membership():
     _require_active_borrower_membership(SimpleNamespace(active=True))
 
 
+def test_bootstrap_preserves_globally_disabled_borrower_role():
+    with pytest.raises(HTTPException) as caught:
+        _require_active_borrower_role(SimpleNamespace(active=False))
+
+    assert caught.value.status_code == 403
+    assert caught.value.detail["code"] == "ROLE_INACTIVE"
+
+
+def test_bootstrap_preserves_revoked_borrower_role_binding():
+    with pytest.raises(HTTPException) as caught:
+        _require_active_borrower_role_binding(SimpleNamespace(active=False))
+
+    assert caught.value.status_code == 403
+    assert caught.value.detail["code"] == "ROLE_BINDING_INACTIVE"
+
+
+def test_bootstrap_requires_tenant_selection_when_borrower_memberships_are_ambiguous():
+    memberships = [
+        SimpleNamespace(active=True, organization_id="org-a"),
+        SimpleNamespace(active=True, organization_id="org-b"),
+    ]
+    with pytest.raises(HTTPException) as caught:
+        _select_active_borrower_membership(memberships)
+
+    assert caught.value.status_code == 403
+    assert caught.value.detail["code"] == "TENANT_SELECTION_REQUIRED"
+
+
+def test_bootstrap_selects_only_active_borrower_membership():
+    inactive = SimpleNamespace(active=False, organization_id="org-disabled")
+    active = SimpleNamespace(active=True, organization_id="org-active")
+    assert _select_active_borrower_membership([inactive, active]) is active
+
+
 def test_bootstrap_role_is_least_privilege_borrower_scope():
     assert set(BORROWER_PERMISSIONS) == {
         "application.read.own",
@@ -72,3 +110,7 @@ def test_bootstrap_role_is_least_privilege_borrower_scope():
     }
     assert "*" not in BORROWER_PERMISSIONS
     assert "funding.confirm" not in BORROWER_PERMISSIONS
+
+
+def test_bootstrap_emits_canonical_moneybee_account_event():
+    assert CANONICAL_ACCOUNT_PROVISIONED_EVENT == "codestra.moneybee.account.provisioned"
