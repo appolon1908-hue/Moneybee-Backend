@@ -21,15 +21,15 @@ jobs:
       - run: pip install ".[dev]"
       - run: ruff check app tests
       - run: pytest -q
-      - name: Verify OpenAPI snapshot
-        run: |
-          python scripts/export_openapi.py
-          git diff --exit-code -- openapi.json
+      - name: Generate OpenAPI contract
+        run: python scripts/export_openapi.py
       - name: Upload generated OpenAPI contract
         uses: actions/upload-artifact@v4
         with:
           name: moneybee-openapi
           path: openapi.json
+      - name: Verify OpenAPI snapshot
+        run: git diff --exit-code -- openapi.json
       - name: Verify migration upgrade and rollback
         env:
           APP_ENV: test
