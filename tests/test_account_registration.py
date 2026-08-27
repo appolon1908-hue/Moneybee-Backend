@@ -1,6 +1,6 @@
-import json
 import os
 import uuid
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -18,6 +18,29 @@ pytestmark = pytest.mark.skipif(
     not DATABASE_URL.startswith("postgresql+asyncpg://"),
     reason="PostgreSQL account-registration persistence test",
 )
+
+FORBIDDEN_CREDENTIAL_FIELDS = {
+    "password",
+    "password_hash",
+    "password_digest",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "smtp_password",
+    "private_key",
+}
+
+
+def payload_field_names(value: Any) -> set[str]:
+    names: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            names.add(str(key).lower())
+            names.update(payload_field_names(item))
+    elif isinstance(value, list):
+        for item in value:
+            names.update(payload_field_names(item))
+    return names
 
 
 def claims(*, subject: str, email: str, verified: bool = True, client_id: str = "moneybee-borrower"):
@@ -90,9 +113,9 @@ async def test_verified_keycloak_account_bootstrap_is_idempotent(monkeypatch):
         )
         assert event is not None
         assert event.event_type == "account.registered.v1"
-        encoded_payload = json.dumps(event.payload).lower()
-        assert "password" not in encoded_payload
-        assert "client_secret" not in encoded_payload
+        assert FORBIDDEN_CREDENTIAL_FIELDS.isdisjoint(
+            payload_field_names(event.payload)
+        )
 
         external = await db.scalar(
             select(identity.ExternalIdentity).where(
