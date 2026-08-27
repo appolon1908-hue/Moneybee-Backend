@@ -70,7 +70,7 @@ Brute-force detection: ON
 Terms and conditions required action: ON after legal text approval
 ```
 
-Keycloak 26.7 recommends verifying the email before credential setup for new self-registration. Keep the deprecated “always set password on register form” behavior disabled.
+Keep deprecated registration behavior disabled when it weakens the verified-email-first account flow.
 
 ## Klyrow SMTP for identity emails
 
@@ -89,6 +89,26 @@ Password: KLYROW_SMTP_PASSWORD
 ```
 
 Do not store SMTP credentials in Git, frontend variables, browser storage, Docker image labels or MoneyBee database rows.
+
+### Confirmed Postal domain status and activation block
+
+The latest recorded Postal checks report SPF, DKIM, MX and return-path passing for fourteen domains, including both `moneybee.loan` and `moneybeeloan.com`. The canonical MoneyBee authentication sender is:
+
+```text
+MoneyBee Accounts <accounts@moneybeeloan.com>
+```
+
+`booked4seasons.com` is configured for inbound and outbound mail but has no completed Postal DNS check and must not be treated as proven working.
+
+Previously exposed Postal DKIM private keys are designated compromised. Rotate the DKIM signing key and selector for every configured Postal domain, including `booked4seasons.com`, before enabling MoneyBee identity email. Do not reuse or publish any prior private key.
+
+Follow:
+
+```text
+docs/security/POSTAL_DKIM_ROTATION_RUNBOOK.md
+```
+
+A passing historical Postal DNS check does not satisfy this gate. Acceptance requires a new selector, new signing key, removal of the old selector, fresh Postal checks, and external message-header evidence after rotation.
 
 Keycloak sends:
 
@@ -131,6 +151,14 @@ UNBOUND_LENDER_SELF_REGISTRATION=REJECTED
 LOGOUT=PASS
 LOGOUT_ALL_SESSIONS=PASS
 MFA_ENROLLMENT=PASS
+MONEYBEE_POSTAL_DKIM_ROTATED=PASS
+MONEYBEE_POSTAL_OLD_SELECTOR_REMOVED=PASS
+MONEYBEE_POSTAL_SPF=PASS
+MONEYBEE_POSTAL_DKIM=PASS
+MONEYBEE_POSTAL_DMARC_ALIGNMENT=PASS
+MONEYBEE_POSTAL_MX=PASS
+MONEYBEE_POSTAL_RETURN_PATH=PASS
+KEYCLOAK_SMTP_TEST=PASS
 ACCOUNT_REGISTERED_EVENT=PASS
 KLYROW_WELCOME_EMAIL_SANDBOX=PASS
 ODOO_DUPLICATE_PROJECTION=PASS
