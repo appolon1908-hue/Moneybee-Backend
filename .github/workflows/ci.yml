@@ -34,7 +34,7 @@ jobs:
           name: moneybee-openapi
           path: openapi.json
       - name: Verify OpenAPI snapshot
-        run: git diff --exit-code -- openapi.json
+        run: python scripts/verify_openapi_snapshot.py
       - name: Verify migration upgrade and rollback
         env:
           APP_ENV: test
