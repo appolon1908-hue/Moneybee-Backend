@@ -33,8 +33,12 @@ PERMISSIONS = (
 )
 
 
-def _id(value: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"moneybee:{value}"))
+def _id(value: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"moneybee:{value}")
+
+
+def _uuid_statement(statement: str) -> sa.TextClause:
+    return sa.text(statement).bindparams(sa.bindparam("id", type_=sa.Uuid()))
 
 
 def upgrade() -> None:
@@ -85,10 +89,10 @@ def upgrade() -> None:
         )
     )
     connection.execute(
-        sa.text(
+        _uuid_statement(
             """
             INSERT INTO roles (id, code, description, active)
-            VALUES (CAST(:id AS uuid), :code, :description, true)
+            VALUES (:id, :code, :description, true)
             ON CONFLICT (code) DO NOTHING
             """
         ),
@@ -103,10 +107,10 @@ def upgrade() -> None:
     )
     for code in PERMISSIONS:
         connection.execute(
-            sa.text(
+            _uuid_statement(
                 """
                 INSERT INTO permissions (id, code, description)
-                VALUES (CAST(:id AS uuid), :code, :description)
+                VALUES (:id, :code, :description)
                 ON CONFLICT (code) DO NOTHING
                 """
             ),
@@ -117,10 +121,10 @@ def upgrade() -> None:
             },
         )
         connection.execute(
-            sa.text(
+            _uuid_statement(
                 """
                 INSERT INTO role_permissions (id, role_id, permission_id)
-                SELECT CAST(:id AS uuid), role.id, permission.id
+                SELECT :id, role.id, permission.id
                 FROM roles AS role
                 JOIN permissions AS permission ON permission.code = :permission_code
                 WHERE role.code = :role_code
