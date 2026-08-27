@@ -46,7 +46,7 @@ def upgrade() -> None:
         ),
         sa.Column("provider", sa.String(length=100), nullable=False),
         sa.Column("item_id", sa.String(length=255), nullable=True),
-        sa.Column("access_token_ciphertext", sa.Text(), nullable=False),
+        sa.Column("credential_reference", sa.String(length=500), nullable=False),
         sa.Column("transaction_cursor", sa.Text(), nullable=True),
         sa.Column("metadata_payload", sa.JSON(), nullable=False),
         *record_columns(),

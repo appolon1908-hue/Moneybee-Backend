@@ -11,6 +11,7 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 from fastapi.testclient import TestClient
 
 from app.config import settings
+from app import models
 from app.integration_routes import verify_codestra_signature
 from app.integrations.mapping import get_path, map_payload
 from app.integrations.middleware import (
@@ -39,6 +40,13 @@ def test_provider_registry_is_disabled_and_secret_free_by_default():
     assert settings.object_storage_mode == "disabled"
     assert settings.middleware_provider == "disabled"
     assert settings.crm_provider == "disabled"
+
+
+def test_moneybee_database_stores_only_bank_credential_references():
+    columns = set(models.BankProviderState.__table__.columns.keys())
+    assert "credential_reference" in columns
+    assert "access_token" not in columns
+    assert "access_token_ciphertext" not in columns
 
 
 def test_banking_adapter_api_fails_closed_without_ready_capability():

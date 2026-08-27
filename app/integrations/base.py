@@ -58,6 +58,9 @@ class BankAdapter(Protocol):
     async def exchange_public_token(self, public_token: str) -> dict:
         ...
 
+    async def resolve_access_token(self, credential_reference: str) -> str:
+        ...
+
     async def get_accounts(self, access_token: str) -> dict:
         ...
 

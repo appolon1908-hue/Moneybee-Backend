@@ -66,6 +66,12 @@ class PlaidAdapter:
             "request_id": result.get("request_id"),
         }
 
+    async def resolve_access_token(self, credential_reference: str) -> str:
+        raise ProviderError(
+            "plaid",
+            "An external credential store must resolve bank credential references",
+        )
+
     async def get_accounts(self, access_token: str) -> dict:
         return await self._post(
             "/accounts/get",

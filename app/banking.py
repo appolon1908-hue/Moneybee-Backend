@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
-from app.encryption import decrypt_secret, encrypt_secret
+from app.integrations.base import ProviderError
 from app.integrations.registry import bank_adapter
 
 
@@ -53,6 +53,18 @@ async def exchange_public_token(
         )
 
     result = await adapter.exchange_public_token(public_token)
+    credential_reference = str(result.get("credential_reference") or "").strip()
+    if not credential_reference:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "BANK_CREDENTIAL_STORE_UNAVAILABLE",
+                "message": (
+                    "The bank provider did not return an external credential reference; "
+                    "MoneyBee does not store provider access tokens."
+                ),
+            },
+        )
     connection = models.BankConnection(
         application_id=application.id,
         provider=adapter.name,
@@ -66,7 +78,7 @@ async def exchange_public_token(
             connection_id=connection.id,
             provider=adapter.name,
             item_id=result.get("item_id"),
-            access_token_ciphertext=encrypt_secret(result["access_token"]),
+            credential_reference=credential_reference,
             metadata_payload={"request_id": result.get("request_id")},
         )
     )
@@ -122,7 +134,16 @@ async def sync_bank(
     if state is None:
         raise HTTPException(status_code=409, detail="Bank provider state is missing")
 
-    access_token = decrypt_secret(state.access_token_ciphertext)
+    try:
+        access_token = await adapter.resolve_access_token(state.credential_reference)
+    except ProviderError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "BANK_CREDENTIAL_STORE_UNAVAILABLE",
+                "message": "The external bank credential reference could not be resolved.",
+            },
+        ) from exc
     account_result = await adapter.get_accounts(access_token)
     account_map: dict[str, models.BankAccount] = {}
     for source in account_result.get("accounts", []):

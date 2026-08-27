@@ -787,7 +787,7 @@ class BankProviderState(Base, Record):
     item_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
     )
-    access_token_ciphertext: Mapped[str] = mapped_column(Text)
+    credential_reference: Mapped[str] = mapped_column(String(500))
     transaction_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
