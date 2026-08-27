@@ -20,6 +20,7 @@ router = APIRouter(tags=["account"])
 bearer = HTTPBearer(auto_error=False)
 
 BORROWER_ROLE_CODE = "BORROWER_SELF_SERVICE"
+ACCOUNT_PROVISIONED_EVENT_TYPE = "codestra.moneybee.account.provisioned"
 BORROWER_PERMISSIONS = (
     "application.read.own",
     "application.edit.own",
@@ -259,7 +260,7 @@ async def _provision(
     )
 
     event_key = hashlib.sha256(
-        f"moneybee.account.provisioned.v1|{issuer}|{subject}".encode("utf-8")
+        f"{ACCOUNT_PROVISIONED_EVENT_TYPE}|{issuer}|{subject}".encode("utf-8")
     ).hexdigest()
     prior_event = await db.scalar(
         select(models.OutboxEvent).where(models.OutboxEvent.idempotency_key == event_key)
@@ -267,7 +268,7 @@ async def _provision(
     if prior_event is None:
         db.add(
             models.OutboxEvent(
-                event_type="moneybee.account.provisioned.v1",
+                event_type=ACCOUNT_PROVISIONED_EVENT_TYPE,
                 schema_version=1,
                 aggregate_type="user",
                 aggregate_id=user.id,
