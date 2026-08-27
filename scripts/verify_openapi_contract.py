@@ -22,6 +22,23 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _digest_differences(
+    expected: dict[str, str],
+    actual: dict[str, str],
+) -> list[str]:
+    details: list[str] = []
+    for name in sorted(expected.keys() - actual.keys()):
+        details.append(f"missing runtime contract: {name}")
+    for name in sorted(actual.keys() - expected.keys()):
+        details.append(f"unreviewed runtime contract: {name}={actual[name]}")
+    for name in sorted(expected.keys() & actual.keys()):
+        if expected[name] != actual[name]:
+            details.append(
+                f"digest mismatch: {name} expected={expected[name]} actual={actual[name]}"
+            )
+    return details
+
+
 def main() -> None:
     baseline = _load(ROOT / "openapi.json")
     generated = app.openapi()
@@ -63,15 +80,11 @@ def main() -> None:
             expected_schemas[name] = digest
 
     if actual_paths != expected_paths:
-        raise SystemExit(
-            "Additive OpenAPI path drift detected: "
-            f"expected={sorted(expected_paths)} actual={sorted(actual_paths)}"
-        )
+        details = _digest_differences(expected_paths, actual_paths)
+        raise SystemExit("Additive OpenAPI path drift detected:\n- " + "\n- ".join(details))
     if actual_schemas != expected_schemas:
-        raise SystemExit(
-            "Additive OpenAPI schema drift detected: "
-            f"expected={sorted(expected_schemas)} actual={sorted(actual_schemas)}"
-        )
+        details = _digest_differences(expected_schemas, actual_schemas)
+        raise SystemExit("Additive OpenAPI schema drift detected:\n- " + "\n- ".join(details))
     print(
         "OpenAPI contract verified: "
         f"{len(generated_paths)} paths, {len(actual_paths)} reviewed additions"
