@@ -20,7 +20,6 @@ router = APIRouter(tags=["account"])
 bearer = HTTPBearer(auto_error=False)
 
 BORROWER_ROLE_CODE = "BORROWER_SELF_SERVICE"
-ACCOUNT_PROVISIONED_EVENT_TYPE = "codestra.moneybee.account.provisioned"
 BORROWER_PERMISSIONS = (
     "application.read.own",
     "application.edit.own",
@@ -30,6 +29,7 @@ BORROWER_PERMISSIONS = (
     "credit.authorize.own",
     "offer.accept.own",
 )
+CANONICAL_ACCOUNT_PROVISIONED_EVENT = "codestra.moneybee.account.provisioned"
 
 
 class AccountBootstrapResponse(BaseModel):
@@ -75,6 +75,43 @@ def _require_active_borrower_membership(membership: identity.OrganizationMembers
         )
 
 
+def _require_active_borrower_role(role: identity.Role) -> None:
+    if not role.active:
+        raise _problem(
+            "ROLE_INACTIVE",
+            "The MoneyBee borrower self-service role is disabled.",
+            403,
+        )
+
+
+def _require_active_borrower_role_binding(binding: identity.UserRoleBinding) -> None:
+    if not binding.active:
+        raise _problem(
+            "ROLE_BINDING_INACTIVE",
+            "The MoneyBee borrower role binding is disabled.",
+            403,
+        )
+
+
+def _select_active_borrower_membership(
+    memberships: list[identity.OrganizationMembership],
+) -> identity.OrganizationMembership:
+    active = [membership for membership in memberships if membership.active]
+    if not active:
+        raise _problem(
+            "MEMBERSHIP_INACTIVE",
+            "The MoneyBee borrower membership is disabled.",
+            403,
+        )
+    if len(active) != 1:
+        raise _problem(
+            "TENANT_SELECTION_REQUIRED",
+            "An active borrower organization must be selected before bootstrap can continue.",
+            403,
+        )
+    return active[0]
+
+
 async def verified_borrower_claims(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -118,8 +155,8 @@ async def _ensure_role_and_permissions(
         )
         db.add(role)
         await db.flush()
-    elif not role.active:
-        role.active = True
+    else:
+        _require_active_borrower_role(role)
 
     for permission_code in BORROWER_PERMISSIONS:
         permission = await db.scalar(
@@ -157,8 +194,8 @@ async def _ensure_role_and_permissions(
                 active=True,
             )
         )
-    elif not binding.active:
-        binding.active = True
+    else:
+        _require_active_borrower_role_binding(binding)
 
 
 async def _provision(
@@ -216,13 +253,18 @@ async def _provision(
             user.email = email
         if not user.display_name:
             user.display_name = display_name
-        membership = await db.scalar(
-            select(identity.OrganizationMembership).where(
-                identity.OrganizationMembership.user_id == user.id,
-                identity.OrganizationMembership.membership_type == "BORROWER",
-            )
+
+        borrower_memberships = list(
+            (
+                await db.scalars(
+                    select(identity.OrganizationMembership).where(
+                        identity.OrganizationMembership.user_id == user.id,
+                        identity.OrganizationMembership.membership_type == "BORROWER",
+                    )
+                )
+            ).all()
         )
-        if membership is None:
+        if not borrower_memberships:
             organization = identity.Organization(
                 name=f"{display_name}'s business"[:255],
                 organization_type="BORROWER",
@@ -238,6 +280,7 @@ async def _provision(
             )
             db.add(membership)
         else:
+            membership = _select_active_borrower_membership(borrower_memberships)
             _require_active_borrower_membership(membership)
             organization = await db.get(identity.Organization, membership.organization_id)
             if organization is None:
@@ -260,7 +303,7 @@ async def _provision(
     )
 
     event_key = hashlib.sha256(
-        f"{ACCOUNT_PROVISIONED_EVENT_TYPE}|{issuer}|{subject}".encode("utf-8")
+        f"{CANONICAL_ACCOUNT_PROVISIONED_EVENT}|{issuer}|{subject}".encode("utf-8")
     ).hexdigest()
     prior_event = await db.scalar(
         select(models.OutboxEvent).where(models.OutboxEvent.idempotency_key == event_key)
@@ -268,7 +311,7 @@ async def _provision(
     if prior_event is None:
         db.add(
             models.OutboxEvent(
-                event_type=ACCOUNT_PROVISIONED_EVENT_TYPE,
+                event_type=CANONICAL_ACCOUNT_PROVISIONED_EVENT,
                 schema_version=1,
                 aggregate_type="user",
                 aggregate_id=user.id,
