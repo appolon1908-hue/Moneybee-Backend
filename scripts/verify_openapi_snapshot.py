@@ -1,23 +1,22 @@
-import base64
-import gzip
 import hashlib
 from pathlib import Path
 
-SNAPSHOT = Path("contracts/openapi.snapshot.json.gz.b64")
+SNAPSHOT_SHA256 = Path("contracts/openapi.snapshot.sha256")
 GENERATED = Path("openapi.json")
 
-expected = gzip.decompress(base64.b64decode(SNAPSHOT.read_text(encoding="utf-8").strip()))
+expected_sha256 = SNAPSHOT_SHA256.read_text(encoding="utf-8").strip().lower()
 actual = GENERATED.read_bytes()
-
-expected_sha256 = hashlib.sha256(expected).hexdigest()
 actual_sha256 = hashlib.sha256(actual).hexdigest()
 
-if actual != expected:
+if len(expected_sha256) != 64 or any(char not in "0123456789abcdef" for char in expected_sha256):
+    raise SystemExit("OpenAPI snapshot pin is not a valid SHA-256 digest.")
+
+if actual_sha256 != expected_sha256:
     raise SystemExit(
         "OpenAPI snapshot mismatch: "
         f"generated={len(actual)} bytes sha256={actual_sha256} "
-        f"expected={len(expected)} bytes sha256={expected_sha256}. "
-        "Regenerate and review the OpenAPI contract before updating the snapshot."
+        f"expected_sha256={expected_sha256}. "
+        "Regenerate and review the OpenAPI contract before updating the snapshot pin."
     )
 
 print(
