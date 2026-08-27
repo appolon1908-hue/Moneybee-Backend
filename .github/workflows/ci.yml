@@ -77,6 +77,13 @@ jobs:
             tests/test_auth_identity.py \
             tests/test_identity_tenancy_postgres.py \
             tests/test_account_registration.py
+      - name: Test portal boundaries and finance ledger on PostgreSQL
+        env:
+          LOCAL_AUTH_BYPASS: "true"
+        run: |
+          pytest -q \
+            tests/test_portal_token_boundaries.py \
+            tests/test_financial_ledger.py
       - name: Test identity downgrade and current forward-fix path
         run: |
           alembic downgrade 20260823_0011
@@ -85,3 +92,33 @@ jobs:
         run: |
           alembic downgrade base
           alembic upgrade head
+
+  containers:
+    needs: [verify, postgres-identity-tenancy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [api, worker, migrate]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend ${{ matrix.role }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.role }}
+          load: true
+          tags: moneybee-${{ matrix.role }}:ci
+          cache-from: type=gha,scope=backend-${{ matrix.role }}
+          cache-to: type=gha,mode=max,scope=backend-${{ matrix.role }}
+      - name: Scan backend ${{ matrix.role }} image
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          image-ref: moneybee-${{ matrix.role }}:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
