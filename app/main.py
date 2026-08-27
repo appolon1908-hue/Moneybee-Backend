@@ -2,6 +2,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -80,7 +81,10 @@ async def validation_problem(request: Request, exc: RequestValidationError):
             "status": 422,
             "detail": "One or more fields are invalid.",
             "instance": request.url.path,
-            "errors": exc.errors(),
+            "errors": jsonable_encoder(
+                exc.errors(),
+                custom_encoder={ValueError: str, Exception: str},
+            ),
             "request_id": request.headers.get("X-Request-ID"),
         },
     )
