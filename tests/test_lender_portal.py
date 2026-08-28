@@ -95,17 +95,37 @@ def test_lender_dashboard_programs_and_versioned_decision():
         assert dashboard.status_code == 200
         assert dashboard.json()["programs"] >= 1
 
+        lender_workspace = client.get("/api/v2/lender/workspace")
+        assert lender_workspace.status_code == 200
+        assert lender_workspace.json()["summary"]["submission_count"] >= 1
+        assert any(
+            row["id"] == submission_id
+            for row in lender_workspace.json()["recent_submissions"]
+        )
+
         workspace = client.get(
             f"/api/v2/lender/submissions/{submission_id}/workspace"
         )
         assert workspace.status_code == 200
         assert workspace.json()["submission"]["version"] == 1
 
+        assignment = client.patch(
+            f"/api/v2/lender/submissions/{submission_id}/assignment",
+            json={"assigned_to_subject": "underwriter@example.com"},
+        )
+        assert assignment.status_code == 200
+        assert assignment.json()["assigned_to_subject"] == "underwriter@example.com"
+        assert assignment.json()["version"] == 2
+
+        portfolio = client.get("/api/v2/lender/portfolio")
+        assert portfolio.status_code == 200
+        assert "accepted_or_funded_amount" in portfolio.json()["summary"]
+
         decision = client.post(
             f"/api/v2/lender/submissions/{submission_id}/decisions",
             headers={"Idempotency-Key": uuid.uuid4().hex},
             json={
-                "expected_version": 1,
+                "expected_version": 2,
                 "decision": "APPROVE",
                 "reason_codes": ["CASH_FLOW_ACCEPTABLE"],
                 "notes": "Approved for offer preparation.",
@@ -113,4 +133,4 @@ def test_lender_dashboard_programs_and_versioned_decision():
         )
         assert decision.status_code == 201
         assert decision.json()["status"] == "APPROVED"
-        assert decision.json()["version"] == 2
+        assert decision.json()["version"] == 3

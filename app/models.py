@@ -439,6 +439,9 @@ class LenderSubmission(Base, Record):
     external_submission_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
+    assigned_to_subject: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(60), default="QUEUED")
     version: Mapped[int] = mapped_column(Integer, default=1)
     submitted_at: Mapped[datetime | None] = mapped_column(

@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app import models
 from app.auth import Principal, current_principal
 from app.db import get_db
 from app.portal.common import problem, require_any_permission
+from app.portal import models as portal_models
 from app.portal.schemas import (
     BankTransactionRead,
     LenderDashboard,
@@ -27,6 +29,10 @@ from app.portal.schemas import (
 router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_db)]
 User = Annotated[Principal, Depends(current_principal)]
+
+
+class LenderSubmissionAssignment(BaseModel):
+    assigned_to_subject: str | None = Field(default=None, max_length=255)
 
 
 def _scope(user: Principal) -> uuid.UUID | None:
@@ -49,6 +55,7 @@ def _submission_payload(item: models.LenderSubmission) -> dict:
         "program_id": str(item.program_id),
         "program_version": item.program_version,
         "external_submission_id": item.external_submission_id,
+        "assigned_to_subject": item.assigned_to_subject,
         "status": item.status,
         "version": item.version,
         "submitted_at": item.submitted_at,
@@ -181,6 +188,99 @@ async def lender_dashboard(db: Db, user: User):
         funded_deals=int(funding_row[0] or 0),
         total_funded=str(funding_row[1] or Decimal("0")),
     )
+
+
+@router.get(
+    "/lender/workspace",
+    response_model=dict,
+    tags=["lender", "portal"],
+)
+async def lender_workspace(db: Db, user: User):
+    require_any_permission(user, "lender.application.read", "lender.submission.read")
+    lender_id = _scope(user)
+    submission_filters = []
+    program_filters = []
+    task_filters = [portal_models.PortalTask.status.in_(["OPEN", "IN_PROGRESS"])]
+    if lender_id:
+        submission_filters.append(models.LenderSubmission.lender_id == lender_id)
+        program_filters.append(models.LenderProgram.lender_id == lender_id)
+        task_filters.append(portal_models.PortalTask.organization_id == lender_id)
+
+    active_programs = (
+        await db.scalar(
+            select(func.count(models.LenderProgram.id)).where(
+                models.LenderProgram.active.is_(True),
+                *program_filters,
+            )
+        )
+        or 0
+    )
+    submission_count = (
+        await db.scalar(select(func.count(models.LenderSubmission.id)).where(*submission_filters))
+        or 0
+    )
+    pending_submissions = (
+        await db.scalar(
+            select(func.count(models.LenderSubmission.id)).where(
+                models.LenderSubmission.status.in_(["DRAFT", "QUEUED", "SUBMITTED", "UNDER_REVIEW"]),
+                *submission_filters,
+            )
+        )
+        or 0
+    )
+    recent_submissions = list(
+        (
+            await db.scalars(
+                select(models.LenderSubmission)
+                .where(*submission_filters)
+                .order_by(models.LenderSubmission.created_at.desc())
+                .limit(25)
+            )
+        ).all()
+    )
+    open_tasks = list(
+        (
+            await db.scalars(
+                select(portal_models.PortalTask)
+                .where(*task_filters)
+                .order_by(
+                    portal_models.PortalTask.due_at.asc().nulls_last(),
+                    portal_models.PortalTask.created_at.desc(),
+                )
+                .limit(25)
+            )
+        ).all()
+    )
+    return {
+        "summary": {
+            "active_programs": active_programs,
+            "submission_count": submission_count,
+            "pending_submissions": pending_submissions,
+        },
+        "recent_submissions": [_submission_payload(row) for row in recent_submissions],
+        "open_tasks": [
+            {
+                "id": str(row.id),
+                "application_id": str(row.application_id) if row.application_id else None,
+                "organization_id": str(row.organization_id) if row.organization_id else None,
+                "assignee_user_id": str(row.assignee_user_id) if row.assignee_user_id else None,
+                "assignee_subject": row.assignee_subject,
+                "task_type": row.task_type,
+                "title": row.title,
+                "description": row.description,
+                "status": row.status,
+                "priority": row.priority,
+                "due_at": row.due_at,
+                "completed_at": row.completed_at,
+                "source_type": row.source_type,
+                "source_reference": row.source_reference,
+                "metadata_payload": row.metadata_payload,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in open_tasks
+        ],
+    }
 
 
 @router.get(
@@ -419,6 +519,40 @@ async def lender_submission_workspace(submission_id: uuid.UUID, db: Db, user: Us
     )
 
 
+@router.patch(
+    "/lender/submissions/{submission_id}/assignment",
+    response_model=dict,
+    tags=["lender", "portal"],
+)
+async def assign_lender_submission(
+    submission_id: uuid.UUID,
+    payload: LenderSubmissionAssignment,
+    db: Db,
+    user: User,
+):
+    require_any_permission(user, "lender.submission.read", "lender.application.read")
+    submission = await _authorized_submission(db, submission_id, user, lock=True)
+    previous = submission.assigned_to_subject
+    submission.assigned_to_subject = payload.assigned_to_subject
+    submission.version += 1
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="LENDER_SUBMISSION_ASSIGNED",
+            resource_type="lender_submission",
+            resource_id=str(submission.id),
+            details={
+                "previous_assigned_to_subject": previous,
+                "assigned_to_subject": payload.assigned_to_subject,
+                "version": submission.version,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(submission)
+    return _submission_payload(submission)
+
+
 @router.get(
     "/lender/bank-review-queue",
     response_model=list[dict],
@@ -639,3 +773,48 @@ async def lender_fundings(db: Db, user: User):
         }
         for funding, offer in rows
     ]
+
+
+@router.get(
+    "/lender/portfolio",
+    response_model=dict,
+    tags=["lender", "funding"],
+)
+async def lender_portfolio(db: Db, user: User):
+    require_any_permission(user, "lender.application.read", "lender.submission.read")
+    lender_id = _scope(user)
+    offer_statement = select(models.Offer)
+    submission_statement = select(models.LenderSubmission.status, func.count(models.LenderSubmission.id)).group_by(models.LenderSubmission.status)
+    if lender_id:
+        offer_statement = offer_statement.where(models.Offer.lender_id == lender_id)
+        submission_statement = submission_statement.where(models.LenderSubmission.lender_id == lender_id)
+    offers = list((await db.scalars(offer_statement.order_by(models.Offer.created_at.desc()).limit(500))).all())
+    accepted_or_funded = [row for row in offers if row.status in {"ACCEPTED", "FUNDED", "CLOSED"}]
+    status_counts = {
+        status: count
+        for status, count in (await db.execute(submission_statement)).all()
+    }
+    return {
+        "summary": {
+            "offer_count": len(offers),
+            "accepted_or_funded_count": len(accepted_or_funded),
+            "accepted_or_funded_amount": str(sum((row.amount for row in accepted_or_funded), Decimal("0"))),
+        },
+        "positions": [
+            {
+                "offer_id": str(row.id),
+                "application_id": str(row.application_id),
+                "program_id": str(row.program_id) if row.program_id else None,
+                "product_type": row.product_type,
+                "amount": str(row.amount),
+                "payment_frequency": row.payment_frequency,
+                "payment_amount": str(row.payment_amount),
+                "status": row.status,
+                "version": row.version,
+                "expires_at": row.expires_at,
+                "created_at": row.created_at,
+            }
+            for row in offers
+        ],
+        "submission_status_counts": status_counts,
+    }
