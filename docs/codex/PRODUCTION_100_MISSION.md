@@ -100,12 +100,19 @@ need its own pass.
 This is the big one — the spec itself lists what's outstanding. Tracked
 here in the order that unblocks the most downstream work first:
 
-- [ ] **Idempotency persistence**: idempotency-key table (actor, endpoint,
-      request hash, stored response, expiry) wired into the commands the
-      spec names as requiring it — lender submission, offer acceptance,
-      contract creation, funding confirmation, commission posting, CRM
-      opportunity creation. Currently only `Idempotency-Key` header is
-      *accepted* at the CORS layer; nothing persists/dedupes on it yet.
+- [x] **Idempotency persistence** — **corrected: the spec doc's "not yet
+      complete" note here is stale.** Audited before doing any work and
+      found `IdempotencyRecord`/`idempotency_keys` already fully wired
+      (actor+route+key, request-hash conflict detection, response replay)
+      into offer acceptance, lender submission decisions, public
+      prequalifications, public intake forms, and account bootstrap. Only
+      real gap found: `POST /admin/commissions/{id}/adjustments` (a real,
+      already-shipped endpoint) had none — fixed, pass: `59b23b9`
+      (deliberate breaking API change; a required header added to an
+      endpoint with no known consumers yet). "Contract creation" and
+      "funding confirmation" genuinely have no persistence yet because
+      those endpoints don't exist at all — tracked as part of the
+      contracts/e-sign and funding engines below, not a standalone gap.
 - [ ] **Conditions/offers state machine completion**: verify all condition
       states (`OPEN → BORROWER_ACTION_REQUIRED → SUBMITTED → UNDER_REVIEW →
       SATISFIED/REJECTED/WAIVED`) and offer normalization fields (APR/factor
