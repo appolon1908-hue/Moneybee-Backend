@@ -1,22 +1,9 @@
-import re
 import time
 
 from app.config import settings
+from app.event_contracts import build_event_envelope, canonical_event_type
 from app.integrations.base import MiddlewareResult, ProviderError
 from app.integrations.http import provider_request
-
-
-def canonical_event_type(event_type: str) -> str:
-    """Translate legacy internal names to the versioned integration vocabulary."""
-    if "." in event_type:
-        return event_type
-    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", event_type).lower()
-    aliases = {
-        "lead_submitted": "lead.created",
-        "bank_webhook_received": "bank.provider_event_received",
-        "plaid_webhook_received": "bank.provider_event_received",
-    }
-    return aliases.get(snake, snake) + ".v1"
 
 
 class CodestraProvider:
@@ -71,26 +58,31 @@ class CodestraProvider:
         causation_id: str | None,
         occurred_at: str,
         payload: dict,
+        idempotency_key: str,
+        schema_version: int = 1,
+        delivery_attempt: int | None = None,
     ) -> MiddlewareResult:
         if not settings.codestra_middleware_base_url:
             raise ProviderError("codestra", "Middleware base URL is not configured")
         token = await self._token()
-        envelope = {
-            "event_id": event_id,
-            "event_type": canonical_event_type(event_type),
-            "aggregate": {
-                "type": aggregate_type,
-                "id": aggregate_id,
-                "version": aggregate_version,
-            },
-            "tenant_id": tenant_id,
-            "correlation_id": correlation_id,
-            "causation_id": causation_id,
-            "occurred_at": occurred_at,
-            "payload": payload,
-            "source": "moneybee",
-            "schema_version": 1,
-        }
+        try:
+            envelope = build_event_envelope(
+                event_id=event_id,
+                event_type=event_type,
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                aggregate_version=aggregate_version,
+                tenant_id=tenant_id,
+                correlation_id=correlation_id,
+                causation_id=causation_id,
+                occurred_at=occurred_at,
+                payload=payload,
+                idempotency_key=idempotency_key,
+                schema_version=schema_version,
+                delivery_attempt=delivery_attempt,
+            )
+        except ValueError as exc:
+            raise ProviderError("codestra", f"Event contract is invalid: {exc}") from exc
         result = await provider_request(
             provider="codestra",
             method="POST",
@@ -101,7 +93,12 @@ class CodestraProvider:
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                "Idempotency-Key": event_id,
+                "Idempotency-Key": idempotency_key,
+                "X-Correlation-Id": envelope["correlation_id"],
+                "X-Codestra-Event-Id": envelope["id"],
+                "X-Codestra-Event-Type": envelope["type"],
+                "X-Codestra-Source": "moneybee-backend",
+                "X-Codestra-Tenant-Id": envelope["tenant_id"],
             },
             json=envelope,
         )
@@ -116,3 +113,6 @@ class CodestraProvider:
             accepted=True,
             response={"status": status},
         )
+
+
+__all__ = ["CodestraProvider", "canonical_event_type"]
