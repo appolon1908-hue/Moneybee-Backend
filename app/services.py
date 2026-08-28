@@ -519,3 +519,56 @@ def transition_application(
             changed_by=principal.subject,
         )
     )
+
+
+FUNDING_TRANSITIONS: dict[str, frozenset[str]] = {
+    "CONDITIONS_PENDING": frozenset(
+        {"CONDITIONS_SATISFIED", "DECLINED", "CANCELLED"}
+    ),
+    "CONDITIONS_SATISFIED": frozenset(
+        {"CONTRACT_SIGNED", "DECLINED", "CANCELLED"}
+    ),
+    "CONTRACT_SIGNED": frozenset(
+        {"APPROVED_FOR_FUNDING", "DECLINED", "CANCELLED"}
+    ),
+    "APPROVED_FOR_FUNDING": frozenset(
+        {"FUNDS_SENT", "DECLINED", "CANCELLED"}
+    ),
+    "FUNDS_SENT": frozenset({"FUNDED", "DECLINED", "CANCELLED"}),
+    "FUNDED": frozenset(),
+    "DECLINED": frozenset(),
+    "CANCELLED": frozenset(),
+}
+
+
+def transition_funding(
+    db: AsyncSession,
+    funding: models.Funding,
+    to_status: str,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = funding.status
+    if previous == to_status:
+        return
+    allowed = FUNDING_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_FUNDING_TRANSITION",
+                "from_status": previous,
+                "to_status": to_status,
+                "allowed": sorted(allowed),
+            },
+        )
+    funding.status = to_status
+    db.add(
+        models.AuditEvent(
+            actor_id=principal.subject,
+            action=f"FUNDING_{to_status}",
+            resource_type="funding",
+            resource_id=str(funding.id),
+            details={"from_status": previous, "to_status": to_status, "reason": reason},
+        )
+    )

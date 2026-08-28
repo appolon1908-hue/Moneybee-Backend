@@ -277,8 +277,23 @@ class FundingRead(BaseModel):
     approved_amount: Decimal | None
     funded_amount: Decimal | None
     provider_reference: str | None
+    funds_sent_at: datetime | None
     funding_confirmed_at: datetime | None
     created_at: datetime
+
+
+class FundingDeclineInput(BaseModel):
+    reason: str = Field(min_length=5, max_length=10_000)
+
+
+class FundingFundsSentInput(BaseModel):
+    provider_reference: str = Field(min_length=1, max_length=255)
+
+
+class FundingConfirmInput(BaseModel):
+    funded_amount: Decimal = Field(gt=0)
+    commission_rate_bps: int = Field(ge=0, le=10_000)
+    commission_expected_amount: Decimal | None = Field(default=None, gt=0)
 
 
 class CommissionRead(BaseModel):
