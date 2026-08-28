@@ -354,6 +354,10 @@ async def decide_condition(
             details={"submission_id": str(submission.id)},
         )
     )
+    if decision in {"SATISFIED", "WAIVED"}:
+        await services.advance_funding_if_conditions_satisfied(
+            db, item.submission_id, user
+        )
     await db.commit()
     await db.refresh(item)
     return item
