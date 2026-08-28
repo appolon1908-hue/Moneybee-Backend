@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas
@@ -157,6 +158,32 @@ def payload_digest(payload: schemas.PrequalificationInput) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+async def _stored_public_prequalification_replay(
+    db: AsyncSession,
+    *,
+    idempotency_key: str,
+    request_hash: str,
+) -> schemas.LeadAccepted | None:
+    row = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == "public",
+            models.IdempotencyRecord.route == "/public/prequalifications",
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if row is None:
+        return None
+    if row.request_hash != request_hash:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "IDEMPOTENCY_KEY_CONFLICT",
+                "message": "The idempotency key was already used with a different prequalification payload.",
+            },
+        )
+    return schemas.LeadAccepted.model_validate(row.response_body)
+
+
 async def create_lead(
     db: AsyncSession,
     payload: schemas.PrequalificationInput,
@@ -165,6 +192,15 @@ async def create_lead(
 ) -> schemas.LeadAccepted:
     if not all(item.accepted for item in payload.consents):
         raise HTTPException(status_code=422, detail="Required consent was not accepted")
+    request_hash = payload_digest(payload)
+    replay = await _stored_public_prequalification_replay(
+        db,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        return replay
+
     lead = models.Lead(
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
@@ -193,7 +229,7 @@ async def create_lead(
         models.OutboxEvent(
             event_type="LeadSubmitted",
             aggregate_id=lead.id,
-            payload={"lead_id": str(lead.id), "digest": payload_digest(payload)},
+            payload={"lead_id": str(lead.id), "digest": request_hash},
             idempotency_key=idempotency_key,
         )
     )
@@ -207,8 +243,7 @@ async def create_lead(
             details={"landing_page": payload.marketing.landing_page},
         )
     )
-    await db.commit()
-    return schemas.LeadAccepted(
+    response = schemas.LeadAccepted(
         lead_id=lead.id,
         reference=f"MB-{str(lead.id).split('-')[0].upper()}",
         next_action={
@@ -217,6 +252,29 @@ async def create_lead(
         },
         request_id=request_id,
     )
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id="public",
+            route="/public/prequalifications",
+            request_hash=request_hash,
+            response_status=202,
+            response_body=response.model_dump(mode="json"),
+        )
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        replay = await _stored_public_prequalification_replay(
+            db,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return replay
+        raise
+    return response
 
 
 def score(application: models.Application, program: models.LenderProgram):

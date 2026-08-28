@@ -261,3 +261,52 @@ def test_borrower_application_sections_and_submission_flow():
             invalid_transition.json()["detail"]["code"]
             == "INVALID_APPLICATION_TRANSITION"
         )
+
+
+def test_public_prequalification_idempotency_replays_and_conflicts():
+    unique = uuid.uuid4().hex
+    prequalification = {
+        "funding_amount": 75000,
+        "currency": "USD",
+        "use_of_funds": "WORKING_CAPITAL",
+        "time_in_business_months": 24,
+        "monthly_revenue": 50000,
+        "business_name": "Idempotent Honey Transport",
+        "first_name": "Ralph",
+        "last_name": "Appolon",
+        "email": f"idempotent-{unique}@example.com",
+        "phone": "+15555550123",
+        "postal_code": "33101",
+        "consents": [
+            {
+                "type": "APPLICATION_TERMS",
+                "document_version": "v1",
+                "accepted": True,
+            }
+        ],
+        "marketing": {"landing_page": "business-loans"},
+    }
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v2/public/prequalifications",
+            json=prequalification,
+            headers={"Idempotency-Key": unique},
+        )
+        replay = client.post(
+            "/api/v2/public/prequalifications",
+            json=prequalification,
+            headers={"Idempotency-Key": unique},
+        )
+        conflict_payload = {**prequalification, "monthly_revenue": 90000}
+        conflict = client.post(
+            "/api/v2/public/prequalifications",
+            json=conflict_payload,
+            headers={"Idempotency-Key": unique},
+        )
+
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json() == first.json()
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
