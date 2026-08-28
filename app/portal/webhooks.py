@@ -106,6 +106,7 @@ async def receive_provider_webhook(
     signature: str | None = None,
     timestamp_header: str | None = None,
     provider_event_header: str | None = None,
+    metadata: dict[str, str] | None = None,
 ):
     provider_key = provider.strip().lower()
     if provider_key not in settings.provider_webhook_allowlist:
@@ -173,6 +174,7 @@ async def receive_provider_webhook(
             or payload.get("application_id")
             or payload.get("submission_id"),
             "content_type": request.headers.get("content-type"),
+            **(metadata or {}),
         },
         status="RECEIVED",
     )
@@ -266,6 +268,10 @@ async def lender_webhook(
         signature=signature,
         timestamp_header=timestamp_header,
         provider_event_header=provider_event_header,
+        metadata={
+            "endpoint_alias": "lender",
+            "lender_id": str(lender_id),
+        },
     )
     response["lender_id"] = str(lender_id)
     return response
@@ -296,6 +302,7 @@ async def docusign_webhook(
         signature=signature,
         timestamp_header=timestamp_header,
         provider_event_header=provider_event_header,
+        metadata={"endpoint_alias": "docusign"},
     )
 
 
@@ -324,6 +331,7 @@ async def odoo_action_webhook(
         signature=signature,
         timestamp_header=timestamp_header,
         provider_event_header=provider_event_header,
+        metadata={"endpoint_alias": "odoo.actions"},
     )
 
 
@@ -356,6 +364,7 @@ async def communication_webhook(
         signature=signature,
         timestamp_header=timestamp_header,
         provider_event_header=provider_event_header,
+        metadata={"endpoint_alias": f"communications.{provider_key}"},
     )
 
 
@@ -384,6 +393,7 @@ async def n8n_webhook(
         signature=signature,
         timestamp_header=timestamp_header,
         provider_event_header=provider_event_header,
+        metadata={"endpoint_alias": "n8n"},
     )
 
 
@@ -412,6 +422,7 @@ async def experian_webhook(
         signature=signature,
         timestamp_header=timestamp_header,
         provider_event_header=provider_event_header,
+        metadata={"endpoint_alias": "experian"},
     )
 
 

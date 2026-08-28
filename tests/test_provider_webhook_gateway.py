@@ -102,41 +102,78 @@ def test_canonical_provider_webhook_aliases_are_authenticated_and_enqueued(monke
     monkeypatch.setattr(settings, "provider_webhook_allowlist_csv", ",".join(secrets))
     monkeypatch.setattr(settings, "provider_webhook_secrets_json", json.dumps(secrets))
 
+    lender_id = "00000000-0000-0000-0000-000000000001"
     cases = [
-        ("/api/v2/webhooks/docusign", "docusign"),
-        ("/api/v2/webhooks/odoo/actions", "odoo"),
-        ("/api/v2/webhooks/n8n", "n8n"),
-        ("/api/v2/webhooks/experian", "experian"),
-        ("/api/v2/webhooks/communications/sendgrid", "sendgrid"),
-        ("/api/v2/webhooks/communications/twilio", "twilio"),
-        ("/api/v2/webhooks/lenders/00000000-0000-0000-0000-000000000001", "lender"),
+        ("/api/v2/webhooks/docusign", "docusign", "docusign"),
+        ("/api/v2/webhooks/odoo/actions", "odoo", "odoo.actions"),
+        ("/api/v2/webhooks/n8n", "n8n", "n8n"),
+        ("/api/v2/webhooks/experian", "experian", "experian"),
+        (
+            "/api/v2/webhooks/communications/sendgrid",
+            "sendgrid",
+            "communications.sendgrid",
+        ),
+        ("/api/v2/webhooks/communications/twilio", "twilio", "communications.twilio"),
+        (f"/api/v2/webhooks/lenders/{lender_id}", "lender", "lender"),
     ]
 
     with TestClient(app) as client:
-        for path, provider in cases:
+        for path, provider, alias in cases:
+            event_id = f"evt-{provider}-{time.time_ns()}"
             body = json.dumps(
                 {
-                    "event_id": f"evt-{provider}-{time.time_ns()}",
+                    "event_id": event_id,
                     "event_type": "provider.status_changed",
                     "aggregate_id": "app-1",
                 },
                 separators=(",", ":"),
             ).encode()
             timestamp = str(int(time.time()))
-            response = client.post(
+            headers = {
+                "Content-Type": "application/json",
+                "X-MoneyBee-Timestamp": timestamp,
+                "X-MoneyBee-Signature": signature(body, timestamp, secrets[provider]),
+            }
+            response = client.post(path, content=body, headers=headers)
+            duplicate = client.post(path, content=body, headers=headers)
+            changed = json.dumps(
+                {
+                    "event_id": event_id,
+                    "event_type": "provider.payload_changed",
+                    "aggregate_id": "app-1",
+                },
+                separators=(",", ":"),
+            ).encode()
+            conflict = client.post(
                 path,
-                content=body,
+                content=changed,
                 headers={
-                    "Content-Type": "application/json",
-                    "X-MoneyBee-Timestamp": timestamp,
+                    **headers,
                     "X-MoneyBee-Signature": signature(
-                        body, timestamp, secrets[provider]
+                        changed, timestamp, secrets[provider]
                     ),
                 },
             )
+            receipts = client.get(
+                f"/api/v2/admin/webhook-receipts?provider={provider}&status=RECEIVED"
+            )
+
             assert response.status_code == 202
             assert response.json()["provider"] == provider
             assert response.json()["duplicate"] is False
+            assert duplicate.status_code == 202
+            assert duplicate.json()["duplicate"] is True
+            assert conflict.status_code == 409
+            matching_receipts = [
+                row
+                for row in receipts.json()
+                if row["provider_event_id"] == event_id
+            ]
+            assert len(matching_receipts) == 1
+            assert matching_receipts[0]["payload_metadata"]["endpoint_alias"] == alias
+            if provider == "lender":
+                assert response.json()["lender_id"] == lender_id
+                assert matching_receipts[0]["payload_metadata"]["lender_id"] == lender_id
 
 
 def test_communication_webhook_rejects_unknown_alias_provider(monkeypatch):
