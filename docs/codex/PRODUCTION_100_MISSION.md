@@ -44,13 +44,15 @@ has to do; everything before it is mine to execute.
 
 ## Phase 1 — Production hardening (from the system review, code-only, low risk)
 
-- [ ] Structured, request-scoped logging (JSON to stdout, keyed to the
+- [x] Structured, request-scoped logging (JSON to stdout, keyed to the
       existing `X-Request-ID`), plus a catch-all exception handler so an
       unhandled error is logged with a stack trace server-side and returns
       a clean RFC 7807 500 to the client instead of leaking internals
-- [ ] Rate limiting on unauthenticated surfaces (`public_intake_routes.py`,
-      `portal/webhooks.py`) — in-process token bucket for now, documented
-      as a stopgap pending edge/Redis-backed limiting at real scale
+      — `app/logging_config.py`, `app/main.py` (pass: `af8486c`)
+- [x] Rate limiting on unauthenticated surfaces (`public_intake_routes.py`,
+      `portal/webhooks.py`) — in-process fixed-window limiter for now,
+      documented in-code as a stopgap pending edge/Redis-backed limiting
+      at real scale — `app/rate_limit.py` (pass: `af8486c`)
 - [ ] Split `app/routers.py` (2,211 lines / 79 routes) into domain modules
       matching the pattern already used by `financial_routes.py` /
       `portal/*.py` — no behavior change, pure structure
