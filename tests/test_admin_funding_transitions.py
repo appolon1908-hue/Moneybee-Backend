@@ -12,7 +12,10 @@ from app.db import SessionLocal
 from app.main import app
 
 
-def _accept_an_offer_and_build_funding(client: TestClient) -> str:
+def _prepare_matched_submission(client: TestClient) -> tuple[str, str, str, str]:
+    """Builds a submitted, matched application through to a ready-to-offer
+    lender submission. Returns (application_id, submission_id, lender_id,
+    program_id)."""
     unique = uuid.uuid4().hex
     lead = client.post(
         "/api/v2/public/prequalifications",
@@ -95,6 +98,18 @@ def _accept_an_offer_and_build_funding(client: TestClient) -> str:
         ).json()
         if item["program_id"] == program_id
     )["id"]
+    return application_id, submission_id, lender_id, program_id
+
+
+def _create_and_accept_offer(
+    client: TestClient,
+    application_id: str,
+    submission_id: str,
+    lender_id: str,
+    program_id: str,
+) -> str:
+    """Creates and accepts an offer on an already-matched submission.
+    Returns the funding_id."""
     offer_id = client.post(
         f"/api/v2/lender/submissions/{submission_id}/offers",
         json={
@@ -122,6 +137,15 @@ def _accept_an_offer_and_build_funding(client: TestClient) -> str:
     return funding.json()["id"]
 
 
+def _accept_an_offer_and_build_funding(client: TestClient) -> str:
+    application_id, submission_id, lender_id, program_id = _prepare_matched_submission(
+        client
+    )
+    return _create_and_accept_offer(
+        client, application_id, submission_id, lender_id, program_id
+    )
+
+
 async def _set_funding_status(funding_id: str, status: str) -> None:
     async with SessionLocal() as db:
         funding = await db.get(models.Funding, uuid.UUID(funding_id))
@@ -129,13 +153,20 @@ async def _set_funding_status(funding_id: str, status: str) -> None:
         await db.commit()
 
 
-async def test_funding_rejects_invalid_transition():
+async def test_funding_auto_advances_to_conditions_satisfied_with_no_conditions():
     with TestClient(app) as client:
-        funding_id = _accept_an_offer_and_build_funding(client)
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        funding_id = _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        # The submission behind this funding never had any conditions
+        # attached, so acceptance should vacuously satisfy them immediately.
+        funding = client.get(f"/api/v2/applications/{application_id}/funding")
+        assert funding.json()["status"] == "CONDITIONS_SATISFIED"
 
-        # Fresh funding starts at CONDITIONS_PENDING; approve requires
-        # CONTRACT_SIGNED (the Contract engine isn't built yet, so nothing
-        # can legitimately reach that state through the real API today).
+        # approve still correctly requires CONTRACT_SIGNED, not reachable yet.
         response = client.post(
             f"/api/v2/admin/fundings/{funding_id}/approve",
             headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -144,9 +175,37 @@ async def test_funding_rejects_invalid_transition():
         assert response.json()["detail"]["code"] == "INVALID_FUNDING_TRANSITION"
         assert response.json()["detail"]["allowed"] == [
             "CANCELLED",
-            "CONDITIONS_SATISFIED",
+            "CONTRACT_SIGNED",
             "DECLINED",
         ]
+
+
+async def test_funding_stays_pending_until_last_condition_satisfied():
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        condition_id = client.post(
+            f"/api/v2/lender/submissions/{submission_id}/conditions",
+            json={"description": "Provide the most recent bank statement."},
+        ).json()["id"]
+
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+
+        # A condition exists and isn't satisfied yet - funding must not advance.
+        funding = client.get(f"/api/v2/applications/{application_id}/funding")
+        assert funding.json()["status"] == "CONDITIONS_PENDING"
+
+        client.post(f"/api/v2/conditions/{condition_id}/submit")
+        approved = client.post(f"/api/v2/lender/conditions/{condition_id}/approve")
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "SATISFIED"
+
+        # The only condition is now satisfied - funding should have advanced.
+        funding = client.get(f"/api/v2/applications/{application_id}/funding")
+        assert funding.json()["status"] == "CONDITIONS_SATISFIED"
 
 
 async def test_funding_full_transition_sequence_and_commission_creation():

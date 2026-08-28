@@ -572,3 +572,40 @@ def transition_funding(
             details={"from_status": previous, "to_status": to_status, "reason": reason},
         )
     )
+
+
+async def advance_funding_if_conditions_satisfied(
+    db: AsyncSession,
+    submission_id: uuid.UUID,
+    principal: Principal,
+) -> None:
+    """Move a funding CONDITIONS_PENDING -> CONDITIONS_SATISFIED once every
+    condition on the submission whose offer it came from is SATISFIED or
+    WAIVED (or the submission never had any conditions attached). Called
+    both right after a condition decision (the natural "did we just finish
+    the last one" trigger) and right after offer acceptance (to cover a
+    submission with zero conditions, which never triggers a decision).
+    """
+    submission = await db.get(models.LenderSubmission, submission_id)
+    if submission is None:
+        return
+    funding = await db.scalar(
+        select(models.Funding)
+        .join(models.Offer, models.Offer.id == models.Funding.offer_id)
+        .where(
+            models.Funding.application_id == submission.application_id,
+            models.Offer.lender_id == submission.lender_id,
+            models.Offer.program_id == submission.program_id,
+        )
+    )
+    if funding is None or funding.status != "CONDITIONS_PENDING":
+        return
+    conditions = (
+        await db.scalars(
+            select(models.UnderwritingCondition).where(
+                models.UnderwritingCondition.submission_id == submission_id
+            )
+        )
+    ).all()
+    if all(item.status in {"SATISFIED", "WAIVED"} for item in conditions):
+        transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)

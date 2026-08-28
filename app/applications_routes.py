@@ -311,6 +311,18 @@ async def accept_offer(
             approved_amount=offer.amount,
         )
     )
+    await db.flush()
+    submission_id_for_offer = await db.scalar(
+        select(models.LenderSubmission.id).where(
+            models.LenderSubmission.application_id == application.id,
+            models.LenderSubmission.lender_id == offer.lender_id,
+            models.LenderSubmission.program_id == offer.program_id,
+        )
+    )
+    if submission_id_for_offer is not None:
+        await services.advance_funding_if_conditions_satisfied(
+            db, submission_id_for_offer, user
+        )
     db.add(
         models.OutboxEvent(
             event_type="offer.accepted.v1",
