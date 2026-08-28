@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -59,7 +59,7 @@ jobs:
           sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER moneybee WITH PASSWORD 'moneybee_test'"
           sudo -u postgres createdb --owner=moneybee moneybee_test
           pg_isready --host=localhost --port=5432 --username=moneybee
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
