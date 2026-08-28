@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MoneyBeeLoans API",
-    version="0.4.0",
+    version="0.5.0",
     openapi_url="/openapi.json",
     docs_url="/docs" if settings.app_env != "production" else None,
     lifespan=lifespan,
@@ -46,6 +46,7 @@ app.add_middleware(
         "Content-Type",
         "Idempotency-Key",
         "If-Match",
+        "traceparent",
         "X-Correlation-ID",
         "X-Request-ID",
         "X-Organization-ID",
@@ -64,16 +65,55 @@ app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    correlation_id = request.headers.get("X-Correlation-ID") or request_id
+
+    if (
+        request.method == "POST"
+        and request.url.path in {
+            "/api/v1/public/prequalifications",
+            "/api/v2/public/prequalifications",
+        }
+        and not request.headers.get("Idempotency-Key")
+    ):
+        return JSONResponse(
+            status_code=428,
+            media_type="application/problem+json",
+            content={
+                "type": "https://api.moneybeeloan.com/problems/idempotency-required",
+                "title": "Idempotency key required",
+                "status": 428,
+                "detail": "Idempotency-Key is required for public prequalification submissions.",
+                "instance": request.url.path,
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+            },
+            headers={
+                "X-Request-ID": request_id,
+                "X-Correlation-ID": correlation_id,
+                "Cache-Control": "no-store",
+            },
+        )
+
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    if request.url.path.startswith("/api/v1/"):
+        response.headers["Deprecation"] = "true"
+        response.headers["Sunset"] = "Thu, 31 Dec 2026 23:59:59 GMT"
+        response.headers["Link"] = '</api/v2>; rel="successor-version"'
     return response
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_problem(request: Request, exc: RequestValidationError):
+    request_id = request.headers.get("X-Request-ID")
+    correlation_id = request.headers.get("X-Correlation-ID") or request_id
     return JSONResponse(
         status_code=422,
         media_type="application/problem+json",
@@ -87,7 +127,8 @@ async def validation_problem(request: Request, exc: RequestValidationError):
                 exc.errors(),
                 custom_encoder={ValueError: str, Exception: str},
             ),
-            "request_id": request.headers.get("X-Request-ID"),
+            "request_id": request_id,
+            "correlation_id": correlation_id,
         },
     )
 
