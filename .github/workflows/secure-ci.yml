@@ -66,6 +66,7 @@ jobs:
       - name: Static and private-key gates
         run: |
           python scripts/check_no_private_keys.py
+          python scripts/check_identity_email_readiness.py
           python -m compileall -q app tests migrations ops scripts
           python -m ruff check app tests migrations scripts
       - name: Upgrade application test database
