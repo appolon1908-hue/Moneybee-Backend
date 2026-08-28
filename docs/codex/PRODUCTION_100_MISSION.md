@@ -113,12 +113,13 @@ here in the order that unblocks the most downstream work first:
       "funding confirmation" genuinely have no persistence yet because
       those endpoints don't exist at all — tracked as part of the
       contracts/e-sign and funding engines below, not a standalone gap.
-- [ ] **Conditions/offers state machine completion**: verify all condition
-      states (`OPEN → BORROWER_ACTION_REQUIRED → SUBMITTED → UNDER_REVIEW →
-      SATISFIED/REJECTED/WAIVED`) and offer normalization fields (APR/factor
-      rate, fees, total repayment, prepayment terms, guarantee, collateral)
-      are fully modeled — audit against `app/financial_models.py` /
-      `app/domain_logic.py` and fill gaps.
+- [x] **Conditions/offers state machine completion** — pass: `e53c4ce`.
+      Conditions: audited, essentially complete (validated state machine
+      already in `app/marketplace_routes.py`; 2 of 7 spec-named states
+      unused but no functional gap, noted not fixed since there's nothing
+      broken). Offers: real gap found and fixed — `prepayment_terms`,
+      `personal_guarantee_required`, `collateral_description` didn't exist
+      anywhere; added to the model/schema/migration.
 - [ ] **Contracts / e-sign engine**: DocuSign adapter exists
       (`app/integrations/` has the provider settings) but the
       contract-creation → e-sign-send → signed-callback → funding-eligible
