@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from app.main import app
-
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.main import app  # noqa: E402
 
 
 def _load(path: Path) -> dict[str, Any]:
