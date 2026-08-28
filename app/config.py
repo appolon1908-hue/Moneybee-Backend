@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
     codestra_middleware_webhook_tolerance_seconds: int = 300
-    provider_webhook_allowlist_csv: str = "lender,docusign,sendgrid,twilio"
+    provider_webhook_allowlist_csv: str = (
+        "lender,docusign,sendgrid,twilio,odoo,n8n,experian"
+    )
     provider_webhook_secrets_json: str = "{}"
     provider_webhook_tolerance_seconds: int = 300
 

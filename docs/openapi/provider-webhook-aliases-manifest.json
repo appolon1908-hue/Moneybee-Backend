@@ -1,0 +1,11 @@
+{
+  "paths": {
+    "/api/v2/webhooks/communications/{provider}": "9cdb9739131d614e3189a43b8e128ab6f56237d8f0df1f44a3eb4589733a92db",
+    "/api/v2/webhooks/docusign": "4dfa78f6d555b5980d2eda60da8b76f254c2581e87d3356f98f845e8607c1bb2",
+    "/api/v2/webhooks/experian": "203797915cb7d74bff45ff4f5597b2defdb1a4c786e7c589a0db20a4592c1c7f",
+    "/api/v2/webhooks/lenders/{lender_id}": "ae960334a8878d11fb591873d7286905f0634e5b0226249548389cf9daed9ff5",
+    "/api/v2/webhooks/n8n": "0f6f12cc15a02845405750c8e0bce9433d7587e97b0431fec4d01f6ef7cc29f9",
+    "/api/v2/webhooks/odoo/actions": "72a91105b72520c390dd14cc398e7f78d05f0ca0fd2c7bb006f0785777183938"
+  },
+  "schemas": {}
+}

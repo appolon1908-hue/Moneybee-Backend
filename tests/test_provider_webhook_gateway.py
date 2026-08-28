@@ -87,3 +87,64 @@ def test_provider_webhook_is_authenticated_deduplicated_and_conflict_safe(monkey
     assert conflict.json()["detail"]["code"] == "WEBHOOK_EVENT_ID_CONFLICT"
     assert receipts.status_code == 200
     assert len(receipts.json()) == 1
+
+
+def test_canonical_provider_webhook_aliases_are_authenticated_and_enqueued(monkeypatch):
+    secrets = {
+        "docusign": "docusign-secret",
+        "odoo": "odoo-secret",
+        "n8n": "n8n-secret",
+        "experian": "experian-secret",
+        "sendgrid": "sendgrid-secret",
+        "twilio": "twilio-secret",
+        "lender": "lender-secret",
+    }
+    monkeypatch.setattr(settings, "provider_webhook_allowlist_csv", ",".join(secrets))
+    monkeypatch.setattr(settings, "provider_webhook_secrets_json", json.dumps(secrets))
+
+    cases = [
+        ("/api/v2/webhooks/docusign", "docusign"),
+        ("/api/v2/webhooks/odoo/actions", "odoo"),
+        ("/api/v2/webhooks/n8n", "n8n"),
+        ("/api/v2/webhooks/experian", "experian"),
+        ("/api/v2/webhooks/communications/sendgrid", "sendgrid"),
+        ("/api/v2/webhooks/communications/twilio", "twilio"),
+        ("/api/v2/webhooks/lenders/00000000-0000-0000-0000-000000000001", "lender"),
+    ]
+
+    with TestClient(app) as client:
+        for path, provider in cases:
+            body = json.dumps(
+                {
+                    "event_id": f"evt-{provider}-{time.time_ns()}",
+                    "event_type": "provider.status_changed",
+                    "aggregate_id": "app-1",
+                },
+                separators=(",", ":"),
+            ).encode()
+            timestamp = str(int(time.time()))
+            response = client.post(
+                path,
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-MoneyBee-Timestamp": timestamp,
+                    "X-MoneyBee-Signature": signature(
+                        body, timestamp, secrets[provider]
+                    ),
+                },
+            )
+            assert response.status_code == 202
+            assert response.json()["provider"] == provider
+            assert response.json()["duplicate"] is False
+
+
+def test_communication_webhook_rejects_unknown_alias_provider(monkeypatch):
+    monkeypatch.setattr(settings, "provider_webhook_allowlist_csv", "mailgun")
+    monkeypatch.setattr(
+        settings, "provider_webhook_secrets_json", json.dumps({"mailgun": "secret"})
+    )
+    with TestClient(app) as client:
+        response = client.post("/api/v2/webhooks/communications/mailgun", content=b"{}")
+
+    assert response.status_code == 404

@@ -88,6 +88,25 @@ async def provider_webhook(
     ] = None,
 ):
     """Authenticate and durably enqueue an external event without mutating lending state."""
+    return await receive_provider_webhook(
+        provider,
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
+
+
+async def receive_provider_webhook(
+    provider: str,
+    request: Request,
+    db: AsyncSession,
+    *,
+    signature: str | None = None,
+    timestamp_header: str | None = None,
+    provider_event_header: str | None = None,
+):
     provider_key = provider.strip().lower()
     if provider_key not in settings.provider_webhook_allowlist:
         raise HTTPException(status_code=404, detail="Webhook provider not found")
@@ -219,6 +238,181 @@ async def provider_webhook(
         "event_id": event_id,
         "receipt_id": str(receipt.id),
     }
+
+
+@router.post(
+    "/webhooks/lenders/{lender_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["provider-webhooks"],
+)
+async def lender_webhook(
+    lender_id: uuid.UUID,
+    request: Request,
+    db: Db,
+    signature: Annotated[
+        str | None, Header(alias="X-MoneyBee-Signature")
+    ] = None,
+    timestamp_header: Annotated[
+        str | None, Header(alias="X-MoneyBee-Timestamp")
+    ] = None,
+    provider_event_header: Annotated[
+        str | None, Header(alias="X-Provider-Event-ID")
+    ] = None,
+):
+    response = await receive_provider_webhook(
+        "lender",
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
+    response["lender_id"] = str(lender_id)
+    return response
+
+
+@router.post(
+    "/webhooks/docusign",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["provider-webhooks"],
+)
+async def docusign_webhook(
+    request: Request,
+    db: Db,
+    signature: Annotated[
+        str | None, Header(alias="X-MoneyBee-Signature")
+    ] = None,
+    timestamp_header: Annotated[
+        str | None, Header(alias="X-MoneyBee-Timestamp")
+    ] = None,
+    provider_event_header: Annotated[
+        str | None, Header(alias="X-Provider-Event-ID")
+    ] = None,
+):
+    return await receive_provider_webhook(
+        "docusign",
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
+
+
+@router.post(
+    "/webhooks/odoo/actions",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["provider-webhooks"],
+)
+async def odoo_action_webhook(
+    request: Request,
+    db: Db,
+    signature: Annotated[
+        str | None, Header(alias="X-MoneyBee-Signature")
+    ] = None,
+    timestamp_header: Annotated[
+        str | None, Header(alias="X-MoneyBee-Timestamp")
+    ] = None,
+    provider_event_header: Annotated[
+        str | None, Header(alias="X-Provider-Event-ID")
+    ] = None,
+):
+    return await receive_provider_webhook(
+        "odoo",
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
+
+
+@router.post(
+    "/webhooks/communications/{provider}",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["provider-webhooks"],
+)
+async def communication_webhook(
+    provider: str,
+    request: Request,
+    db: Db,
+    signature: Annotated[
+        str | None, Header(alias="X-MoneyBee-Signature")
+    ] = None,
+    timestamp_header: Annotated[
+        str | None, Header(alias="X-MoneyBee-Timestamp")
+    ] = None,
+    provider_event_header: Annotated[
+        str | None, Header(alias="X-Provider-Event-ID")
+    ] = None,
+):
+    provider_key = provider.strip().lower()
+    if provider_key not in {"sendgrid", "twilio"}:
+        raise HTTPException(status_code=404, detail="Webhook provider not found")
+    return await receive_provider_webhook(
+        provider_key,
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
+
+
+@router.post(
+    "/webhooks/n8n",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["provider-webhooks"],
+)
+async def n8n_webhook(
+    request: Request,
+    db: Db,
+    signature: Annotated[
+        str | None, Header(alias="X-MoneyBee-Signature")
+    ] = None,
+    timestamp_header: Annotated[
+        str | None, Header(alias="X-MoneyBee-Timestamp")
+    ] = None,
+    provider_event_header: Annotated[
+        str | None, Header(alias="X-Provider-Event-ID")
+    ] = None,
+):
+    return await receive_provider_webhook(
+        "n8n",
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
+
+
+@router.post(
+    "/webhooks/experian",
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["provider-webhooks"],
+)
+async def experian_webhook(
+    request: Request,
+    db: Db,
+    signature: Annotated[
+        str | None, Header(alias="X-MoneyBee-Signature")
+    ] = None,
+    timestamp_header: Annotated[
+        str | None, Header(alias="X-MoneyBee-Timestamp")
+    ] = None,
+    provider_event_header: Annotated[
+        str | None, Header(alias="X-Provider-Event-ID")
+    ] = None,
+):
+    return await receive_provider_webhook(
+        "experian",
+        request,
+        db,
+        signature=signature,
+        timestamp_header=timestamp_header,
+        provider_event_header=provider_event_header,
+    )
 
 
 @router.get(
