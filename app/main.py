@@ -17,6 +17,7 @@ from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
+from app.rate_limit import check_request_rate_limit
 from app.routers import router
 
 
@@ -67,10 +68,37 @@ app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    rate_limit = check_request_rate_limit(request)
+    if rate_limit and rate_limit.limited:
+        return JSONResponse(
+            status_code=429,
+            media_type="application/problem+json",
+            headers={
+                "Retry-After": str(rate_limit.reset_seconds),
+                "X-RateLimit-Limit": str(rate_limit.limit),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(rate_limit.reset_seconds),
+                "X-Request-ID": request_id,
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+            },
+            content={
+                "type": "https://api.moneybeeloan.com/problems/rate-limit",
+                "title": "Rate limit exceeded",
+                "status": 429,
+                "detail": "Too many requests. Try again after the retry window.",
+                "instance": request.url.path,
+                "request_id": request_id,
+            },
+        )
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if rate_limit:
+        response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
+        response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
+        response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_seconds)
     return response
 
 
