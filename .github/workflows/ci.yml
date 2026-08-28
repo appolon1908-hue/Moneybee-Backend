@@ -21,6 +21,8 @@ jobs:
       - run: pip install ".[dev]"
       - run: ruff check app tests
       - run: pytest -q
+      - name: Smoke-test critical API surfaces
+        run: python scripts/smoke_api.py
       - name: Verify OpenAPI contract and additive manifests
         run: python scripts/verify_openapi_contract.py
       - name: Upload reviewed OpenAPI sources
