@@ -173,7 +173,14 @@ def test_borrower_application_sections_and_submission_flow():
             "/prepare-matched-submissions"
         )
         assert submission_response.status_code == 200
-        submission = submission_response.json()[0]
+        # The application can match against lender programs created by other
+        # tests sharing this database, so select this test's own submission
+        # by program_id rather than assuming it is the only (or first) match.
+        submission = next(
+            item
+            for item in submission_response.json()
+            if item["program_id"] == program_id
+        )
         assert submission["status"] == "DRAFT"
 
         condition_response = client.post(
