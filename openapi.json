@@ -3351,6 +3351,18 @@
             ],
             "title": "Apr"
           },
+          "collateral_description": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collateral Description"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3409,6 +3421,23 @@
           "payment_frequency": {
             "title": "Payment Frequency",
             "type": "string"
+          },
+          "personal_guarantee_required": {
+            "default": false,
+            "title": "Personal Guarantee Required",
+            "type": "boolean"
+          },
+          "prepayment_terms": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepayment Terms"
           },
           "product_type": {
             "title": "Product Type",
@@ -3480,6 +3509,18 @@
             ],
             "title": "Apr"
           },
+          "collateral_description": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collateral Description"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3525,6 +3566,23 @@
           "payment_frequency": {
             "title": "Payment Frequency",
             "type": "string"
+          },
+          "personal_guarantee_required": {
+            "default": false,
+            "title": "Personal Guarantee Required",
+            "type": "boolean"
+          },
+          "prepayment_terms": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepayment Terms"
           },
           "product_type": {
             "title": "Product Type",
