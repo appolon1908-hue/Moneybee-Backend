@@ -44,6 +44,12 @@ has to do; everything before it is mine to execute.
 
 ## Phase 1 — Production hardening (from the system review, code-only, low risk)
 
+**Status: closed.** 3 of 6 items landed as code; 3 were re-scoped after
+checking their actual premise/blast radius rather than done speculatively
+(see notes on each below) — 2 had nothing left to do until later Phase 2
+work exists, 1 (error-envelope convergence) is real but large enough to
+need its own pass.
+
 - [x] Structured, request-scoped logging (JSON to stdout, keyed to the
       existing `X-Request-ID`), plus a catch-all exception handler so an
       unhandled error is logged with a stack trace server-side and returns
@@ -53,9 +59,13 @@ has to do; everything before it is mine to execute.
       `portal/webhooks.py`) — in-process fixed-window limiter for now,
       documented in-code as a stopgap pending edge/Redis-backed limiting
       at real scale — `app/rate_limit.py` (pass: `af8486c`)
-- [ ] Split `app/routers.py` (2,211 lines / 79 routes) into domain modules
-      matching the pattern already used by `financial_routes.py` /
-      `portal/*.py` — no behavior change, pure structure
+- [x] Split `app/routers.py` (2,211 lines / 83 functions) into domain
+      modules matching the pattern already used by `financial_routes.py` /
+      `portal/*.py` — `applications_routes.py`, `marketplace_routes.py`,
+      `admin_routes.py`, `borrower_legacy_routes.py`, `banking_routes.py`
+      (pass: `9bff2a7`). Verified as a true no-op by diffing the live
+      `app.openapi()` output before/after as parsed JSON (not text): paths,
+      operations, schemas, and security schemes all identical.
 - [x] `/api/v1` given real deprecation semantics (`Deprecation: true`,
       `Sunset: <date>`, and a `Link: <v2-equivalent>; rel="successor-version"`
       response header, configurable via `api_v1_sunset_date`) instead of
