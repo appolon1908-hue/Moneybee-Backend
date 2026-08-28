@@ -11,7 +11,6 @@ from app.integrations.middleware import canonical_event_type
 from app.integrations.registry import middleware_adapter
 from app.integration_models import OperationalException
 from app.models import IntegrationEvent, OutboxEvent, OutboxStatus
-from app.services import effective_capabilities
 
 
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
@@ -50,18 +49,15 @@ async def deliver(event_id: str) -> None:
         if not event or event.lease_owner != WORKER_ID:
             return
         try:
-            capabilities = await effective_capabilities(db)
-            if not capabilities.get("crm.write", False):
-                raise ProviderError(
-                    "codestra",
-                    "crm.write is not enabled and provider-ready",
-                )
+            # The dispatcher is transport-only. Domain capability checks happen
+            # before a command creates its business mutation/outbox record. A CRM
+            # capability must never block finance, identity, offer, or other events.
             adapter = middleware_adapter()
             canonical_type = canonical_event_type(event.event_type)
             result = await adapter.publish(
                 event_id=str(event.id),
                 event_type=canonical_type,
-                aggregate_type=canonical_type.split(".", 1)[0],
+                aggregate_type=event.aggregate_type or "event",
                 aggregate_id=str(event.aggregate_id),
                 aggregate_version=event.aggregate_version,
                 tenant_id=event.tenant_id,
@@ -69,6 +65,9 @@ async def deliver(event_id: str) -> None:
                 causation_id=event.causation_id,
                 occurred_at=event.created_at.isoformat(),
                 payload=event.payload,
+                idempotency_key=event.idempotency_key,
+                schema_version=event.schema_version,
+                delivery_attempt=event.attempt_count,
             )
             db.add(
                 IntegrationEvent(
