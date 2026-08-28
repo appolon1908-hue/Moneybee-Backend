@@ -1,7 +1,9 @@
+import hashlib
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -423,6 +425,9 @@ async def create_commission_adjustment(
     payload: schemas.CommissionAdjustmentInput,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.adjust"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
     if payload.amount == 0:
         raise HTTPException(
@@ -431,6 +436,32 @@ async def create_commission_adjustment(
         )
     if await db.get(models.Commission, commission_id) is None:
         raise HTTPException(status_code=404, detail="Commission not found")
+
+    route = f"/admin/commissions/{commission_id}/adjustments"
+    request_hash = hashlib.sha256(
+        json.dumps(
+            payload.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    replay = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if replay:
+        if replay.request_hash != request_hash:
+            raise HTTPException(status_code=409, detail="Idempotency key payload conflict")
+        replay_adjustment = await db.get(
+            models.CommissionAdjustment, uuid.UUID(replay.response_body["adjustment_id"])
+        )
+        if replay_adjustment is None:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_adjustment
+
     adjustment = models.CommissionAdjustment(
         commission_id=commission_id,
         adjustment_type=payload.adjustment_type,
@@ -449,6 +480,17 @@ async def create_commission_adjustment(
                 "adjustment_type": payload.adjustment_type,
                 "amount": str(payload.amount),
             },
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=201,
+            response_body={"adjustment_id": str(adjustment.id)},
         )
     )
     await db.commit()
