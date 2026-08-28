@@ -11,6 +11,8 @@ from app.auth import Principal
 from app.config import settings
 
 
+PUBLIC_PREQUALIFICATION_ROUTE = "/public/prequalifications"
+
 APPLICATION_TRANSITIONS: dict[
     models.ApplicationStatus, frozenset[models.ApplicationStatus]
 ] = {
@@ -157,14 +159,51 @@ def payload_digest(payload: schemas.PrequalificationInput) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+def _borrower_start_url(lead_id: uuid.UUID) -> str:
+    if settings.app_env in {"staging", "production"}:
+        base = "https://app.moneybeeloan.com"
+    else:
+        base = "http://localhost:5174"
+    return f"{base}/start?lead={lead_id}"
+
+
 async def create_lead(
     db: AsyncSession,
     payload: schemas.PrequalificationInput,
     idempotency_key: str,
     request_id: str,
 ) -> schemas.LeadAccepted:
+    key = idempotency_key.strip()
+    if len(key) < 8 or len(key) > 160:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_IDEMPOTENCY_KEY",
+                "message": "Idempotency-Key must contain between 8 and 160 characters.",
+            },
+        )
     if not all(item.accepted for item in payload.consents):
         raise HTTPException(status_code=422, detail="Required consent was not accepted")
+
+    request_hash = payload_digest(payload)
+    replay = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == "public",
+            models.IdempotencyRecord.route == PUBLIC_PREQUALIFICATION_ROUTE,
+            models.IdempotencyRecord.key == key,
+        )
+    )
+    if replay is not None:
+        if replay.request_hash != request_hash:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IDEMPOTENCY_CONFLICT",
+                    "message": "The Idempotency-Key was already used with a different prequalification request.",
+                },
+            )
+        return schemas.LeadAccepted.model_validate(replay.response_body)
+
     lead = models.Lead(
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
@@ -189,12 +228,29 @@ async def create_lead(
                 evidence={"accepted": True, "request_id": request_id},
             )
         )
+
+    response = schemas.LeadAccepted(
+        lead_id=lead.id,
+        reference=f"MB-{str(lead.id).split('-')[0].upper()}",
+        next_action={
+            "type": "CREATE_ACCOUNT",
+            "url": _borrower_start_url(lead.id),
+        },
+        request_id=request_id,
+    )
+    event_key = hashlib.sha256(
+        f"public:{PUBLIC_PREQUALIFICATION_ROUTE}:{key}".encode("utf-8")
+    ).hexdigest()
     db.add(
         models.OutboxEvent(
             event_type="LeadSubmitted",
+            schema_version=1,
+            aggregate_type="lead",
             aggregate_id=lead.id,
-            payload={"lead_id": str(lead.id), "digest": payload_digest(payload)},
-            idempotency_key=idempotency_key,
+            correlation_id=request_id,
+            causation_id=request_id,
+            payload={"lead_id": str(lead.id), "digest": request_hash},
+            idempotency_key=event_key,
         )
     )
     db.add(
@@ -207,16 +263,18 @@ async def create_lead(
             details={"landing_page": payload.marketing.landing_page},
         )
     )
-    await db.commit()
-    return schemas.LeadAccepted(
-        lead_id=lead.id,
-        reference=f"MB-{str(lead.id).split('-')[0].upper()}",
-        next_action={
-            "type": "CREATE_ACCOUNT",
-            "url": f"http://localhost:5174/start?lead={lead.id}",
-        },
-        request_id=request_id,
+    db.add(
+        models.IdempotencyRecord(
+            key=key,
+            actor_id="public",
+            route=PUBLIC_PREQUALIFICATION_ROUTE,
+            request_hash=request_hash,
+            response_status=202,
+            response_body=response.model_dump(mode="json"),
+        )
     )
+    await db.commit()
+    return response
 
 
 def score(application: models.Application, program: models.LenderProgram):
