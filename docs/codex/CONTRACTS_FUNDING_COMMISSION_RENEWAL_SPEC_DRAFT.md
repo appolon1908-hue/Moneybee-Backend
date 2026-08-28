@@ -1,10 +1,10 @@
 # Contracts, funding, commission, and renewal engines — draft spec
 
-Status: **draft, not implemented.** This proposes concrete state machines,
-endpoints, and fields for the two largest items in
-`docs/codex/PRODUCTION_100_MISSION.md` Phase 2. It exists to be reacted to,
-corrected, and approved before any code is written — the open questions at
-the bottom are decisions I'm not making unilaterally.
+Status: **approved to build.** The one substantive business decision
+(commission is deal-negotiated, splittable across brokers) is confirmed;
+the remaining lower-stakes questions are defaulted below, each flagged
+and one grep away to change. Implementation proceeds per the order at the
+bottom, one tested pass at a time against PR #33.
 
 Grounded entirely in what's already in this repo, not invented from a blank
 page:
@@ -216,7 +216,7 @@ communication.
 - `POST /admin/renewal-opportunities/{id}/status` — operator moves the
   pipeline `status` (`CONTACTED`, `CONVERTED`, etc.), idempotent.
 
-## Open questions — need your decision before I build any of this
+## Open questions — resolved or defaulted, all overridable
 
 1. **Commission rate source — resolved.** Commission is a percentage of
    the loan (funded) amount, negotiated per deal rather than a single
@@ -238,36 +238,49 @@ communication.
    step via `POST /admin/commissions/{id}/splits` (proposed below,
    unchanged) once the total commission exists. No `LenderProgram` schema
    change needed for this after all.
-2. **Renewal eligibility window.** What makes a funded account eligible
-   for a renewal opportunity — a fixed time since funding (e.g. 90 days),
-   a fraction of the term elapsed, a minimum payment history, or something
-   else? I don't have a defensible default to propose here without your
-   input; "some number of days" would be a guess.
-3. **Contract creation vs. send as one step or two.** Proposed above as
-   one worker step (`DRAFT` immediately followed by `SENT`). If
-   `send_envelope` should be independently retryable (e.g. so a DocuSign
-   outage doesn't block the `Contract` row from existing and being
-   visible to the borrower), it should be two separate outbox-driven
-   steps instead. Which failure mode matters more here?
-4. **Multi-signer contracts.** `ESignAdapter.send_envelope` takes a single
-   `signer_email`/`signer_name`. `app/models.py`'s `Owner` model supports
-   multiple owners per application. Does every contract need every >X%
-   owner's signature, or is a single authorized signer (e.g. the
-   application's primary contact) sufficient for v1?
-5. **Who can approve `APPROVED_FOR_FUNDING`/`funds-sent`/`confirm`?** These
-   move real money. Proposing new granular permissions
-   (`funding.approve`, `funding.funds_sent`, `funding.confirm`) rather
-   than reusing the existing broad `commission.adjust`-style permissions,
-   so these can be governed separately (e.g. requiring a different role
-   or dual-control later) — confirm that's the right granularity, not
-   over- or under-engineered for how this team actually operates.
+2. **Renewal eligibility window — defaulting, not confirmed.** No signal
+   from you yet on what makes a funded account eligible, and "some number
+   of days" is a guess I don't want to hide. Proceeding with **90 days
+   since `funding_confirmed_at`**, a common working-capital/MCA renewal
+   benchmark, as a named, isolated constant
+   (`RENEWAL_ELIGIBILITY_DAYS = 90` in one place) specifically so it's a
+   one-line change, not a re-architecture, when you give me the real
+   number or rule (elapsed-term-fraction, payment-history-based, etc.).
+3. **Contract creation vs. send — defaulting to one step.** `DRAFT`
+   immediately followed by `SENT` in the same worker step. Simpler, and
+   two-step (independently-retryable send) is a mechanical split to make
+   later if a real DocuSign-outage incident shows it's needed — not
+   worth the extra complexity speculatively.
+4. **Multi-signer contracts — defaulting to single signer for v1.** Your
+   "1 or multiple" read as leaving it to me: going with **one authorized
+   signer** (the application's primary contact/owner) rather than
+   requiring every >X% owner. Multi-signer sequencing (who signs first,
+   what happens on partial completion) is real added complexity that
+   isn't justified until a specific deal needs it — flagging this as the
+   default most likely to need revisiting once real commercial contracts
+   are in play.
+5. **Funding-approval permissions — proceeding with the granular
+   proposal.** `funding.approve` / `funding.funds_sent` / `funding.confirm`
+   as three separate permissions (not one), so who can move money can be
+   governed independently per step later (e.g. dual control on
+   `funds_sent`) without a schema change then.
 
-## What I'll do once these are answered
+All defaults above are recorded here specifically so they're one grep
+away to find and change — nothing is hidden in code comments only.
 
-Same working method as every other pass in this mission: implement one
-state machine at a time (Contract, then Funding transitions, then
-Commission, then Renewal — in that order, since each depends on the
-previous), with the idempotency/audit pattern already proven, tests that
-drive the real HTTP flow the way `tests/test_admin_commission_adjustments.py`
-does, `scripts/verify_openapi_contract.py`-clean commits (surgical patches,
-not wholesale regeneration), pushed to PR #33 pass by pass.
+## Implementation order
+
+Building in dependency order, each as its own tested, pushed pass to PR
+#33, same discipline as every prior pass (real local checks before every
+push, idempotency on every money-moving write, surgical
+`verify_openapi_contract.py`-clean patches, mission doc checked off as
+each lands):
+
+1. Funding state machine (the six-stage transition sequence + the four
+   operator endpoints) — the backbone everything else hangs off of.
+2. Contract/e-sign engine (DRAFT→SENT→SIGNED, DocuSign webhook consumer).
+3. Commission engine (creation at funding-confirm with operator-entered
+   rate, receipts, splits) — depends on step 1's `confirm` endpoint
+   existing to attach to.
+4. Renewal engine (eligibility worker + pipeline-status endpoint) — least
+   urgent, no other engine depends on it.
