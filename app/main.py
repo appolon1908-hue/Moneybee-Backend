@@ -15,13 +15,16 @@ from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
+from app.logging_config import Timer, bind_request_id, configure_logging, request_logger
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
+from app.rate_limit import InMemoryRateLimitMiddleware
 from app.routers import router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     await initialize_local_schema()
     try:
         yield
@@ -62,15 +65,27 @@ app.include_router(integration_router, prefix="/api/v1", include_in_schema=False
 app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
+app.add_middleware(InMemoryRateLimitMiddleware)
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    bind_request_id(request_id)
+    timer = Timer()
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    request_logger().info(
+        "request.completed",
+        extra={
+            "http_method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": timer.elapsed_ms(),
+        },
+    )
     return response
 
 
@@ -90,6 +105,31 @@ async def validation_problem(request: Request, exc: RequestValidationError):
                 custom_encoder={ValueError: str, Exception: str},
             ),
             "request_id": request.headers.get("X-Request-ID"),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_problem(request: Request, exc: Exception):
+    request_id = request.headers.get("X-Request-ID")
+    request_logger().exception(
+        "request.unhandled_exception",
+        extra={
+            "http_method": request.method,
+            "path": request.url.path,
+            "request_id": request_id,
+        },
+    )
+    return JSONResponse(
+        status_code=500,
+        media_type="application/problem+json",
+        content={
+            "type": "https://api.moneybeeloan.com/problems/internal-error",
+            "title": "Internal server error",
+            "status": 500,
+            "detail": "An unexpected error occurred.",
+            "instance": request.url.path,
+            "request_id": request_id,
         },
     )
 

@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     field_encryption_key: str | None = None
     provider_timeout_seconds: float = 30.0
 
+    log_level: str = "INFO"
+    public_rate_limit_per_minute: int = 60
+    webhook_rate_limit_per_minute: int = 120
+
     source_sha: str | None = None
     api_image_digest: str | None = None
     frontend_image_digest: str | None = None
