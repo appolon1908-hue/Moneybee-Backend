@@ -135,6 +135,13 @@ async def _load_funding_or_404(db: AsyncSession, funding_id: uuid.UUID) -> model
     return funding
 
 
+async def _load_contract_or_404(db: AsyncSession, contract_id: uuid.UUID) -> models.Contract:
+    contract = await db.get(models.Contract, contract_id)
+    if contract is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return contract
+
+
 async def _funding_idempotency_replay(
     db: AsyncSession,
     *,
@@ -350,6 +357,50 @@ async def decline_funding(
     await db.commit()
     await db.refresh(funding)
     return funding
+
+
+@router.post(
+    "/admin/contracts/{contract_id}/void",
+    response_model=schemas.ContractRead,
+    tags=["admin", "funding"],
+)
+async def void_contract(
+    contract_id: uuid.UUID,
+    payload: schemas.ContractVoidInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("contract.void"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    contract = await _load_contract_or_404(db, contract_id)
+    route = f"/admin/contracts/{contract_id}/void"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_contract_or_404(db, contract_id)
+
+    services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"contract_id": str(contract.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(contract)
+    return contract
 
 
 @router.get(

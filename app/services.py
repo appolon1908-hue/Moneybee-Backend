@@ -574,6 +574,49 @@ def transition_funding(
     )
 
 
+CONTRACT_TRANSITIONS: dict[str, frozenset[str]] = {
+    "DRAFT": frozenset({"SENT", "VOIDED"}),
+    "SENT": frozenset({"SIGNED", "DECLINED", "EXPIRED", "VOIDED"}),
+    "SIGNED": frozenset(),
+    "DECLINED": frozenset(),
+    "EXPIRED": frozenset(),
+    "VOIDED": frozenset(),
+}
+
+
+def transition_contract(
+    db: AsyncSession,
+    contract: models.Contract,
+    to_status: str,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = contract.status
+    if previous == to_status:
+        return
+    allowed = CONTRACT_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_CONTRACT_TRANSITION",
+                "from_status": previous,
+                "to_status": to_status,
+                "allowed": sorted(allowed),
+            },
+        )
+    contract.status = to_status
+    db.add(
+        models.AuditEvent(
+            actor_id=principal.subject,
+            action=f"CONTRACT_{to_status}",
+            resource_type="contract",
+            resource_id=str(contract.id),
+            details={"from_status": previous, "to_status": to_status, "reason": reason},
+        )
+    )
+
+
 async def advance_funding_if_conditions_satisfied(
     db: AsyncSession,
     submission_id: uuid.UUID,
@@ -609,3 +652,14 @@ async def advance_funding_if_conditions_satisfied(
     ).all()
     if all(item.status in {"SATISFIED", "WAIVED"} for item in conditions):
         transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+        db.add(
+            models.Contract(
+                application_id=funding.application_id,
+                offer_id=funding.offer_id,
+                # No real contract-template catalog/versioning exists yet -
+                # this is a placeholder until that's a real business
+                # decision, not a stand-in for actual legal content.
+                template_version="v1",
+                status="DRAFT",
+            )
+        )
