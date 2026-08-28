@@ -49,6 +49,18 @@ def test_request_completed_is_logged(caplog):
     assert any("request.completed" in record.message for record in caplog.records)
 
 
+def test_api_v1_responses_carry_deprecation_and_sunset_headers():
+    with TestClient(app) as client:
+        v1_response = client.get("/api/v1/me")
+        v2_response = client.get("/api/v2/me")
+
+    assert v1_response.headers.get("Deprecation") == "true"
+    assert "Sunset" in v1_response.headers
+    assert v1_response.headers["Link"] == '</api/v2/me>; rel="successor-version"'
+    assert "Deprecation" not in v2_response.headers
+    assert "Sunset" not in v2_response.headers
+
+
 def test_bucket_for_path_matches_public_and_webhook_prefixes():
     assert _bucket_for_path("/api/v2/public/contact-requests") == "public"
     assert _bucket_for_path("/api/v1/public/callback-requests") == "public"
