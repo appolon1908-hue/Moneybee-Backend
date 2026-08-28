@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import identity_models as identity
 from app import models
 from app.auth import Db, decode_access_token
+from app.event_contracts import INTERNAL_ACTOR_KEY, INTERNAL_SUBJECT_KEY
 from app.request_context import enforce_portal_client, request_identifiers
 
 
@@ -313,7 +314,7 @@ async def _provision(
             models.OutboxEvent(
                 event_type=CANONICAL_ACCOUNT_PROVISIONED_EVENT,
                 schema_version=1,
-                aggregate_type="user",
+                aggregate_type="moneybee-user",
                 aggregate_id=user.id,
                 aggregate_version=1,
                 tenant_id=str(organization.id),
@@ -325,6 +326,13 @@ async def _provision(
                     "membership_type": "BORROWER",
                     "email": email,
                     "email_verified": True,
+                    "display_name": display_name,
+                    "marketing_consent": False,
+                    INTERNAL_SUBJECT_KEY: f"moneybee-user:{user.id}",
+                    INTERNAL_ACTOR_KEY: {
+                        "type": "user",
+                        "id": f"keycloak:{subject}",
+                    },
                 },
                 idempotency_key=event_key,
             )
