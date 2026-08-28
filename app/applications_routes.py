@@ -725,6 +725,20 @@ async def application_funding(application_id: uuid.UUID, db: Db, user: User):
 
 
 @router.get(
+    "/applications/{application_id}/contract",
+    response_model=schemas.ContractRead | None,
+    tags=["funding"],
+)
+async def application_contract(application_id: uuid.UUID, db: Db, user: User):
+    await services.get_authorized_application(db, application_id, user)
+    return await db.scalar(
+        select(models.Contract)
+        .where(models.Contract.application_id == application_id)
+        .order_by(models.Contract.created_at.desc())
+    )
+
+
+@router.get(
     "/me/notification-preferences",
     response_model=schemas.NotificationPreferenceRead,
     tags=["identity", "communications"],

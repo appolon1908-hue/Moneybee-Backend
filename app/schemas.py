@@ -268,6 +268,24 @@ class LenderSubmissionRead(BaseModel):
     created_at: datetime
 
 
+class ContractRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    offer_id: uuid.UUID
+    template_version: str
+    provider: str | None
+    external_envelope_id: str | None
+    status: str
+    sent_at: datetime | None
+    signed_at: datetime | None
+    created_at: datetime
+
+
+class ContractVoidInput(BaseModel):
+    reason: str = Field(min_length=5, max_length=10_000)
+
+
 class FundingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

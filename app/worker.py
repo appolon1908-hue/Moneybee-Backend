@@ -1,21 +1,37 @@
 import asyncio
 import os
 import socket
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
 
+from app.auth import Principal
 from app.db import SessionLocal
+from app.integration_models import IntegrationInboxMessage, OperationalException
 from app.integrations.base import ProviderError
 from app.integrations.middleware import canonical_event_type
-from app.integrations.registry import middleware_adapter
-from app.integration_models import OperationalException
-from app.models import IntegrationEvent, OutboxEvent, OutboxStatus
-from app.services import effective_capabilities
+from app.integrations.registry import esign_adapter, middleware_adapter
+from app.models import Contract, Funding, IntegrationEvent, Owner, OutboxEvent, OutboxStatus
+from app.services import effective_capabilities, transition_contract, transition_funding
 
 
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+SYSTEM_PRINCIPAL = Principal(
+    user_id=uuid.UUID(int=0),
+    issuer="system",
+    subject="worker:contract-engine",
+    organization_ids=(),
+    active_organization_id=None,
+    roles=frozenset(),
+    permissions=frozenset({"*"}),
+    membership_types=frozenset(),
+    borrower_id=None,
+    lender_id=None,
+    is_active=True,
+)
 
 
 def external_delivery_enabled() -> bool:
@@ -146,6 +162,153 @@ async def deliver(event_id: str) -> None:
             event.lease_owner = None
             event.lease_expires_at = None
             await db.commit()
+
+
+def esign_live_send_enabled() -> bool:
+    """Named after the ESIGN_LIVE_SEND capability-freeze flag already
+    referenced in docs/codex/MB_RELEASE_READINESS_PACKET_20260827.md -
+    fail-closed like external_delivery_enabled() above."""
+    return os.getenv("ESIGN_LIVE_SEND", "false").strip().lower() in TRUE_VALUES
+
+
+async def send_pending_contract_envelope() -> str | None:
+    """Claims and sends at most one DRAFT contract per call. Not wired
+    into run()'s loop - deployment decides how this gets scheduled,
+    independent of the CRM outbox delivery loop above so the two
+    concerns' retry/failure semantics don't get entangled. Returns the
+    contract id processed, or None if there was nothing to do."""
+    if not esign_live_send_enabled():
+        return None
+    async with SessionLocal() as db, db.begin():
+        contract = await db.scalar(
+            select(Contract)
+            .where(Contract.status == "DRAFT")
+            .order_by(Contract.created_at)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if contract is None:
+            return None
+        signer = await db.scalar(
+            select(Owner)
+            .where(Owner.application_id == contract.application_id)
+            .order_by(Owner.ownership_percent.desc(), Owner.created_at)
+            .limit(1)
+        )
+        if signer is None or not signer.email:
+            transition_contract(
+                db,
+                contract,
+                "VOIDED",
+                SYSTEM_PRINCIPAL,
+                reason="No owner with an email address to sign as",
+            )
+            return str(contract.id)
+        try:
+            result = await esign_adapter().send_envelope(
+                contract_id=str(contract.id),
+                signer_email=signer.email,
+                signer_name=f"{signer.first_name} {signer.last_name}",
+            )
+        except ProviderError:
+            # Left as DRAFT - the next call to this function retries it.
+            # No dead-letter/backoff bookkeeping yet, unlike the CRM outbox
+            # above; add if send failures turn out to need it in practice.
+            return str(contract.id)
+        contract.provider = "docusign"
+        contract.external_envelope_id = str(
+            result.get("envelopeId") or result.get("envelope_id") or ""
+        ) or None
+        transition_contract(db, contract, "SENT", SYSTEM_PRINCIPAL)
+        return str(contract.id)
+
+
+def _docusign_envelope_id(payload: dict) -> str | None:
+    """DocuSign Connect webhook payload shape varies by configuration
+    (legacy XML-derived JSON vs. the newer eventNotification format) and
+    this integration has never been configured against a real DocuSign
+    account, so this checks the field names DocuSign's own docs use for
+    each - verify against the actual configured webhook format before
+    this goes live."""
+    return (
+        payload.get("envelopeId")
+        or payload.get("envelope_id")
+        or payload.get("data", {}).get("envelopeId")
+    )
+
+
+def _docusign_envelope_status(payload: dict) -> str | None:
+    status = (
+        payload.get("status")
+        or payload.get("event")
+        or payload.get("data", {}).get("envelopeSummary", {}).get("status")
+    )
+    return str(status).lower() if status else None
+
+
+DOCUSIGN_STATUS_TO_CONTRACT_STATUS = {
+    "completed": "SIGNED",
+    "declined": "DECLINED",
+    "voided": "VOIDED",
+}
+
+
+async def process_pending_docusign_event() -> str | None:
+    """Claims and applies at most one received DocuSign inbox message per
+    call. Same scheduling note as send_pending_contract_envelope()."""
+    async with SessionLocal() as db, db.begin():
+        message = await db.scalar(
+            select(IntegrationInboxMessage)
+            .where(
+                IntegrationInboxMessage.provider == "docusign",
+                IntegrationInboxMessage.status == "RECEIVED",
+            )
+            .order_by(IntegrationInboxMessage.created_at)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if message is None:
+            return None
+
+        envelope_id = _docusign_envelope_id(message.payload)
+        new_status = DOCUSIGN_STATUS_TO_CONTRACT_STATUS.get(
+            _docusign_envelope_status(message.payload) or ""
+        )
+        message.attempts += 1
+        message.processed_at = datetime.now(UTC)
+        if not envelope_id or not new_status:
+            message.status = "IGNORED"
+            message.last_error = "Unrecognized envelope id or status in payload"
+            return str(message.id)
+
+        contract = await db.scalar(
+            select(Contract).where(Contract.external_envelope_id == envelope_id)
+        )
+        if contract is None:
+            message.status = "FAILED"
+            message.last_error = f"No contract found for envelope {envelope_id}"
+            return str(message.id)
+
+        try:
+            transition_contract(db, contract, new_status, SYSTEM_PRINCIPAL)
+        except Exception as exc:
+            message.status = "FAILED"
+            message.last_error = str(exc)[:1000]
+            return str(message.id)
+
+        if new_status == "SIGNED":
+            contract.signed_at = datetime.now(UTC)
+            funding = await db.scalar(
+                select(Funding).where(
+                    Funding.application_id == contract.application_id,
+                    Funding.offer_id == contract.offer_id,
+                )
+            )
+            if funding is not None and funding.status == "CONDITIONS_SATISFIED":
+                transition_funding(db, funding, "CONTRACT_SIGNED", SYSTEM_PRINCIPAL)
+
+        message.status = "PROCESSED"
+        return str(message.id)
 
 
 async def run() -> None:
