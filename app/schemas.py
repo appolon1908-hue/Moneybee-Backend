@@ -193,6 +193,9 @@ class OfferInput(BaseModel):
     factor_rate: Decimal | None = None
     origination_fee: Decimal = 0
     total_repayment: Decimal | None = None
+    prepayment_terms: str | None = Field(default=None, max_length=10_000)
+    personal_guarantee_required: bool = False
+    collateral_description: str | None = Field(default=None, max_length=10_000)
     expires_at: datetime | None = None
 
 

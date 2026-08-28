@@ -235,6 +235,9 @@ class Offer(Base, Record):
     factor_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     origination_fee: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     total_repayment: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    prepayment_terms: Mapped[str | None] = mapped_column(Text, nullable=True)
+    personal_guarantee_required: Mapped[bool] = mapped_column(default=False)
+    collateral_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

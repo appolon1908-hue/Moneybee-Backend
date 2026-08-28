@@ -234,10 +234,19 @@ def test_borrower_application_sections_and_submission_flow():
                 "apr": 15,
                 "origination_fee": 500,
                 "total_repayment": 60000,
+                "prepayment_terms": "No penalty after month 6.",
+                "personal_guarantee_required": True,
+                "collateral_description": "UCC-1 blanket lien on business assets.",
             },
         )
         assert offer_response.status_code == 201
         offer_id = offer_response.json()["id"]
+        assert offer_response.json()["prepayment_terms"] == "No penalty after month 6."
+        assert offer_response.json()["personal_guarantee_required"] is True
+        assert (
+            offer_response.json()["collateral_description"]
+            == "UCC-1 blanket lien on business assets."
+        )
 
         accept_key = uuid.uuid4().hex
         accepted_response = client.post(
