@@ -120,17 +120,30 @@ here in the order that unblocks the most downstream work first:
       broken). Offers: real gap found and fixed — `prepayment_terms`,
       `personal_guarantee_required`, `collateral_description` didn't exist
       anywhere; added to the model/schema/migration.
-- [ ] **Contracts / e-sign engine**: DocuSign adapter exists
-      (`app/integrations/` has the provider settings) but the
-      contract-creation → e-sign-send → signed-callback → funding-eligible
-      state machine described in the spec's "Funding, commissions, and
-      renewals" section is not yet built end-to-end.
-- [ ] **Funding, commission, and renewal engines**: the full lifecycle
-      (accepted offer → conditions → contract signed → approved for funding
-      → funds sent → funded → commission expected/received) plus the
-      renewal worker that evaluates funded accounts and creates renewal
-      opportunities. This is the largest single piece of remaining domain
-      logic.
+- [x]/[ ] **Contracts, funding, commission, renewal engines** — full draft
+      spec at `docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md`,
+      reviewed and confirmed (commission is deal-negotiated and splittable
+      across brokers; other lower-stakes questions defaulted and flagged
+      there). Building in the spec's stated dependency order:
+  - [x] **1. Funding state machine** — pass: `946491d`. Full six-stage
+        lifecycle (`CONDITIONS_PENDING → CONDITIONS_SATISFIED →
+        CONTRACT_SIGNED → APPROVED_FOR_FUNDING → FUNDS_SENT → FUNDED`,
+        `DECLINED`/`CANCELLED` from any non-terminal state), four
+        idempotent operator endpoints, Commission created at `confirm`
+        with an operator-entered rate. `approve` currently requires
+        `CONTRACT_SIGNED`, unreachable through the real API until step 2
+        lands — tested by seeding the prerequisite state directly, same
+        as the commission-adjustment test had to for the same reason.
+  - [ ] **2. Contract / e-sign engine** — DocuSign adapter and webhook
+        receiver already exist (`app/integrations/providers.py`,
+        `app/portal/webhooks.py:285`); nothing yet creates a `Contract`
+        row, calls `send_envelope`, or applies inbound signed/declined
+        events. Next up.
+  - [ ] **3. Commission engine (receipts/splits)** — creation-at-confirm
+        already landed in step 1; `POST /admin/commissions/{id}/receipts`
+        and `POST /admin/commissions/{id}/splits` still to build.
+  - [ ] **4. Renewal engine** — eligibility worker + pipeline-status
+        endpoint, least urgent, nothing else depends on it.
 - [ ] **Object storage + malware scanning** for document uploads (adapter
       interface exists in `app/integrations/base.py`; scanning step and
       real S3-compatible wiring do not).
