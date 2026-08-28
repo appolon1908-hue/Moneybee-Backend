@@ -1,82 +1,86 @@
-from __future__ import annotations
-
 import time
-from dataclasses import dataclass
+from collections import defaultdict, deque
 
-from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app.config import settings
 
 
-@dataclass(frozen=True)
-class RateLimitDecision:
-    limited: bool
-    limit: int
-    remaining: int
-    reset_seconds: int
-    bucket: str
+RATE_LIMITED_PREFIXES: dict[str, str] = {
+    "/api/v2/public/": "public",
+    "/api/v1/public/": "public",
+    "/api/v2/webhooks/": "webhook",
+    "/api/v1/webhooks/": "webhook",
+}
+
+_LIMITS_PER_MINUTE: dict[str, int] = {
+    "public": settings.public_rate_limit_per_minute,
+    "webhook": settings.webhook_rate_limit_per_minute,
+}
+
+WINDOW_SECONDS = 60.0
 
 
-_buckets: dict[str, tuple[int, float]] = {}
-
-
-def reset_rate_limit_state() -> None:
-    _buckets.clear()
+def _bucket_for_path(path: str) -> str | None:
+    for prefix, bucket in RATE_LIMITED_PREFIXES.items():
+        if path.startswith(prefix):
+            return bucket
+    return None
 
 
 def _client_key(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip() or "unknown"
-    if request.client and request.client.host:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
         return request.client.host
     return "unknown"
 
 
-def _route_scope(path: str) -> tuple[str, int] | None:
-    if path.startswith(("/api/v1/public/", "/api/v2/public/")):
-        return "public", settings.public_rate_limit_per_minute
-    if path.startswith(("/api/v1/webhooks/", "/api/v2/webhooks/")):
-        return "webhook", settings.webhook_rate_limit_per_minute
-    return None
+class InMemoryRateLimitMiddleware(BaseHTTPMiddleware):
+    """Fixed-window per-IP rate limiting for unauthenticated surfaces.
 
+    This is a single-process stopgap: it does not coordinate across
+    multiple API instances. At real scale, replace with an edge-level or
+    Redis-backed limiter (see docs/codex/PRODUCTION_100_MISSION.md).
+    """
 
-def check_request_rate_limit(request: Request) -> RateLimitDecision | None:
-    if not settings.rate_limit_enabled:
-        return None
+    def __init__(self, app, limits_per_minute: dict[str, int] | None = None) -> None:
+        super().__init__(app)
+        self._limits = limits_per_minute or _LIMITS_PER_MINUTE
+        self._hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
-    route_scope = _route_scope(request.url.path)
-    if route_scope is None:
-        return None
+    async def dispatch(self, request: Request, call_next):
+        bucket = _bucket_for_path(request.url.path)
+        if bucket is None:
+            return await call_next(request)
 
-    scope, limit = route_scope
-    window_seconds = max(1, settings.rate_limit_window_seconds)
-    if limit <= 0:
-        return None
+        limit = self._limits.get(bucket)
+        if not limit or limit <= 0:
+            return await call_next(request)
 
-    now = time.monotonic()
-    bucket = f"{scope}:{_client_key(request)}"
-    count, reset_at = _buckets.get(bucket, (0, now + window_seconds))
-    if now >= reset_at:
-        count = 0
-        reset_at = now + window_seconds
+        key = (bucket, _client_key(request))
+        now = time.monotonic()
+        hits = self._hits[key]
+        while hits and now - hits[0] > WINDOW_SECONDS:
+            hits.popleft()
 
-    reset_seconds = max(1, int(reset_at - now + 0.999))
-    if count >= limit:
-        return RateLimitDecision(
-            limited=True,
-            limit=limit,
-            remaining=0,
-            reset_seconds=reset_seconds,
-            bucket=scope,
-        )
+        if len(hits) >= limit:
+            retry_after = max(1, int(WINDOW_SECONDS - (now - hits[0])))
+            return JSONResponse(
+                status_code=429,
+                media_type="application/problem+json",
+                content={
+                    "type": "https://api.moneybeeloan.com/problems/rate-limited",
+                    "title": "Too many requests",
+                    "status": 429,
+                    "detail": "Rate limit exceeded for this endpoint.",
+                    "instance": request.url.path,
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
 
-    count += 1
-    _buckets[bucket] = (count, reset_at)
-    return RateLimitDecision(
-        limited=False,
-        limit=limit,
-        remaining=max(0, limit - count),
-        reset_seconds=reset_seconds,
-        bucket=scope,
-    )
+        hits.append(now)
+        return await call_next(request)

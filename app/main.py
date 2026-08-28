@@ -1,5 +1,4 @@
 import uuid
-from time import perf_counter
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -16,17 +15,16 @@ from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
-from app.observability import get_logger
+from app.logging_config import Timer, bind_request_id, configure_logging, request_logger
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
-from app.rate_limit import check_request_rate_limit
+from app.rate_limit import InMemoryRateLimitMiddleware
 from app.routers import router
-
-logger = get_logger("moneybee.api")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     await initialize_local_schema()
     try:
         yield
@@ -67,89 +65,25 @@ app.include_router(integration_router, prefix="/api/v1", include_in_schema=False
 app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
+app.add_middleware(InMemoryRateLimitMiddleware)
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-    correlation_id = request.headers.get("X-Correlation-ID", request_id)
-    start = perf_counter()
-    rate_limit = check_request_rate_limit(request)
-    if rate_limit and rate_limit.limited:
-        duration_ms = round((perf_counter() - start) * 1000, 2)
-        logger.warning(
-            "request_rate_limited",
-            extra={
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": 429,
-                "duration_ms": duration_ms,
-                "client_host": request.client.host if request.client else None,
-                "rate_limit_bucket": rate_limit.bucket,
-            },
-        )
-        return JSONResponse(
-            status_code=429,
-            media_type="application/problem+json",
-            headers={
-                "Retry-After": str(rate_limit.reset_seconds),
-                "X-RateLimit-Limit": str(rate_limit.limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(rate_limit.reset_seconds),
-                "X-Request-ID": request_id,
-                "X-Correlation-ID": correlation_id,
-                "X-Content-Type-Options": "nosniff",
-                "Referrer-Policy": "strict-origin-when-cross-origin",
-            },
-            content={
-                "type": "https://api.moneybeeloan.com/problems/rate-limit",
-                "title": "Rate limit exceeded",
-                "status": 429,
-                "detail": "Too many requests. Try again after the retry window.",
-                "instance": request.url.path,
-                "request_id": request_id,
-            },
-        )
-    try:
-        response = await call_next(request)
-    except Exception as exc:
-        duration_ms = round((perf_counter() - start) * 1000, 2)
-        logger.exception(
-            "request_failed",
-            extra={
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": 500,
-                "duration_ms": duration_ms,
-                "client_host": request.client.host if request.client else None,
-                "error_type": type(exc).__name__,
-            },
-        )
-        raise
-    duration_ms = round((perf_counter() - start) * 1000, 2)
+    bind_request_id(request_id)
+    timer = Timer()
+    response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
-    response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if rate_limit:
-        response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
-        response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
-        response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_seconds)
-    logger.info(
-        "request_completed",
+    request_logger().info(
+        "request.completed",
         extra={
-            "request_id": request_id,
-            "correlation_id": correlation_id,
-            "method": request.method,
+            "http_method": request.method,
             "path": request.url.path,
             "status_code": response.status_code,
-            "duration_ms": duration_ms,
-            "client_host": request.client.host if request.client else None,
-            "rate_limit_bucket": rate_limit.bucket if rate_limit else None,
+            "duration_ms": timer.elapsed_ms(),
         },
     )
     return response
@@ -171,6 +105,31 @@ async def validation_problem(request: Request, exc: RequestValidationError):
                 custom_encoder={ValueError: str, Exception: str},
             ),
             "request_id": request.headers.get("X-Request-ID"),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_problem(request: Request, exc: Exception):
+    request_id = request.headers.get("X-Request-ID")
+    request_logger().exception(
+        "request.unhandled_exception",
+        extra={
+            "http_method": request.method,
+            "path": request.url.path,
+            "request_id": request_id,
+        },
+    )
+    return JSONResponse(
+        status_code=500,
+        media_type="application/problem+json",
+        content={
+            "type": "https://api.moneybeeloan.com/problems/internal-error",
+            "title": "Internal server error",
+            "status": 500,
+            "detail": "An unexpected error occurred.",
+            "instance": request.url.path,
+            "request_id": request_id,
         },
     )
 
