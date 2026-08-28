@@ -145,9 +145,13 @@ class of command and get the same idempotency treatment as
 
 ### Creation trigger
 
-Proposed: automatic, via outbox, when `Funding.status → FUNDED`. Creates
-one `Commission` row (`status="EXPECTED"`) with `expected_amount`
-computed from a rate (see open question 1) applied to `funded_amount`.
+Created as part of the same `POST /admin/fundings/{id}/confirm` operator
+action that moves `Funding.status → FUNDED` (see open question 1,
+resolved) — the operator supplies the negotiated `commission_rate_bps`
+(or a direct `expected_amount`) at that moment, since the rate is
+deal-specific rather than a stored default. One `Commission` row
+(`status="EXPECTED"`), `expected_amount = funded_amount *
+commission_rate_bps / 10000`.
 
 ### Commission state machine
 
@@ -214,23 +218,26 @@ communication.
 
 ## Open questions — need your decision before I build any of this
 
-1. **Commission rate source — partially answered.** You said this is
-   based on standard US business-loan-commission conventions. Every
-   `product_type` in this codebase so far is `WORKING_CAPITAL`
-   (alternative/MCA-style lending, not SBA/bank term loans), where US
-   broker commissions are typically cited in the ~6-12% range of funded
-   amount (higher than traditional term-loan/SBA commissions, which run
-   ~1-3%, because terms are shorter and deals turn over faster). Proposing
-   as a concrete, overridable default: `commission_rate_bps: int = 800`
-   (8%) added to `LenderProgram` — varies per lender/product since that's
-   already the natural per-deal-type scope in this schema, with the
-   `Commission.expected_amount` calculation reading it at funding time
-   (not hardcoded, so any specific program can be set differently).
-   **Confirm**: is 8% the right default/starting point, or do you have an
-   actual number (or a per-program range) from how this business
-   negotiates broker commissions today? And does the rate live on the
-   `LenderProgram` (per product/lender) as proposed, or does it need to be
-   negotiable per individual `Offer` instead?
+1. **Commission rate source — resolved.** Commission is a percentage of
+   the loan (funded) amount, negotiated per deal rather than a single
+   fixed platform-wide rate, and splittable across multiple brokers on
+   the same deal. This confirms the existing (already-modeled,
+   never-written-to) `CommissionSplit` table
+   (`recipient_type`/`recipient_reference`/`percentage`/`amount`) is
+   exactly the right shape — no new split-tracking model needed.
+   Revised design from the original proposal: rather than a stored
+   `commission_rate_bps` default on `LenderProgram` (which implied one
+   fixed rate per program), the rate/amount is **entered by the operator
+   at the point of funding confirmation** — `POST
+   /admin/fundings/{id}/confirm` (the trigger below) now additionally
+   accepts `commission_rate_bps` (or a direct `expected_amount` override,
+   for cases where the split doesn't cleanly compute from a flat rate),
+   which both records the deal-specific number and computes
+   `Commission.expected_amount = funded_amount * commission_rate_bps /
+   10000`. Splitting across brokers is a separate, subsequent operator
+   step via `POST /admin/commissions/{id}/splits` (proposed below,
+   unchanged) once the total commission exists. No `LenderProgram` schema
+   change needed for this after all.
 2. **Renewal eligibility window.** What makes a funded account eligible
    for a renewal opportunity — a fixed time since funding (e.g. 90 days),
    a fraction of the term elapsed, a minimum payment history, or something
