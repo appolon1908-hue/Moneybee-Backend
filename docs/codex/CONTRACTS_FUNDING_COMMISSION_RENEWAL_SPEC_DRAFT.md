@@ -214,12 +214,23 @@ communication.
 
 ## Open questions — need your decision before I build any of this
 
-1. **Commission rate source.** No field for this exists anywhere today.
-   Proposing `commission_rate_bps: int` added to `LenderProgram` (rate
-   varies by lender/product, which already varies per program) — but it
-   could instead belong on the `Offer` (rate negotiated per deal) or be a
-   single global config default with per-program override. Which one
-   matches how commissions actually get negotiated in this business?
+1. **Commission rate source — partially answered.** You said this is
+   based on standard US business-loan-commission conventions. Every
+   `product_type` in this codebase so far is `WORKING_CAPITAL`
+   (alternative/MCA-style lending, not SBA/bank term loans), where US
+   broker commissions are typically cited in the ~6-12% range of funded
+   amount (higher than traditional term-loan/SBA commissions, which run
+   ~1-3%, because terms are shorter and deals turn over faster). Proposing
+   as a concrete, overridable default: `commission_rate_bps: int = 800`
+   (8%) added to `LenderProgram` — varies per lender/product since that's
+   already the natural per-deal-type scope in this schema, with the
+   `Commission.expected_amount` calculation reading it at funding time
+   (not hardcoded, so any specific program can be set differently).
+   **Confirm**: is 8% the right default/starting point, or do you have an
+   actual number (or a per-program range) from how this business
+   negotiates broker commissions today? And does the rate live on the
+   `LenderProgram` (per product/lender) as proposed, or does it need to be
+   negotiable per individual `Offer` instead?
 2. **Renewal eligibility window.** What makes a funded account eligible
    for a renewal opportunity — a fixed time since funding (e.g. 90 days),
    a fraction of the term elapsed, a minimum payment history, or something
