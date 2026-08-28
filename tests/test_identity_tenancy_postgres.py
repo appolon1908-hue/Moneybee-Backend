@@ -12,7 +12,7 @@ from app import identity_models as identity
 from app import models
 from app.auth import Principal, require_permission
 from app.identity import IdentityResolutionError, resolve_identity
-from app.routers import authorized_submission
+from app.marketplace_routes import authorized_submission
 from app.services import authorize_application
 
 

@@ -13,15 +13,19 @@ from sqlalchemy import text
 from app import financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
 from app import public_intake_models  # noqa: F401
+from app.admin_routes import router as admin_router
+from app.applications_routes import router as applications_router
+from app.banking_routes import router as banking_router
+from app.borrower_legacy_routes import router as borrower_legacy_router
 from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
 from app.logging_config import Timer, bind_request_id, configure_logging, request_logger
+from app.marketplace_routes import router as marketplace_router
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
 from app.rate_limit import InMemoryRateLimitMiddleware
-from app.routers import router
 
 
 @asynccontextmanager
@@ -57,12 +61,20 @@ app.add_middleware(
         "X-Organization-ID",
     ],
 )
-app.include_router(router, prefix="/api/v2")
+app.include_router(applications_router, prefix="/api/v2")
+app.include_router(marketplace_router, prefix="/api/v2")
+app.include_router(admin_router, prefix="/api/v2")
+app.include_router(borrower_legacy_router, prefix="/api/v2")
+app.include_router(banking_router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
 app.include_router(portal_router, prefix="/api/v2")
 app.include_router(public_intake_router, prefix="/api/v2")
 app.include_router(financial_router, prefix="/api/v2")
-app.include_router(router, prefix="/api/v1", include_in_schema=False)
+app.include_router(applications_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(marketplace_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(admin_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(borrower_legacy_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(banking_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
