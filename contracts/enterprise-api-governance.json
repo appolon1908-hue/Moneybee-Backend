@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "platform": "moneybee",
+  "canonicalApiPrefix": "/api/v2",
+  "legacyApi": {
+    "prefix": "/api/v1",
+    "deprecated": true,
+    "sunset": "2026-12-31T23:59:59Z",
+    "newRoutesAllowed": false
+  },
+  "requestMetadata": {
+    "requestId": "X-Request-ID",
+    "correlationId": "X-Correlation-ID",
+    "tenantId": "X-Organization-ID",
+    "traceContext": "traceparent"
+  },
+  "writeControls": {
+    "idempotencyHeader": "Idempotency-Key",
+    "idempotencyRequiredForExternallyEffectivePost": true,
+    "optimisticConcurrency": "If-Match-or-version",
+    "auditRequired": true,
+    "transactionalOutboxRequiredForCrossSystemEffects": true,
+    "businessMutationAndOutboxSameTransaction": true
+  },
+  "identity": {
+    "issuer": "https://auth.codestra.co/realms/codestra",
+    "audience": "moneybee-api",
+    "backendJwtRevalidationRequired": true,
+    "localIdentityBindingRequiredInProduction": true,
+    "tenantAuthorizationRequiredServerSide": true,
+    "portalClientSeparationRequired": true
+  },
+  "apiClasses": [
+    "PUBLIC",
+    "BORROWER",
+    "LENDER",
+    "ADMIN",
+    "FINANCE",
+    "INTERNAL",
+    "PROVIDER_WEBHOOK",
+    "HEALTH"
+  ],
+  "errors": {
+    "mediaType": "application/problem+json",
+    "machineReadableCodeRequired": true,
+    "requestIdRequired": true,
+    "correlationIdRequired": true,
+    "stackTraceExposure": false,
+    "secretExposure": false
+  },
+  "data": {
+    "financialAndAuthenticationCaching": false,
+    "piiClassificationRequired": true,
+    "secretsInEvents": false,
+    "securityEmailContentInEvents": false
+  },
+  "events": {
+    "canonicalEnvelope": "codestra.event-envelope.v1",
+    "source": "urn:codestra:moneybee-backend",
+    "middlewareIsCrossSystemMutationBoundary": true,
+    "idempotencyRequired": true,
+    "schemaVersionRequired": true
+  },
+  "delivery": {
+    "workerRole": "transport-only",
+    "domainCapabilitiesCheckedBeforeOutboxCreation": true,
+    "globalCrmGateOnAllEvents": false,
+    "boundedRetries": true,
+    "terminalOperationalException": true
+  },
+  "testing": {
+    "openApiContractGate": true,
+    "migrationUpgradeRollbackUpgrade": true,
+    "postgresTenantIsolation": true,
+    "exactHeadCiRequired": true,
+    "contractDriftGateRequired": true
+  },
+  "production": {
+    "featureBranchDeploymentAllowed": false,
+    "immutableArtifactRequired": true,
+    "exactMergedShaRequired": true,
+    "externalEffectsDefaultDisabled": true,
+    "humanApprovalRequired": true,
+    "rollbackEvidenceRequired": true
+  }
+}
