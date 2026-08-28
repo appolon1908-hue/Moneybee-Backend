@@ -1,0 +1,172 @@
+# MoneyBee → 100% production mission
+
+Mission: `MB-100-PERCENT-PRODUCTION`. Single tracked plan, spanning both
+repos, to go from "reviewed and well-governed" (see
+`docs/codex/SYSTEM_REVIEW_2026-08-28.md`) to spec-complete and
+production-ready. This is a living checklist — it gets updated and
+checked off pass by pass, each pass committed and pushed with an
+explanation of exactly what changed.
+
+Companion: `moneybee-frontend-/docs/codex/PRODUCTION_100_MISSION.md`
+(frontend-side checklist; phases 0 and 5 are shared and kept identical).
+
+## What "100% / green light" means here, precisely
+
+Checked against three sources of truth already in this repo, not invented:
+`docs/MONEYBEE_V3_BACKEND_SPEC.md` (target API/DB surface + its own
+"Current implementation status" gap list), `docs/codex/SYSTEM_REVIEW_2026-08-28.md`
+(hardening gaps found by direct code review), and
+`docs/codex/MB_RELEASE_READINESS_PACKET_20260827.md` (this org's own
+deploy-authorization gate). "100%" = every checkbox below is checked, CI is
+green on every required job, and the two PRs (backend #33, frontend #24)
+are mergeable with no open conversations.
+
+**Explicit scope boundary**: this mission gets the system to
+*deploy-ready* — code complete, tests green, capability-freeze flags
+correctly OFF. It does **not** perform the actual production cutover.
+Per this repo's own readiness packet, that requires a named human
+operator, a real target host, immutable image digests, verified
+backup/restore evidence, and a literal authorization statement — none of
+which exist yet and none of which I can create from here (no production
+credentials, no access to real Plaid/Experian/Middesk/Odoo/SendGrid/Twilio
+accounts). Phase 5 below spells out exactly what a human operator still
+has to do; everything before it is mine to execute.
+
+## Phase 0 — Governance (shared, no code)
+
+- [x] System review completed and pushed (`SYSTEM_REVIEW_2026-08-28.md`)
+- [x] PR #33 open on `claude/system-review-architecture-8vo66p` (backend)
+- [x] PR #24 open on `claude/system-review-architecture-8vo66p` (frontend)
+- [ ] Every commit in this mission keeps the two PRs' required checks green
+      before moving to the next pass (never push on a red local run)
+- [ ] This file's checkboxes match reality after every pass (updated in the
+      same commit as the code, not after)
+
+## Phase 1 — Production hardening (from the system review, code-only, low risk)
+
+- [ ] Structured, request-scoped logging (JSON to stdout, keyed to the
+      existing `X-Request-ID`), plus a catch-all exception handler so an
+      unhandled error is logged with a stack trace server-side and returns
+      a clean RFC 7807 500 to the client instead of leaking internals
+- [ ] Rate limiting on unauthenticated surfaces (`public_intake_routes.py`,
+      `portal/webhooks.py`) — in-process token bucket for now, documented
+      as a stopgap pending edge/Redis-backed limiting at real scale
+- [ ] Split `app/routers.py` (2,211 lines / 79 routes) into domain modules
+      matching the pattern already used by `financial_routes.py` /
+      `portal/*.py` — no behavior change, pure structure
+- [ ] `/api/v1` given real deprecation semantics (a `Deprecation`/`Sunset`
+      response header) instead of being a silent, undated full alias of v2
+- [ ] Field-encryption key versioning: prefix ciphertext with a key id so
+      `FIELD_ENCRYPTION_KEY` can rotate without a flag-day re-encrypt of
+      every stored secret
+- [ ] Converge the two error-response shapes (RFC 7807 validation errors vs.
+      `{code, message}` auth/identity errors) on one envelope
+- [ ] `/health/ready` widened to reflect every dependency actually in play
+      at the time (currently Postgres only)
+
+## Phase 2 — Backend spec completion (per `docs/MONEYBEE_V3_BACKEND_SPEC.md` §"Not yet complete")
+
+This is the big one — the spec itself lists what's outstanding. Tracked
+here in the order that unblocks the most downstream work first:
+
+- [ ] **Idempotency persistence**: idempotency-key table (actor, endpoint,
+      request hash, stored response, expiry) wired into the commands the
+      spec names as requiring it — lender submission, offer acceptance,
+      contract creation, funding confirmation, commission posting, CRM
+      opportunity creation. Currently only `Idempotency-Key` header is
+      *accepted* at the CORS layer; nothing persists/dedupes on it yet.
+- [ ] **Conditions/offers state machine completion**: verify all condition
+      states (`OPEN → BORROWER_ACTION_REQUIRED → SUBMITTED → UNDER_REVIEW →
+      SATISFIED/REJECTED/WAIVED`) and offer normalization fields (APR/factor
+      rate, fees, total repayment, prepayment terms, guarantee, collateral)
+      are fully modeled — audit against `app/financial_models.py` /
+      `app/domain_logic.py` and fill gaps.
+- [ ] **Contracts / e-sign engine**: DocuSign adapter exists
+      (`app/integrations/` has the provider settings) but the
+      contract-creation → e-sign-send → signed-callback → funding-eligible
+      state machine described in the spec's "Funding, commissions, and
+      renewals" section is not yet built end-to-end.
+- [ ] **Funding, commission, and renewal engines**: the full lifecycle
+      (accepted offer → conditions → contract signed → approved for funding
+      → funds sent → funded → commission expected/received) plus the
+      renewal worker that evaluates funded accounts and creates renewal
+      opportunities. This is the largest single piece of remaining domain
+      logic.
+- [ ] **Object storage + malware scanning** for document uploads (adapter
+      interface exists in `app/integrations/base.py`; scanning step and
+      real S3-compatible wiring do not).
+- [ ] **Real provider adapters** promoted from scaffolded/generic-HTTP to
+      fully tested per-provider implementations (Plaid, Experian, Middesk,
+      Odoo) — confirm each against provider sandbox contracts, not just
+      the internal `Protocol` shape.
+- [ ] **Complete RBAC test coverage**: extend the existing tenancy/portal
+      boundary tests (`test_identity_tenancy_postgres.py`,
+      `test_portal_token_boundaries.py`, `test_portal_client_boundaries.py`)
+      to cover every permission in `LEGACY_ROLE_PERMISSIONS`
+      (`app/auth.py`) and every new endpoint added in this mission.
+- [ ] Remaining target DB tables per the spec's "Database target" section
+      not yet present — reconcile against `migrations/versions/` and add
+      what's missing (compliance: versioned disclosures/acceptances,
+      adverse actions; communications: templates/preferences; integrations:
+      reconciliation).
+
+## Phase 3 — See frontend companion doc for portal/dashboard completion
+
+`apps/lender` is the furthest behind its target feature slices (spec wants
+`underwriting`, `conditions`, `offers`, `programs`, `funded`, `reports`,
+`settings`; only `dashboard`, `submissions`, and a combined workspace view
+exist today). `apps/admin` is close to its target slice list but several
+(`fraud`, `matching`, `commissions`, `compliance`, `complaints`,
+`affiliates`, `audit`) need confirming as real views vs. planned. Backend
+endpoints for a slice must land in Phase 2 before the frontend view for it
+is meaningful — don't build a screen against an endpoint that doesn't
+exist yet.
+
+## Phase 4 — Test & CI green-light criteria
+
+- [ ] `pytest -q` green locally and in CI after every pass
+- [ ] `ruff check app tests migrations scripts` clean
+- [ ] `alembic downgrade`/`upgrade` round-trip clean for every new migration
+- [ ] `scripts/verify_openapi_contract.py` passes (checked-in `openapi.json`
+      regenerated via `scripts/export_openapi.py` whenever routes change)
+- [ ] Frontend `pnpm typecheck`, `pnpm test`, `pnpm contracts:check` all
+      green (see frontend companion doc)
+- [ ] Both PRs (#33, #24) show all required status checks green with no
+      unresolved review threads
+
+## Phase 5 — What a human operator does from here (not part of this mission)
+
+Per `docs/codex/MB_RELEASE_READINESS_PACKET_20260827.md`, once Phases 1-4
+are checked off and both PRs are merged:
+
+1. Name the target host, maintenance window, and authorized executor.
+2. Obtain real credentials for every enabled provider (Plaid, Experian,
+   Middesk, Odoo, SendGrid, Twilio, DocuSign, S3-compatible storage) and
+   load them server-side only — never in this repo, never in chat.
+3. Build and publish digest-pinned images (api/worker/migrate + the four
+   frontend containers); populate `deploy/release.lock.json` with real
+   SHA-256 digests — no mutable tags.
+4. Record a database backup and a successful restore drill into an
+   isolated database before any migration runs against real data.
+5. Run the dedicated migrate image once, verify the Alembic head matches
+   the lock file, then start application images.
+6. Flip the capability-freeze flags in the readiness packet from `false`
+   to the intended live values **one at a time**, verifying each in
+   staging before production.
+7. Confirm CORS, OIDC issuer, and DNS all point at the real
+   `moneybeeloan.com` / `auth.codestra.co` production values (staging
+   examples currently reference `*-staging.moneybeeloan.com`).
+
+I'll flag explicitly, every time a pass in this mission touches something
+that changes what Phase 5 needs (a new required env var, a new provider
+credential, a new migration to include in the lock file) — so this list
+stays accurate rather than stale.
+
+## Working method
+
+Each pass: pick the next unchecked item(s) small enough to test in one
+sitting → implement → run the real local checks (pytest/ruff/alembic or
+pnpm typecheck/test/contracts) → commit → push to the existing PR branch →
+report exactly what changed, what was verified, and what's next → check the
+box → move to the next pass. No pass merges its own PR or touches
+production.
