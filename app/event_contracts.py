@@ -54,8 +54,14 @@ def build_event_envelope(
     schema_version: int = 1,
     delivery_attempt: int | None = None,
 ) -> dict[str, Any]:
-    """Build the canonical Middleware envelope and strip internal-only metadata."""
+    """Build the canonical Middleware envelope and strip internal-only metadata.
 
+    ``aggregate_version`` remains a transport input so the publisher signature is
+    compatible with outbox records, but it is intentionally not injected into
+    ``data``. Domain schemas are closed and must opt in to every data field.
+    """
+
+    del aggregate_version
     if not event_id:
         raise ValueError("event_id is required")
     if not idempotency_key:
@@ -92,8 +98,6 @@ def build_event_envelope(
         "actor": {"type": str(actor["type"]), "id": str(actor["id"])},
         "data": data,
     }
-    if aggregate_version is not None:
-        envelope["data"].setdefault("aggregate_version", aggregate_version)
     if delivery_attempt is not None:
         envelope["delivery_attempt"] = max(1, int(delivery_attempt))
     return envelope
