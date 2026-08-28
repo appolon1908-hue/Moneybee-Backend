@@ -1,5 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from email.utils import format_datetime
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -68,6 +70,13 @@ app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
 app.add_middleware(InMemoryRateLimitMiddleware)
 
 
+def _api_v1_sunset_http_date() -> str:
+    sunset_date = datetime.strptime(settings.api_v1_sunset_date, "%Y-%m-%d").replace(
+        tzinfo=UTC
+    )
+    return format_datetime(sunset_date, usegmt=True)
+
+
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
@@ -77,6 +86,12 @@ async def request_context(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.path.startswith("/api/v1/"):
+        response.headers["Deprecation"] = "true"
+        response.headers["Sunset"] = _api_v1_sunset_http_date()
+        response.headers["Link"] = (
+            f'<{request.url.path.replace("/api/v1/", "/api/v2/", 1)}>; rel="successor-version"'
+        )
     request_logger().info(
         "request.completed",
         extra={

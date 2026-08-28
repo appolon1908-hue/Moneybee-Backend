@@ -56,15 +56,34 @@ has to do; everything before it is mine to execute.
 - [ ] Split `app/routers.py` (2,211 lines / 79 routes) into domain modules
       matching the pattern already used by `financial_routes.py` /
       `portal/*.py` — no behavior change, pure structure
-- [ ] `/api/v1` given real deprecation semantics (a `Deprecation`/`Sunset`
-      response header) instead of being a silent, undated full alias of v2
-- [ ] Field-encryption key versioning: prefix ciphertext with a key id so
-      `FIELD_ENCRYPTION_KEY` can rotate without a flag-day re-encrypt of
-      every stored secret
+- [x] `/api/v1` given real deprecation semantics (`Deprecation: true`,
+      `Sunset: <date>`, and a `Link: <v2-equivalent>; rel="successor-version"`
+      response header, configurable via `api_v1_sunset_date`) instead of
+      being a silent, undated full alias of v2 (pass: backend)
+- [ ] ~~Field-encryption key versioning~~ — **corrected, not done as
+      planned**: checked every caller of `app/encryption.py` before
+      touching it and found there are none anywhere in `app/` or `tests/`.
+      `resolve_access_token()` in `app/integrations/plaid.py` deliberately
+      raises `ProviderError("plaid", "An external credential store must
+      resolve bank credential references")` — the DB only ever stores an
+      opaque `credential_reference` (`app/models.py:793`), never a raw
+      provider secret. `encrypt_secret`/`decrypt_secret` are unwired
+      scaffolding for a credential store that doesn't exist yet, not an
+      active gap with nothing to rotate. Re-scoped under Phase 2's "real
+      provider adapters" item below — versioning is worth building at the
+      same time credentials are first actually persisted, not before.
 - [ ] Converge the two error-response shapes (RFC 7807 validation errors vs.
-      `{code, message}` auth/identity errors) on one envelope
-- [ ] `/health/ready` widened to reflect every dependency actually in play
-      at the time (currently Postgres only)
+      `{code, message}` auth/identity errors) on one envelope — **checked
+      the blast radius before starting**: 22 assertions across 12 test
+      files depend on the current `{code, message}` shape via
+      `HTTPException.detail`. Real fix, but a dedicated pass on its own,
+      not a quick Phase 1 item — deferred, not skipped.
+- [ ] ~~`/health/ready` widened~~ — **corrected, not done as planned**:
+      there is currently nothing beyond Postgres to widen it to. Redis is
+      configured (`redis_url`) but unused anywhere in `app/`, and every
+      provider adapter is still a stub (see above). Re-scoped: widen this
+      alongside whichever Phase 2 item first gives the app a second real
+      runtime dependency, not before.
 
 ## Phase 2 — Backend spec completion (per `docs/MONEYBEE_V3_BACKEND_SPEC.md` §"Not yet complete")
 

@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     public_rate_limit_per_minute: int = 60
     webhook_rate_limit_per_minute: int = 120
+    api_v1_sunset_date: str = "2026-12-31"
 
     source_sha: str | None = None
     api_image_digest: str | None = None
