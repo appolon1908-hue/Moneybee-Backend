@@ -130,15 +130,24 @@ here in the order that unblocks the most downstream work first:
         CONTRACT_SIGNED → APPROVED_FOR_FUNDING → FUNDS_SENT → FUNDED`,
         `DECLINED`/`CANCELLED` from any non-terminal state), four
         idempotent operator endpoints, Commission created at `confirm`
-        with an operator-entered rate. `approve` currently requires
-        `CONTRACT_SIGNED`, unreachable through the real API until step 2
-        lands — tested by seeding the prerequisite state directly, same
-        as the commission-adjustment test had to for the same reason.
-  - [ ] **2. Contract / e-sign engine** — DocuSign adapter and webhook
-        receiver already exist (`app/integrations/providers.py`,
-        `app/portal/webhooks.py:285`); nothing yet creates a `Contract`
-        row, calls `send_envelope`, or applies inbound signed/declined
-        events. Next up.
+        with an operator-entered rate. Also fixed a real gap found while
+        building this: the automatic `CONDITIONS_PENDING →
+        CONDITIONS_SATISFIED` transition (pass: `4765c5c`) — without it
+        funding could never organically leave `CONDITIONS_PENDING`.
+        `approve`'s `CONTRACT_SIGNED` prerequisite is now reachable
+        end-to-end since step 2 landed.
+  - [x] **2. Contract / e-sign engine** — pass: `825628f`. `Contract`
+        created (`DRAFT`) synchronously the moment funding reaches
+        `CONDITIONS_SATISFIED`; `app/worker.py`'s
+        `send_pending_contract_envelope()` sends it via the existing
+        `esign_adapter()`/`DocuSignAdapter` (gated behind `ESIGN_LIVE_SEND`,
+        the exact flag name from the readiness packet); its
+        `process_pending_docusign_event()` consumes inbound
+        `IntegrationInboxMessage` rows and, on a signed envelope, advances
+        the linked `Funding` to `CONTRACT_SIGNED` — closing the loop back
+        into step 1. DocuSign Connect payload field names are a flagged
+        best-effort guess (never configured against a real account) —
+        verify before going live.
   - [ ] **3. Commission engine (receipts/splits)** — creation-at-confirm
         already landed in step 1; `POST /admin/commissions/{id}/receipts`
         and `POST /admin/commissions/{id}/splits` still to build.
