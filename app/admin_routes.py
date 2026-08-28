@@ -128,6 +128,230 @@ async def admin_fundings(
     )
 
 
+async def _load_funding_or_404(db: AsyncSession, funding_id: uuid.UUID) -> models.Funding:
+    funding = await db.get(models.Funding, funding_id)
+    if funding is None:
+        raise HTTPException(status_code=404, detail="Funding not found")
+    return funding
+
+
+async def _funding_idempotency_replay(
+    db: AsyncSession,
+    *,
+    route: str,
+    actor_id: str,
+    idempotency_key: str,
+    request_hash: str,
+) -> models.IdempotencyRecord | None:
+    replay = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == actor_id,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if replay and replay.request_hash != request_hash:
+        raise HTTPException(status_code=409, detail="Idempotency key payload conflict")
+    return replay
+
+
+def _request_hash(payload: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+@router.post(
+    "/admin/fundings/{funding_id}/approve",
+    response_model=schemas.FundingRead,
+    tags=["admin", "funding"],
+)
+async def approve_funding(
+    funding_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("funding.approve"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    funding = await _load_funding_or_404(db, funding_id)
+    route = f"/admin/fundings/{funding_id}/approve"
+    request_hash = _request_hash({})
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_funding_or_404(db, funding_id)
+
+    services.transition_funding(db, funding, "APPROVED_FOR_FUNDING", user)
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"funding_id": str(funding.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(funding)
+    return funding
+
+
+@router.post(
+    "/admin/fundings/{funding_id}/funds-sent",
+    response_model=schemas.FundingRead,
+    tags=["admin", "funding"],
+)
+async def funding_funds_sent(
+    funding_id: uuid.UUID,
+    payload: schemas.FundingFundsSentInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("funding.funds_sent"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    funding = await _load_funding_or_404(db, funding_id)
+    route = f"/admin/fundings/{funding_id}/funds-sent"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_funding_or_404(db, funding_id)
+
+    services.transition_funding(db, funding, "FUNDS_SENT", user)
+    funding.provider_reference = payload.provider_reference
+    funding.funds_sent_at = models.utcnow()
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"funding_id": str(funding.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(funding)
+    return funding
+
+
+@router.post(
+    "/admin/fundings/{funding_id}/confirm",
+    response_model=schemas.FundingRead,
+    tags=["admin", "funding"],
+)
+async def confirm_funding(
+    funding_id: uuid.UUID,
+    payload: schemas.FundingConfirmInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("funding.confirm"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    funding = await _load_funding_or_404(db, funding_id)
+    route = f"/admin/fundings/{funding_id}/confirm"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_funding_or_404(db, funding_id)
+
+    services.transition_funding(db, funding, "FUNDED", user)
+    funding.funded_amount = payload.funded_amount
+    funding.funding_confirmed_at = models.utcnow()
+    expected_amount = payload.commission_expected_amount
+    if expected_amount is None:
+        expected_amount = (
+            payload.funded_amount * payload.commission_rate_bps / 10_000
+        )
+    db.add(
+        models.Commission(
+            funding_id=funding.id,
+            expected_amount=expected_amount,
+            status="EXPECTED",
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"funding_id": str(funding.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(funding)
+    return funding
+
+
+@router.post(
+    "/admin/fundings/{funding_id}/decline",
+    response_model=schemas.FundingRead,
+    tags=["admin", "funding"],
+)
+async def decline_funding(
+    funding_id: uuid.UUID,
+    payload: schemas.FundingDeclineInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("funding.approve"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    funding = await _load_funding_or_404(db, funding_id)
+    route = f"/admin/fundings/{funding_id}/decline"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_funding_or_404(db, funding_id)
+
+    services.transition_funding(db, funding, "DECLINED", user, reason=payload.reason)
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"funding_id": str(funding.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(funding)
+    return funding
+
+
 @router.get(
     "/admin/commissions",
     response_model=list[schemas.CommissionRead],

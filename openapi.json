@@ -2335,6 +2335,18 @@
             ],
             "title": "Funding Confirmed At"
           },
+          "funds_sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Funds Sent At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2369,6 +2381,7 @@
           "approved_amount",
           "funded_amount",
           "provider_reference",
+          "funds_sent_at",
           "funding_confirmed_at",
           "created_at"
         ],
