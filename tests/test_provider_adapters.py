@@ -4,6 +4,8 @@ import json
 import os
 import uuid
 
+import pytest
+
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
@@ -13,6 +15,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app import models
 from app.integration_routes import verify_codestra_signature
+from app.integrations.base import ProviderError
 from app.integrations.mapping import get_path, map_payload
 from app.integrations.middleware import (
     MIDDLEWARE_CONTRACT,
@@ -101,6 +104,17 @@ def test_codestra_outbound_envelope_is_canonical_and_signed():
         "https://moneybee-events.codestra.co/",
         "/v1/events",
     ) == "https://moneybee-events.codestra.co/v1/events"
+
+
+def test_moneybee_middleware_url_rejects_public_kong():
+    for host in ("https://api.codestra.co", "https://api.codestra.agency"):
+        with pytest.raises(ProviderError, match="not public Kong"):
+            middleware_event_url(host, "/v1/events")
+
+
+def test_moneybee_middleware_url_rejects_invalid_base_url():
+    with pytest.raises(ProviderError, match="base URL is invalid"):
+        middleware_event_url("api.codestra.co", "/v1/events")
 
 
 def test_external_delivery_gate_requires_explicit_opt_in(monkeypatch):
