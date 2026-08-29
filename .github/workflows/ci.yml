@@ -11,6 +11,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      # Unit/API tests intentionally use isolated local schema creation. Production
+      # and migration verification remain fail-closed with AUTO_CREATE_SCHEMA=false.
+      AUTO_CREATE_SCHEMA: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,7 +34,7 @@ jobs:
           name: moneybee-openapi
           path: openapi.json
       - name: Verify OpenAPI snapshot
-        run: git diff --exit-code -- openapi.json
+        run: python scripts/verify_openapi_snapshot.py
       - name: Verify migration upgrade and rollback
         env:
           APP_ENV: test

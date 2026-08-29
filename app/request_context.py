@@ -40,6 +40,8 @@ def token_client_id(claims: Mapping[str, Any]) -> str:
 
 def _portals_for_path(path: str) -> frozenset[PortalName] | None:
     normalized = path.rstrip("/") or "/"
+    if normalized == "/api/v2/account/bootstrap":
+        return frozenset({"borrower"})
     if normalized == "/api/v2/borrower" or normalized.startswith("/api/v2/borrower/"):
         return frozenset({"borrower"})
     if (
