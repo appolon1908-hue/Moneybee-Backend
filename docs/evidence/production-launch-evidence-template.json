@@ -1,0 +1,44 @@
+{
+  "$schema": "../readiness/evidence.schema.json",
+  "gate": "PRODUCTION_LAUNCH",
+  "status": "BLOCKED",
+  "source_sha": "REPLACE_WITH_BACKEND_SHA",
+  "environment": "production",
+  "evidence_type": "production-launch-approval-checklist",
+  "evidence_reference": "Replace with approved release ticket, legal approval, Google account evidence, and staging runbook evidence references.",
+  "generated_at": "2026-08-29T00:00:00Z",
+  "expires_at": null,
+  "approved_by": null,
+  "metadata": {
+    "instructions": "Copy this template to a dated evidence file after external approvals are complete. Do not include secrets, passwords, private keys, raw tokens, or full customer data.",
+    "checks": {
+      "GOOGLE_SEARCH_CONSOLE_VERIFIED": "BLOCKED",
+      "GOOGLE_ADSENSE_SITE_APPROVED": "BLOCKED",
+      "LEGAL_PRIVACY_APPROVED": "BLOCKED",
+      "LEGAL_TERMS_APPROVED": "BLOCKED",
+      "LEGAL_COOKIE_NOTICE_APPROVED": "BLOCKED",
+      "LEGAL_ADVERTISING_DISCLOSURE_APPROVED": "BLOCKED",
+      "STAGING_BROWSER_LOGIN_E2E": "BLOCKED",
+      "STAGING_PUBLIC_FORM_E2E": "BLOCKED",
+      "STAGING_SECURITY_HEADERS_E2E": "BLOCKED",
+      "PROVIDER_ACTIVATION_REVIEWED": "BLOCKED",
+      "KEYCLOAK_SMTP_TEST": "BLOCKED",
+      "KEYCLOAK_VERIFY_EMAIL_TEST": "BLOCKED",
+      "KEYCLOAK_PASSWORD_RESET_TEST": "BLOCKED",
+      "KEYCLOAK_EXPIRED_LINK_TEST": "BLOCKED",
+      "KEYCLOAK_WRONG_RECIPIENT_TEST": "BLOCKED",
+      "MONEYBEE_POSTAL_BOUNCE_HANDLING": "BLOCKED",
+      "MONEYBEE_POSTAL_SUPPRESSION_HANDLING": "BLOCKED"
+    },
+    "required_non_secret_references": [
+      "Search Console verified property URL or screenshot hash",
+      "AdSense site approval reference and publisher ID",
+      "Legal approval ticket IDs for privacy, terms, cookie notice, advertising disclosure, and consent text",
+      "Staging browser E2E run ID for login and public forms",
+      "Security header probe output for production-like URLs",
+      "Provider activation review ticket",
+      "Keycloak SMTP, verify-email, password-reset, expired-link, and wrong-recipient test evidence",
+      "Postal bounce and suppression handling evidence"
+    ]
+  }
+}
