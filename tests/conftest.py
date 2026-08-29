@@ -7,7 +7,15 @@ from pathlib import Path
 # generic CI runs do not initialize the application with APP_ENV=local.
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
+
+# AUTO_CREATE_SCHEMA=true is intentional for the ephemeral SQLite test DB.
+# Runtime defaults remain False so Alembic owns real environment schemas.
 os.environ.setdefault("AUTO_CREATE_SCHEMA", "true")
+
+# LOCAL_AUTH_BYPASS=true is intentional here: the test suite runs against a
+# local SQLite database without a live Keycloak instance. The production default
+# is False after security hardening, and this override must only live in test
+# configuration.
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 os.environ.setdefault("LOCAL_IDENTITY_ENFORCEMENT", "false")
 os.environ.setdefault("CODESTRA_MIDDLEWARE_WEBHOOK_TOLERANCE_SECONDS", "60")

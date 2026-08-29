@@ -228,8 +228,17 @@ class Settings(BaseSettings):
         ):
             warnings.warn(
                 f"MIDDLEWARE_PROVIDER=disabled in app_env={self.app_env!r}. "
-                "Call results, SMS events, and CRM sync will be silently dropped. "
+                "Platform events, call results, and CRM sync are silently dropped. "
                 "Set MIDDLEWARE_PROVIDER=codestra to enable Middleware integration.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        if self.local_auth_bypass and self.app_env not in ("local", "test"):
+            warnings.warn(
+                f"LOCAL_AUTH_BYPASS=true in app_env={self.app_env!r}. "
+                "All endpoints are unauthenticated. "
+                "This setting must only be used in local development.",
                 RuntimeWarning,
                 stacklevel=2,
             )
