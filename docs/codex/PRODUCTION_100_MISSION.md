@@ -198,6 +198,25 @@ commission-rate defaults recorded in the spec doc.
       what's missing (compliance: versioned disclosures/acceptances,
       adverse actions; communications: templates/preferences; integrations:
       reconciliation).
+- [x] **Code-review hardening pass on the funding/contract/commission/renewal
+      engine** — 4 findings, all closed, pass: `615a7de`:
+      - `funding_funds_sent` / `confirm_funding`: a second call with a
+        *fresh* idempotency key after the funding had already reached
+        FUNDS_SENT/FUNDED fell through `transition_funding`'s intentional
+        "already at target status" no-op and silently re-ran side effects
+        (overwriting `provider_reference`/`funds_sent_at`, or inserting a
+        duplicate `Commission` row). Both endpoints now `409
+        FUNDING_ALREADY_FUNDS_SENT` / `FUNDING_ALREADY_FUNDED` before any
+        mutation when already at the target status.
+      - `rate_limit._client_key()` trusted `X-Forwarded-For`
+        unconditionally — any client could bypass the per-IP limiter by
+        sending a fresh spoofed header per request. Added
+        `settings.trust_forwarded_for` (default `False`, fail-closed);
+        the header is only honored once an operator explicitly enables it
+        for a deployment that sits behind a real, header-overwriting
+        reverse proxy.
+      - `evaluate_renewal_eligibility`: replaced the per-funding
+        existing-opportunity query (N+1) with one batched `IN` query.
 
 ## Phase 3 — See frontend companion doc for portal/dashboard completion
 
