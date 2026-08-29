@@ -734,14 +734,22 @@ async def evaluate_renewal_eligibility(db: AsyncSession) -> list[uuid.UUID]:
             )
         )
     ).all()
+    if not fundings:
+        return []
+    existing_funding_ids = set(
+        (
+            await db.scalars(
+                select(models.RenewalOpportunity.original_funding_id).where(
+                    models.RenewalOpportunity.original_funding_id.in_(
+                        funding.id for funding in fundings
+                    )
+                )
+            )
+        ).all()
+    )
     created: list[uuid.UUID] = []
     for funding in fundings:
-        existing = await db.scalar(
-            select(models.RenewalOpportunity).where(
-                models.RenewalOpportunity.original_funding_id == funding.id
-            )
-        )
-        if existing is not None:
+        if funding.id in existing_funding_ids:
             continue
         opportunity = models.RenewalOpportunity(
             original_funding_id=funding.id,

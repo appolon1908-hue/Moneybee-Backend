@@ -264,6 +264,74 @@ async def test_funding_full_transition_sequence_and_commission_creation():
         assert terminal.status_code == 409
 
 
+async def test_funds_sent_rejects_a_second_call_with_a_fresh_idempotency_key():
+    """A replay with the SAME key is idempotent (see above). But a second,
+    genuinely new call after FUNDS_SENT has already been reached must not
+    silently re-execute the side effects (overwriting provider_reference/
+    funds_sent_at) - it should 409 instead."""
+    with TestClient(app) as client:
+        funding_id = _accept_an_offer_and_build_funding(client)
+        await _set_funding_status(funding_id, "CONTRACT_SIGNED")
+        client.post(
+            f"/api/v2/admin/fundings/{funding_id}/approve",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        first = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/funds-sent",
+            json={"provider_reference": "WIRE-REF-ORIGINAL"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert first.status_code == 200
+        assert first.json()["provider_reference"] == "WIRE-REF-ORIGINAL"
+
+        second = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/funds-sent",
+            json={"provider_reference": "WIRE-REF-SHOULD-NOT-STICK"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert second.status_code == 409
+        assert second.json()["detail"]["code"] == "FUNDING_ALREADY_FUNDS_SENT"
+
+        fundings = client.get("/api/v2/admin/fundings").json()
+        unchanged = next(item for item in fundings if item["id"] == funding_id)
+        assert unchanged["provider_reference"] == "WIRE-REF-ORIGINAL"
+
+
+async def test_confirm_rejects_a_second_call_with_a_fresh_idempotency_key():
+    """Same class of bug as funds-sent: confirming twice with different
+    idempotency keys must not create a second Commission row."""
+    with TestClient(app) as client:
+        funding_id = _accept_an_offer_and_build_funding(client)
+        await _set_funding_status(funding_id, "CONTRACT_SIGNED")
+        client.post(
+            f"/api/v2/admin/fundings/{funding_id}/approve",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        client.post(
+            f"/api/v2/admin/fundings/{funding_id}/funds-sent",
+            json={"provider_reference": "WIRE-REF-12345"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        first = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/confirm",
+            json={"funded_amount": "50000.00", "commission_rate_bps": 800},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/confirm",
+            json={"funded_amount": "50000.00", "commission_rate_bps": 800},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert second.status_code == 409
+        assert second.json()["detail"]["code"] == "FUNDING_ALREADY_FUNDED"
+
+        commissions = client.get("/api/v2/admin/commissions").json()
+        matches = [item for item in commissions if item["funding_id"] == funding_id]
+        assert len(matches) == 1
+
+
 async def test_funding_can_be_declined_with_a_reason():
     with TestClient(app) as client:
         funding_id = _accept_an_offer_and_build_funding(client)
