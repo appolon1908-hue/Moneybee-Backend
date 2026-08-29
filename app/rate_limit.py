@@ -31,9 +31,10 @@ def _bucket_for_path(path: str) -> str | None:
 
 
 def _client_key(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    if settings.trust_forwarded_for:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     if request.client:
         return request.client.host
     return "unknown"

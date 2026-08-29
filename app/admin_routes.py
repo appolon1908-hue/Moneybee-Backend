@@ -238,6 +238,16 @@ async def funding_funds_sent(
     if replay:
         return await _load_funding_or_404(db, funding_id)
 
+    if funding.status == "FUNDS_SENT":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "FUNDING_ALREADY_FUNDS_SENT",
+                "from_status": funding.status,
+                "to_status": "FUNDS_SENT",
+            },
+        )
+
     services.transition_funding(db, funding, "FUNDS_SENT", user)
     funding.provider_reference = payload.provider_reference
     funding.funds_sent_at = models.utcnow()
@@ -283,6 +293,16 @@ async def confirm_funding(
     )
     if replay:
         return await _load_funding_or_404(db, funding_id)
+
+    if funding.status == "FUNDED":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "FUNDING_ALREADY_FUNDED",
+                "from_status": funding.status,
+                "to_status": "FUNDED",
+            },
+        )
 
     services.transition_funding(db, funding, "FUNDED", user)
     funding.funded_amount = payload.funded_amount
