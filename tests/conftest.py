@@ -10,6 +10,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("AUTO_CREATE_SCHEMA", "true")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 os.environ.setdefault("LOCAL_IDENTITY_ENFORCEMENT", "false")
+os.environ.setdefault("CODESTRA_MIDDLEWARE_WEBHOOK_TOLERANCE_SECONDS", "60")
+os.environ.setdefault("PROVIDER_WEBHOOK_TOLERANCE_SECONDS", "60")
+os.environ.setdefault(
+    "PROVIDER_WEBHOOK_ALLOWLIST_CSV",
+    "lender,docusign,sendgrid,odoo,n8n,experian",
+)
 
 
 def _remove_local_sqlite_file(url: str) -> None:

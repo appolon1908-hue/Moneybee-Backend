@@ -1,6 +1,7 @@
 from functools import lru_cache
 import json
 from typing import Literal
+import warnings
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,9 +13,9 @@ class Settings(BaseSettings):
     app_env: Literal["local", "test", "dev", "staging", "production"] = "local"
     database_url: str = "sqlite+aiosqlite:///./moneybee.db"
     redis_url: str = "redis://localhost:6379/0"
-    auto_create_schema: bool = True
-    local_auth_bypass: bool = True
-    local_identity_enforcement: bool = False
+    auto_create_schema: bool = False
+    local_auth_bypass: bool = False
+    local_identity_enforcement: bool = True
     cors_origins_csv: str = (
         "http://localhost:5173,http://localhost:5174,"
         "http://localhost:5175,http://localhost:5176"
@@ -29,6 +30,8 @@ class Settings(BaseSettings):
     lender_oidc_client_ids_csv: str = "moneybee-lender"
     admin_oidc_client_ids_csv: str = "moneybee-admin"
 
+    # To send SMS: POST {codestra_middleware_base_url}/commands/sms
+    # Do not use Twilio directly; all SMS routes through Middleware -> Telnexa.
     codestra_middleware_base_url: str | None = None
     codestra_middleware_token_url: str | None = None
     codestra_middleware_client_id: str | None = None
@@ -37,12 +40,12 @@ class Settings(BaseSettings):
     codestra_middleware_event_path: str = "/v1/events"
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
-    codestra_middleware_webhook_tolerance_seconds: int = 300
+    codestra_middleware_webhook_tolerance_seconds: int = 60
     provider_webhook_allowlist_csv: str = (
-        "lender,docusign,sendgrid,twilio,odoo,n8n,experian"
+        "lender,docusign,sendgrid,odoo,n8n,experian"
     )
     provider_webhook_secrets_json: str = "{}"
-    provider_webhook_tolerance_seconds: int = 300
+    provider_webhook_tolerance_seconds: int = 60
     rate_limit_enabled: bool = True
     rate_limit_window_seconds: int = 60
     public_rate_limit_per_minute: int = 120
@@ -98,6 +101,12 @@ class Settings(BaseSettings):
     credit_api_key: str | None = None
     credit_request_path: str = "/v1/credit-requests"
 
+    # TODO(security): Experian is called directly from Moneybee.
+    # Credit bureau calls must be routed through Codestra Middleware for
+    # audit logging, idempotency, and write authority enforcement.
+    # Track: https://github.com/appolon1908-hue/Middleware-/issues
+    # Until then, ensure EXPERIAN_* vars are never committed and
+    # are injected only via secrets management.
     experian_base_url: str | None = None
     experian_token_url: str | None = None
     experian_client_id: str | None = None
@@ -132,10 +141,7 @@ class Settings(BaseSettings):
     sendgrid_from_email: str | None = None
     sendgrid_from_name: str = "MoneyBeeLoans"
 
-    sms_provider: Literal["disabled", "twilio"] = "disabled"
-    twilio_account_sid: str | None = None
-    twilio_auth_token: str | None = None
-    twilio_from_number: str | None = None
+    sms_provider: Literal["disabled"] = "disabled"
 
     object_storage_mode: Literal["disabled", "s3"] = "disabled"
     object_storage_endpoint: str | None = None
@@ -143,6 +149,11 @@ class Settings(BaseSettings):
     object_storage_bucket: str | None = None
     object_storage_access_key: str | None = None
     object_storage_secret_key: str | None = None
+
+    def __getattr__(self, name: str) -> None:
+        if name.startswith("twilio_"):
+            return None
+        raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
 
     @staticmethod
     def _csv_set(value: str) -> frozenset[str]:
@@ -211,6 +222,18 @@ class Settings(BaseSettings):
         if legacy in self.oidc_issuer or legacy in self.oidc_jwks_url:
             raise ValueError("Legacy identity host is forbidden")
 
+        if (
+            self.middleware_provider == "disabled"
+            and self.app_env not in ("local", "test")
+        ):
+            warnings.warn(
+                f"MIDDLEWARE_PROVIDER=disabled in app_env={self.app_env!r}. "
+                "Call results, SMS events, and CRM sync will be silently dropped. "
+                "Set MIDDLEWARE_PROVIDER=codestra to enable Middleware integration.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
         portal_clients = self.portal_client_ids
         if any(not values for values in portal_clients.values()):
             raise ValueError("Every MoneyBee portal requires at least one OIDC client ID")
@@ -271,14 +294,6 @@ class Settings(BaseSettings):
                 [self.sendgrid_api_key, self.sendgrid_from_email]
             ):
                 raise ValueError("SendGrid configuration is incomplete")
-            if self.sms_provider == "twilio" and not all(
-                [
-                    self.twilio_account_sid,
-                    self.twilio_auth_token,
-                    self.twilio_from_number,
-                ]
-            ):
-                raise ValueError("Twilio configuration is incomplete")
             if self.object_storage_mode == "s3" and not all(
                 [
                     self.object_storage_endpoint,

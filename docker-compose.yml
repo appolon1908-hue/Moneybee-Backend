@@ -1,9 +1,11 @@
+# Local development only. Never use this file in production.
+# All credentials use ${VAR:-fallback} syntax; provide real values via .env.
 services:
   postgres:
     image: postgres:17
     environment:
       POSTGRES_USER: moneybee
-      POSTGRES_PASSWORD: moneybee-local-only
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-moneybee-local-only}
       POSTGRES_DB: moneybee
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U moneybee -d moneybee"]
