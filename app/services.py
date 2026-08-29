@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, or_, select
@@ -663,3 +664,94 @@ async def advance_funding_if_conditions_satisfied(
                 status="DRAFT",
             )
         )
+
+
+# Named, isolated default per docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md's
+# resolved open question 2 - no real eligibility rule confirmed yet, so
+# this is a one-line change away from being replaced with the real one.
+RENEWAL_ELIGIBILITY_DAYS = 90
+
+# Simpler than the spec draft's original PENDING -> OPPORTUNITY_CREATED ->
+# CONTACTED -> ... : a RenewalOpportunity row is only ever created once
+# already eligible, so "opportunity created" is redundant with the row's
+# own existence. Starts at PENDING (created, not yet contacted).
+RENEWAL_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "PENDING": frozenset({"CONTACTED", "DECLINED", "EXPIRED"}),
+    "CONTACTED": frozenset({"CONVERTED", "DECLINED", "EXPIRED"}),
+    "CONVERTED": frozenset(),
+    "DECLINED": frozenset(),
+    "EXPIRED": frozenset(),
+}
+
+
+def transition_renewal_status(
+    db: AsyncSession,
+    renewal: models.RenewalOpportunity,
+    to_status: str,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = renewal.status
+    if previous == to_status:
+        return
+    allowed = RENEWAL_STATUS_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_RENEWAL_STATUS_TRANSITION",
+                "from_status": previous,
+                "to_status": to_status,
+                "allowed": sorted(allowed),
+            },
+        )
+    renewal.status = to_status
+    db.add(
+        models.AuditEvent(
+            actor_id=principal.subject,
+            action=f"RENEWAL_{to_status}",
+            resource_type="renewal_opportunity",
+            resource_id=str(renewal.id),
+            details={"from_status": previous, "to_status": to_status, "reason": reason},
+        )
+    )
+
+
+async def evaluate_renewal_eligibility(db: AsyncSession) -> list[uuid.UUID]:
+    """Scans FUNDED fundings old enough to be renewal-eligible and creates
+    a RenewalOpportunity for each that doesn't already have one. Meant to
+    be called periodically (see app/worker.py) rather than per-request -
+    there's no per-funding trigger event the way conditions/contracts have
+    one, since eligibility is purely time-based. Returns the ids of newly
+    created opportunities."""
+    cutoff = datetime.now(UTC) - timedelta(days=RENEWAL_ELIGIBILITY_DAYS)
+    fundings = (
+        await db.scalars(
+            select(models.Funding).where(
+                models.Funding.status == "FUNDED",
+                models.Funding.funding_confirmed_at.is_not(None),
+                models.Funding.funding_confirmed_at <= cutoff,
+            )
+        )
+    ).all()
+    created: list[uuid.UUID] = []
+    for funding in fundings:
+        existing = await db.scalar(
+            select(models.RenewalOpportunity).where(
+                models.RenewalOpportunity.original_funding_id == funding.id
+            )
+        )
+        if existing is not None:
+            continue
+        opportunity = models.RenewalOpportunity(
+            original_funding_id=funding.id,
+            application_id=funding.application_id,
+            eligible_from=funding.funding_confirmed_at,
+            eligibility_status="ELIGIBLE",
+            estimated_amount=funding.funded_amount,
+            status="PENDING",
+        )
+        db.add(opportunity)
+        await db.flush()
+        created.append(opportunity.id)
+    return created

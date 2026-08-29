@@ -739,6 +739,24 @@ async def application_contract(application_id: uuid.UUID, db: Db, user: User):
 
 
 @router.get(
+    "/applications/{application_id}/renewal-opportunities",
+    response_model=list[schemas.RenewalRead],
+    tags=["funding"],
+)
+async def application_renewal_opportunities(application_id: uuid.UUID, db: Db, user: User):
+    await services.get_authorized_application(db, application_id, user)
+    return list(
+        (
+            await db.scalars(
+                select(models.RenewalOpportunity)
+                .where(models.RenewalOpportunity.application_id == application_id)
+                .order_by(models.RenewalOpportunity.created_at.desc())
+            )
+        ).all()
+    )
+
+
+@router.get(
     "/me/notification-preferences",
     response_model=schemas.NotificationPreferenceRead,
     tags=["identity", "communications"],
