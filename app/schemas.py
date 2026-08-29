@@ -423,6 +423,18 @@ class CommissionSplitRead(BaseModel):
     created_at: datetime
 
 
+class CommissionSplitInput(BaseModel):
+    recipient_type: str = Field(min_length=1, max_length=50)
+    recipient_reference: str = Field(min_length=1, max_length=255)
+    percentage: Decimal | None = Field(default=None, ge=0, le=100)
+    amount: Decimal = Field(gt=0)
+
+
+class CommissionReceiptInput(BaseModel):
+    amount: Decimal = Field(gt=0)
+    reference: str | None = Field(default=None, max_length=255)
+
+
 class CommissionAdjustmentInput(BaseModel):
     adjustment_type: str = Field(min_length=2, max_length=50)
     amount: Decimal
