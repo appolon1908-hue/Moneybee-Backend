@@ -474,6 +474,59 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
     return results
 
 
+def smoke_admin_operational_surfaces(client: TestClient) -> list[SmokeResult]:
+    list_checks = {
+        "admin.crm_events": "/api/v2/admin/crm/events",
+        "admin.capabilities": "/api/v2/admin/capabilities",
+        "admin.provider_connections": "/api/v2/admin/provider-connections",
+        "admin.fundings": "/api/v2/admin/fundings",
+        "admin.complaints": "/api/v2/admin/complaints",
+        "admin.integration_events": "/api/v2/admin/integration-events",
+        "admin.reconciliation_runs": "/api/v2/admin/reconciliation-runs",
+        "admin.catalog.leads": "/api/v2/admin/catalog/leads",
+        "admin.catalog.applications": "/api/v2/admin/catalog/applications",
+        "admin.catalog.programs": "/api/v2/admin/catalog/programs",
+        "admin.catalog.submissions": "/api/v2/admin/catalog/submissions",
+        "admin.catalog.offers": "/api/v2/admin/catalog/offers",
+        "admin.catalog.matches": "/api/v2/admin/catalog/matches",
+        "admin.underwriting_reviews": "/api/v2/admin/underwriting/reviews",
+        "admin.sla_alerts": "/api/v2/admin/sla-alerts",
+        "admin.users": "/api/v2/admin/users",
+        "admin.integration_inbox": "/api/v2/admin/integration-inbox",
+        "admin.operational_exceptions": "/api/v2/admin/operational-exceptions",
+    }
+    results = [
+        _expect(
+            "admin.dashboard",
+            client.get("/api/v2/admin/dashboard"),
+            200,
+            lambda payload: isinstance(payload, dict),
+        ),
+        _expect(
+            "admin.integration_control_plane",
+            client.get("/api/v2/admin/integration-control-plane"),
+            200,
+            lambda payload: isinstance(payload, dict),
+        ),
+        _expect(
+            "admin.system_readiness",
+            client.get("/api/v2/admin/system/readiness"),
+            200,
+            lambda payload: "FINAL_STATUS" in payload,
+        ),
+    ]
+    for name, path in list_checks.items():
+        results.append(
+            _expect(
+                name,
+                client.get(path),
+                200,
+                lambda payload: isinstance(payload, list),
+            )
+        )
+    return results
+
+
 def smoke_openapi_surface(client: TestClient) -> list[SmokeResult]:
     response = client.get("/openapi.json")
     if response.status_code != 200:
@@ -508,6 +561,7 @@ def run_smoke() -> list[SmokeResult]:
             *smoke_webhooks(client),
             *smoke_capability_gates(client),
             *smoke_portal_workflows(client),
+            *smoke_admin_operational_surfaces(client),
             *smoke_openapi_surface(client),
         ]
 
