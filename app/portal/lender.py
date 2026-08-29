@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -285,7 +285,7 @@ async def lender_workspace(db: Db, user: User):
 
 @router.get(
     "/lender/programs",
-    response_model=list[dict],
+    response_model=list[dict[str, Any]],
     tags=["lender", "programs"],
 )
 async def lender_programs(
@@ -555,7 +555,7 @@ async def assign_lender_submission(
 
 @router.get(
     "/lender/bank-review-queue",
-    response_model=list[dict],
+    response_model=list[dict[str, Any]],
     tags=["lender", "banking"],
 )
 async def lender_bank_review_queue(db: Db, user: User):
@@ -743,7 +743,7 @@ async def lender_decision(
 
 @router.get(
     "/lender/fundings",
-    response_model=list[dict],
+    response_model=list[dict[str, Any]],
     tags=["lender", "funding"],
 )
 async def lender_fundings(db: Db, user: User):
