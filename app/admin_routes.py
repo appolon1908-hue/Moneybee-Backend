@@ -441,6 +441,61 @@ async def admin_renewals(
     )
 
 
+async def _load_renewal_or_404(
+    db: AsyncSession, renewal_id: uuid.UUID
+) -> models.RenewalOpportunity:
+    renewal = await db.get(models.RenewalOpportunity, renewal_id)
+    if renewal is None:
+        raise HTTPException(status_code=404, detail="Renewal opportunity not found")
+    return renewal
+
+
+@router.post(
+    "/admin/renewal-opportunities/{renewal_id}/status",
+    response_model=schemas.RenewalRead,
+    tags=["admin", "funding"],
+)
+async def update_renewal_status(
+    renewal_id: uuid.UUID,
+    payload: schemas.RenewalStatusInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("renewal.status.update"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    renewal = await _load_renewal_or_404(db, renewal_id)
+    route = f"/admin/renewal-opportunities/{renewal_id}/status"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_renewal_or_404(db, renewal_id)
+
+    services.transition_renewal_status(
+        db, renewal, payload.status, user, reason=payload.reason
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"renewal_id": str(renewal.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(renewal)
+    return renewal
+
+
 @router.get(
     "/admin/complaints",
     response_model=list[schemas.ComplaintRead],

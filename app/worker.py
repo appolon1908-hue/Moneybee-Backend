@@ -13,7 +13,12 @@ from app.integrations.base import ProviderError
 from app.integrations.middleware import canonical_event_type
 from app.integrations.registry import esign_adapter, middleware_adapter
 from app.models import Contract, Funding, IntegrationEvent, Owner, OutboxEvent, OutboxStatus
-from app.services import effective_capabilities, transition_contract, transition_funding
+from app.services import (
+    effective_capabilities,
+    evaluate_renewal_eligibility,
+    transition_contract,
+    transition_funding,
+)
 
 
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
@@ -309,6 +314,19 @@ async def process_pending_docusign_event() -> str | None:
 
         message.status = "PROCESSED"
         return str(message.id)
+
+
+async def evaluate_pending_renewals() -> list[str]:
+    """Scans for newly-eligible renewal opportunities in one pass. Unlike
+    the contract/CRM steps above, there's no per-event trigger to hang
+    this off - eligibility is purely time-based (funding_confirmed_at vs.
+    RENEWAL_ELIGIBILITY_DAYS) - so this is meant to run periodically
+    rather than be claimed one row at a time. No capability-freeze flag:
+    creating a RenewalOpportunity row is purely internal bookkeeping, not
+    an external call, unlike sending a contract envelope or CRM event."""
+    async with SessionLocal() as db, db.begin():
+        created = await evaluate_renewal_eligibility(db)
+        return [str(item) for item in created]
 
 
 async def run() -> None:

@@ -336,6 +336,11 @@ class RenewalRead(BaseModel):
     created_at: datetime
 
 
+class RenewalStatusInput(BaseModel):
+    status: str = Field(min_length=2, max_length=40)
+    reason: str | None = Field(default=None, max_length=10_000)
+
+
 class AffiliateInput(BaseModel):
     name: str = Field(min_length=2, max_length=255)
     tracking_code: str = Field(min_length=3, max_length=100)
