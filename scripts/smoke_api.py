@@ -117,6 +117,85 @@ def _prequalification_payload(suffix: str, revenue: int = 50000) -> dict[str, An
     }
 
 
+def _create_submitted_application_with_submission(client: TestClient) -> dict[str, str]:
+    suffix = uuid.uuid4().hex
+    lender_id = str(uuid.uuid4())
+    lead = client.post(
+        "/api/v2/public/prequalifications",
+        json=_prequalification_payload(suffix, revenue=42000),
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    lead.raise_for_status()
+    application = client.post(
+        "/api/v2/applications",
+        json={"lead_id": lead.json()["lead_id"]},
+    )
+    application.raise_for_status()
+    application_id = application.json()["id"]
+    business = client.put(
+        f"/api/v2/applications/{application_id}/business",
+        json={
+            "legal_name": "Smoke Portal Logistics LLC",
+            "entity_type": "LLC",
+            "state_formed": "FL",
+            "industry": "TRANSPORTATION",
+            "address": {"state": "FL"},
+        },
+    )
+    business.raise_for_status()
+    financials = client.put(
+        f"/api/v2/applications/{application_id}/financial-profile",
+        json={
+            "annual_revenue": 504000,
+            "monthly_revenue": 42000,
+            "monthly_expenses": 21000,
+            "existing_debt": 0,
+            "existing_positions": 0,
+        },
+    )
+    financials.raise_for_status()
+    owner = client.post(
+        f"/api/v2/applications/{application_id}/owners",
+        json={
+            "first_name": "Smoke",
+            "last_name": "Owner",
+            "ownership_percent": 100,
+            "address": {"state": "FL"},
+        },
+    )
+    owner.raise_for_status()
+    submitted = client.post(f"/api/v2/applications/{application_id}/submit")
+    submitted.raise_for_status()
+    program = client.post(
+        f"/api/v2/lenders/{lender_id}/programs",
+        json={
+            "lender_id": lender_id,
+            "name": "Smoke Working Capital",
+            "product_type": "WORKING_CAPITAL",
+            "min_amount": 10000,
+            "max_amount": 125000,
+            "minimum_monthly_revenue": 10000,
+            "minimum_time_in_business_months": 12,
+            "states": [],
+            "excluded_industries": [],
+        },
+    )
+    program.raise_for_status()
+    matched = client.post(f"/api/v2/applications/{application_id}/match")
+    matched.raise_for_status()
+    submissions = client.post(
+        f"/api/v2/admin/applications/{application_id}/prepare-matched-submissions"
+    )
+    submissions.raise_for_status()
+    submission = submissions.json()[0]
+    return {
+        "application_id": application_id,
+        "lender_id": lender_id,
+        "program_id": submission["program_id"],
+        "submission_id": submission["id"],
+    }
+
+
 def smoke_health(client: TestClient) -> list[SmokeResult]:
     return [
         _expect("health.live", client.get("/health/live"), 200),
@@ -255,6 +334,146 @@ def smoke_capability_gates(client: TestClient) -> list[SmokeResult]:
     ]
 
 
+def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
+    try:
+        ids = _create_submitted_application_with_submission(client)
+    except Exception as exc:  # pragma: no cover - reported as smoke failure
+        return [_fail("portal.seed_application_submission", str(exc))]
+
+    application_id = ids["application_id"]
+    submission_id = ids["submission_id"]
+    lender_id = ids["lender_id"]
+    program_id = ids["program_id"]
+    results = [
+        _expect(
+            "portal.auth_context.available",
+            client.get("/api/v2/auth/context"),
+            200,
+            lambda payload: "active_organization_id" in payload and "permissions" in payload,
+        ),
+        _expect(
+            "portal.navigation.available",
+            client.get("/api/v2/portal/navigation"),
+            200,
+            lambda payload: isinstance(payload, list) and len(payload) > 0,
+        ),
+        _expect(
+            "portal.borrower_workspace.available",
+            client.get("/api/v2/borrower/overview"),
+            200,
+            lambda payload: isinstance(payload.get("applications"), list),
+        ),
+        _expect(
+            "portal.lender_workspace.available",
+            client.get("/api/v2/lender/workspace"),
+            200,
+            lambda payload: payload["summary"]["submission_count"] >= 1,
+        ),
+        _expect(
+            "portal.admin_workspace.available",
+            client.get("/api/v2/admin/workspace"),
+            200,
+            lambda payload: "metrics" in payload and "work_queue" in payload,
+        ),
+        _expect(
+            "portal.lender_submissions.available",
+            client.get("/api/v2/lender/submissions"),
+            200,
+            lambda payload: any(item["id"] == submission_id for item in payload),
+        ),
+    ]
+
+    submission_workspace = client.get(f"/api/v2/lender/submissions/{submission_id}/workspace")
+    results.append(
+        _expect(
+            "portal.lender_submission_workspace.available",
+            submission_workspace,
+            200,
+            lambda payload: payload["submission"]["id"] == submission_id,
+        )
+    )
+    condition = client.post(
+        f"/api/v2/lender/submissions/{submission_id}/conditions",
+        json={"description": "Smoke-test borrower condition request"},
+    )
+    results.append(
+        _expect(
+            "portal.lender_condition.create",
+            condition,
+            201,
+            lambda payload: payload["status"] == "BORROWER_ACTION_REQUIRED",
+        )
+    )
+    condition_id = condition.json().get("id") if condition.status_code == 201 else ""
+    results.extend(
+        [
+            _expect(
+                "portal.borrower_conditions.list",
+                client.get(f"/api/v2/applications/{application_id}/conditions"),
+                200,
+                lambda payload: any(item["id"] == condition_id for item in payload),
+            ),
+            _expect(
+                "portal.borrower_condition.submit",
+                client.post(f"/api/v2/conditions/{condition_id}/submit"),
+                200,
+                lambda payload: payload["status"] == "SUBMITTED",
+            ),
+        ]
+    )
+
+    offer = client.post(
+        f"/api/v2/lender/submissions/{submission_id}/offers",
+        json={
+            "application_id": application_id,
+            "lender_id": lender_id,
+            "program_id": program_id,
+            "product_type": "WORKING_CAPITAL",
+            "amount": 50000,
+            "term_months": 12,
+            "payment_frequency": "MONTHLY",
+            "payment_amount": 4800,
+            "apr": 14,
+            "origination_fee": 500,
+            "total_repayment": 57600,
+        },
+    )
+    results.append(
+        _expect(
+            "portal.lender_offer.create",
+            offer,
+            201,
+            lambda payload: payload["status"] == "AVAILABLE",
+        )
+    )
+    offer_id = offer.json().get("id") if offer.status_code == 201 else ""
+    application = client.get(f"/api/v2/applications/{application_id}")
+    expected_version = application.json().get("version") if application.status_code == 200 else None
+    results.extend(
+        [
+            _expect(
+                "portal.borrower_offers.list",
+                client.get(f"/api/v2/applications/{application_id}/offers"),
+                200,
+                lambda payload: any(item["id"] == offer_id for item in payload),
+            ),
+            _expect(
+                "portal.borrower_offer.accept",
+                client.post(
+                    f"/api/v2/offers/{offer_id}/accept",
+                    headers={
+                        "Idempotency-Key": uuid.uuid4().hex,
+                        "If-Match": f'"{expected_version}"',
+                    },
+                ),
+                200,
+                lambda payload: payload["status"] == "ACCEPTED",
+            ),
+        ]
+    )
+    return results
+
+
 def smoke_openapi_surface(client: TestClient) -> list[SmokeResult]:
     response = client.get("/openapi.json")
     if response.status_code != 200:
@@ -288,6 +507,7 @@ def run_smoke() -> list[SmokeResult]:
             *smoke_public_prequalification(client),
             *smoke_webhooks(client),
             *smoke_capability_gates(client),
+            *smoke_portal_workflows(client),
             *smoke_openapi_surface(client),
         ]
 
