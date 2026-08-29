@@ -419,6 +419,12 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
                 200,
                 lambda payload: payload["status"] == "SUBMITTED",
             ),
+            _expect(
+                "portal.lender_condition.approve",
+                client.post(f"/api/v2/lender/conditions/{condition_id}/approve"),
+                200,
+                lambda payload: payload["status"] == "SATISFIED",
+            ),
         ]
     )
 
