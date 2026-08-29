@@ -148,9 +148,15 @@ here in the order that unblocks the most downstream work first:
         into step 1. DocuSign Connect payload field names are a flagged
         best-effort guess (never configured against a real account) —
         verify before going live.
-  - [ ] **3. Commission engine (receipts/splits)** — creation-at-confirm
-        already landed in step 1; `POST /admin/commissions/{id}/receipts`
-        and `POST /admin/commissions/{id}/splits` still to build.
+  - [x] **3. Commission engine (receipts/splits)** — pass: `1efa659`.
+        `POST /admin/commissions/{id}/receipts` (incremental running total,
+        status flips to `PARTIALLY_RECEIVED`/`RECEIVED` against the *net*
+        expected amount including adjustments) and
+        `POST /admin/commissions/{id}/splits` (capped so splits can never
+        exceed net expected). Verified by driving the entire real chain —
+        steps 1+2+3 together — through the actual HTTP API for the first
+        time, no DB-injection shortcuts except the inbound DocuSign
+        payload itself.
   - [ ] **4. Renewal engine** — eligibility worker + pipeline-status
         endpoint, least urgent, nothing else depends on it.
 - [ ] **Object storage + malware scanning** for document uploads (adapter
