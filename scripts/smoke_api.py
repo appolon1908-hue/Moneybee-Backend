@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import hmac
 import json
@@ -44,6 +45,8 @@ _remove_local_smoke_db()
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.config import settings  # noqa: E402
+from app.db import SessionLocal  # noqa: E402
+from app.integration_models import OperationalException  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -194,6 +197,26 @@ def _create_submitted_application_with_submission(client: TestClient) -> dict[st
         "program_id": submission["program_id"],
         "submission_id": submission["id"],
     }
+
+
+async def _seed_operational_exception() -> str:
+    async with SessionLocal() as db:
+        item = OperationalException(
+            fingerprint=f"smoke-exception:{uuid.uuid4().hex}",
+            code="SMOKE_OPERATIONAL_EXCEPTION",
+            severity="LOW",
+            status="OPEN",
+            owner_subject="local-admin",
+            resource_type="smoke",
+            resource_id=uuid.uuid4().hex,
+            correlation_id=uuid.uuid4().hex,
+            retry_action="manual_review",
+            comments=[],
+        )
+        db.add(item)
+        await db.commit()
+        await db.refresh(item)
+        return str(item.id)
 
 
 def smoke_health(client: TestClient) -> list[SmokeResult]:
@@ -392,6 +415,51 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
             lambda payload: payload["submission"]["id"] == submission_id,
         )
     )
+    credit_authorization = client.post(
+        f"/api/v2/applications/{application_id}/credit-authorizations",
+        json={
+            "authorization_version": "smoke-credit-v1",
+            "document_hash": hashlib.sha256(application_id.encode()).hexdigest(),
+            "accepted": True,
+        },
+    )
+    results.extend(
+        [
+            _expect(
+                "portal.borrower_credit_authorization.create",
+                credit_authorization,
+                201,
+                lambda payload: payload["authorization_version"] == "smoke-credit-v1",
+            ),
+            _expect(
+                "portal.borrower_credit_authorizations.list",
+                client.get(f"/api/v2/applications/{application_id}/credit-authorizations"),
+                200,
+                lambda payload: any(
+                    item["authorization_version"] == "smoke-credit-v1"
+                    for item in payload
+                ),
+            ),
+            _expect(
+                "portal.requirement_snapshot.create",
+                client.post(f"/api/v2/applications/{application_id}/requirement-snapshots"),
+                201,
+                lambda payload: payload["application_id"] == application_id,
+            ),
+            _expect(
+                "portal.requirement_snapshots.list",
+                client.get(f"/api/v2/applications/{application_id}/requirement-snapshots"),
+                200,
+                lambda payload: isinstance(payload, list) and len(payload) >= 1,
+            ),
+            _expect(
+                "portal.lender_bank_transactions.list",
+                client.get(f"/api/v2/lender/submissions/{submission_id}/bank-transactions"),
+                200,
+                lambda payload: isinstance(payload, list),
+            ),
+        ]
+    )
     condition = client.post(
         f"/api/v2/lender/submissions/{submission_id}/conditions",
         json={"description": "Smoke-test borrower condition request"},
@@ -520,6 +588,13 @@ def smoke_admin_operational_surfaces(client: TestClient) -> list[SmokeResult]:
             200,
             lambda payload: "FINAL_STATUS" in payload,
         ),
+        _expect(
+            "admin.webhooks_configuration",
+            client.get("/api/v2/admin/webhooks/configuration"),
+            200,
+            lambda payload: payload["signature_algorithm"] == "HMAC-SHA256"
+            and isinstance(payload["providers"], list),
+        ),
     ]
     for name, path in list_checks.items():
         results.append(
@@ -530,6 +605,19 @@ def smoke_admin_operational_surfaces(client: TestClient) -> list[SmokeResult]:
                 lambda payload: isinstance(payload, list),
             )
         )
+    exception_id = asyncio.run(_seed_operational_exception())
+    results.append(
+        _expect(
+            "admin.operational_exception.resolve",
+            client.post(
+                f"/api/v2/admin/operational-exceptions/{exception_id}/resolve",
+                json={"resolution": "Smoke test recovery evidence recorded."},
+            ),
+            200,
+            lambda payload: payload["status"] == "RESOLVED"
+            and payload["resolution"] == "Smoke test recovery evidence recorded.",
+        )
+    )
     return results
 
 
