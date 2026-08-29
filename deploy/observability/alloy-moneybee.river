@@ -1,0 +1,53 @@
+local.file_match "moneybee_api_logs" {
+  path_targets = [
+    {
+      __path__ = "/var/lib/docker/containers/*/*-json.log",
+      app = "moneybee",
+      component = "api",
+    },
+  ]
+}
+
+loki.source.file "moneybee_api_logs" {
+  targets    = local.file_match.moneybee_api_logs.targets
+  forward_to = [loki.process.moneybee_api_logs.receiver]
+}
+
+loki.process "moneybee_api_logs" {
+  stage.json {
+    expressions = {
+      stream = "stream",
+      log = "log",
+    }
+  }
+
+  stage.output {
+    source = "log"
+  }
+
+  forward_to = [loki.write.moneybee.receiver]
+}
+
+loki.write "moneybee" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+prometheus.scrape "moneybee_api" {
+  targets = [
+    {
+      __address__ = "moneybee-api:8000",
+      app = "moneybee",
+      component = "api",
+    },
+  ]
+  metrics_path = "/metrics"
+  forward_to   = [prometheus.remote_write.moneybee.receiver]
+}
+
+prometheus.remote_write "moneybee" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}

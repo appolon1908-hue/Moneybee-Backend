@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 
 from app import financial_models, identity_models, models  # noqa: F401
@@ -16,6 +16,7 @@ from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
+from app.metrics import render_prometheus, request_finished, request_started
 from app.observability import get_logger
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
@@ -23,6 +24,14 @@ from app.rate_limit import check_request_rate_limit
 from app.routers import router
 
 logger = get_logger("moneybee.api")
+
+
+def route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if isinstance(path, str) and path:
+        return path
+    return request.url.path
 
 
 @asynccontextmanager
@@ -74,9 +83,17 @@ async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     correlation_id = request.headers.get("X-Correlation-ID", request_id)
     start = perf_counter()
+    request_started()
     rate_limit = check_request_rate_limit(request)
     if rate_limit and rate_limit.limited:
         duration_ms = round((perf_counter() - start) * 1000, 2)
+        request_finished(
+            method=request.method,
+            route=request.url.path,
+            status_code=429,
+            duration_seconds=duration_ms / 1000,
+            rate_limit_bucket=rate_limit.bucket,
+        )
         logger.warning(
             "request_rate_limited",
             extra={
@@ -116,6 +133,13 @@ async def request_context(request: Request, call_next):
         response = await call_next(request)
     except Exception as exc:
         duration_ms = round((perf_counter() - start) * 1000, 2)
+        request_finished(
+            method=request.method,
+            route=route_template(request),
+            status_code=500,
+            duration_seconds=duration_ms / 1000,
+            rate_limit_bucket=rate_limit.bucket if rate_limit else None,
+        )
         logger.exception(
             "request_failed",
             extra={
@@ -131,6 +155,13 @@ async def request_context(request: Request, call_next):
         )
         raise
     duration_ms = round((perf_counter() - start) * 1000, 2)
+    request_finished(
+        method=request.method,
+        route=route_template(request),
+        status_code=response.status_code,
+        duration_seconds=duration_ms / 1000,
+        rate_limit_bucket=rate_limit.bucket if rate_limit else None,
+    )
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -191,3 +222,11 @@ async def ready():
             status_code=503,
             content={"status": "not_ready", "environment": settings.app_env},
         )
+
+
+@app.get("/metrics", tags=["health"], include_in_schema=False)
+async def metrics():
+    return PlainTextResponse(
+        render_prometheus(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )

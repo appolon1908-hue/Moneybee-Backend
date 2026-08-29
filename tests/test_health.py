@@ -23,3 +23,18 @@ def test_liveness():
     assert response.headers["X-Request-ID"] == "test-request-id"
     assert response.headers["X-Correlation-ID"] == "test-correlation-id"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_metrics_exposes_prometheus_text():
+    with TestClient(app) as client:
+        client.get("/health/live")
+        response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    body = response.text
+    assert "moneybee_http_requests_in_flight" in body
+    assert "moneybee_http_requests_total" in body
+    assert 'route="/health/live"' in body
+    assert 'status_class="2xx"' in body
+    assert "moneybee_http_request_duration_seconds_bucket" in body
