@@ -120,11 +120,13 @@ here in the order that unblocks the most downstream work first:
       broken). Offers: real gap found and fixed — `prepayment_terms`,
       `personal_guarantee_required`, `collateral_description` didn't exist
       anywhere; added to the model/schema/migration.
-- [x]/[ ] **Contracts, funding, commission, renewal engines** — full draft
-      spec at `docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md`,
+- [x] **Contracts, funding, commission, renewal engines — all 4 steps
+      complete.** Full draft spec at
+      `docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md`,
       reviewed and confirmed (commission is deal-negotiated and splittable
       across brokers; other lower-stakes questions defaulted and flagged
-      there). Building in the spec's stated dependency order:
+      there). Built in the spec's stated dependency order, each step
+      tested against the real HTTP API, not mocked:
   - [x] **1. Funding state machine** — pass: `946491d`. Full six-stage
         lifecycle (`CONDITIONS_PENDING → CONDITIONS_SATISFIED →
         CONTRACT_SIGNED → APPROVED_FOR_FUNDING → FUNDS_SENT → FUNDED`,
@@ -157,8 +159,28 @@ here in the order that unblocks the most downstream work first:
         steps 1+2+3 together — through the actual HTTP API for the first
         time, no DB-injection shortcuts except the inbound DocuSign
         payload itself.
-  - [ ] **4. Renewal engine** — eligibility worker + pipeline-status
-        endpoint, least urgent, nothing else depends on it.
+  - [x] **4. Renewal engine** — pass: `532a5e1`.
+        `evaluate_renewal_eligibility()` scans `FUNDED` fundings older
+        than `RENEWAL_ELIGIBILITY_DAYS` (90, a flagged default per the
+        spec's resolved open question 2) and creates one
+        `RenewalOpportunity` per funding; `POST
+        /admin/renewal-opportunities/{id}/status` moves the pipeline
+        stage. Simplified the spec draft's `PENDING → OPPORTUNITY_CREATED
+        → CONTACTED → …` to `PENDING → CONTACTED → CONVERTED/DECLINED/
+        EXPIRED` — a row only ever gets created once already eligible, so
+        "opportunity created" was a redundant state.
+
+**Engine spec status: complete.** All four state machines exist, are
+idempotent on every money-moving write, and compose correctly end-to-end
+(verified in `tests/test_admin_commission_receipts_and_splits.py` by
+driving offer acceptance → conditions → contract → signed webhook →
+funding approval → commission through the real API in one test, no
+shortcuts except the inbound DocuSign payload this environment has no
+real account to receive one from). Two things flagged, not silently
+assumed solid, for whoever takes this toward real DocuSign traffic:
+the payload field-name mapping in `app/worker.py`'s
+`process_pending_docusign_event()`, and the `RENEWAL_ELIGIBILITY_DAYS`/
+commission-rate defaults recorded in the spec doc.
 - [ ] **Object storage + malware scanning** for document uploads (adapter
       interface exists in `app/integrations/base.py`; scanning step and
       real S3-compatible wiring do not).
