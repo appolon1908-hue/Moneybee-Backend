@@ -2,15 +2,18 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app import identity_models, models  # noqa: F401
+from app import financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
+from app.account_routes import router as account_router
 from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
+from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
 from app.portal import router as portal_router
 from app.routers import router
@@ -28,7 +31,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MoneyBeeLoans API",
-    version="0.2.0",
+    version="0.4.0",
     openapi_url="/openapi.json",
     docs_url="/docs" if settings.app_env != "production" else None,
     lifespan=lifespan,
@@ -49,11 +52,14 @@ app.add_middleware(
     ],
 )
 app.include_router(router, prefix="/api/v2")
+app.include_router(account_router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
 app.include_router(portal_router, prefix="/api/v2")
+app.include_router(financial_router, prefix="/api/v2")
 app.include_router(router, prefix="/api/v1", include_in_schema=False)
 app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
 
 
 @app.middleware("http")
@@ -77,7 +83,10 @@ async def validation_problem(request: Request, exc: RequestValidationError):
             "status": 422,
             "detail": "One or more fields are invalid.",
             "instance": request.url.path,
-            "errors": exc.errors(),
+            "errors": jsonable_encoder(
+                exc.errors(),
+                custom_encoder={ValueError: str, Exception: str},
+            ),
             "request_id": request.headers.get("X-Request-ID"),
         },
     )
