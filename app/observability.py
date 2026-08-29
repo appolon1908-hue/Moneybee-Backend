@@ -36,13 +36,16 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, sort_keys=True, default=str)
 
 
+class MoneyBeeJsonStreamHandler(logging.StreamHandler):
+    _moneybee_json = True
+
+
 def configure_logging() -> None:
     root = logging.getLogger()
     if any(getattr(handler, "_moneybee_json", False) for handler in root.handlers):
         return
-    handler = logging.StreamHandler(sys.stdout)
+    handler = MoneyBeeJsonStreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
-    setattr(handler, "_moneybee_json", True)
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(logging.INFO)

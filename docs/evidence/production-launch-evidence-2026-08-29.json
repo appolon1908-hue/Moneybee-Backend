@@ -1,0 +1,86 @@
+{
+  "$schema": "../readiness/evidence.schema.json",
+  "gate": "PRODUCTION_LAUNCH",
+  "status": "PARTIAL",
+  "source_sha": "91ebd1d",
+  "environment": "production",
+  "evidence_type": "production-launch-readiness-check",
+  "evidence_reference": "Local MoneyBee backend/frontend checks run 2026-08-29; live moneybeeloan.com/api.moneybeeloan.com header probe run 2026-08-29; identity-email activation attestation received 2026-08-29 03:48 America/La_Paz.",
+  "generated_at": "2026-08-29T17:55:25Z",
+  "expires_at": "2026-09-28T17:55:25Z",
+  "approved_by": null,
+  "metadata": {
+    "scope": "MoneyBee only",
+    "backend_branch": "fix/backend-hardening-99pct-20260829",
+    "backend_sha": "91ebd1d",
+    "frontend_branch": "fix/frontend-hardening-99pct-20260829",
+    "frontend_sha": "7363d86",
+    "checks": {
+      "GOOGLE_SEARCH_CONSOLE_VERIFIED": "BLOCKED",
+      "GOOGLE_ADSENSE_SITE_APPROVED": "BLOCKED",
+      "LEGAL_PRIVACY_APPROVED": "BLOCKED",
+      "LEGAL_TERMS_APPROVED": "BLOCKED",
+      "LEGAL_COOKIE_NOTICE_APPROVED": "BLOCKED",
+      "LEGAL_ADVERTISING_DISCLOSURE_APPROVED": "BLOCKED",
+      "STAGING_BROWSER_LOGIN_E2E": "BLOCKED",
+      "STAGING_PUBLIC_FORM_E2E": "BLOCKED",
+      "STAGING_SECURITY_HEADERS_E2E": "BLOCKED",
+      "PROVIDER_ACTIVATION_REVIEWED": "BLOCKED",
+      "KEYCLOAK_REGISTRATION_ENABLED": "PASS",
+      "KEYCLOAK_RESET_PASSWORD_ENABLED": "PASS",
+      "KEYCLOAK_EMAIL_VERIFICATION": "PASS",
+      "KLYROW_SMTP_CONNECTIVITY": "PASS",
+      "STARTTLS": "PASS",
+      "SPF": "PASS",
+      "DKIM": "PASS",
+      "DMARC": "PASS",
+      "DIRECT_APP_SMTP_ACCESS": "BLOCKED",
+      "DIRECT_APP_KLYROW_ACCESS": "BLOCKED",
+      "RESET_TOKEN_OUTSIDE_KEYCLOAK": "BLOCKED",
+      "PLAINTEXT_SMTP_SECRET_IN_GIT": "BLOCKED",
+      "KEYCLOAK_SMTP_TEST": "BLOCKED",
+      "KEYCLOAK_VERIFY_EMAIL_TEST": "BLOCKED",
+      "KEYCLOAK_PASSWORD_RESET_TEST": "BLOCKED",
+      "KEYCLOAK_EXPIRED_LINK_TEST": "BLOCKED",
+      "KEYCLOAK_WRONG_RECIPIENT_TEST": "BLOCKED",
+      "MONEYBEE_POSTAL_BOUNCE_HANDLING": "BLOCKED",
+      "MONEYBEE_POSTAL_SUPPRESSION_HANDLING": "BLOCKED"
+    },
+    "verified_local_gates": {
+      "backend_pytest": "117 passed, 4 skipped",
+      "backend_smoke_api": "56 pass, 4 skip, 0 fail",
+      "backend_openapi_contract": "142 paths verified",
+      "backend_endpoint_catalog": "verified",
+      "backend_private_key_scan": "no private-key blocks found",
+      "frontend_vitest": "79 passed",
+      "frontend_coverage": "100% statements, 96.29% branches",
+      "frontend_typecheck": "passed",
+      "frontend_contract_check": "passed",
+      "frontend_build": "admin, borrower, lender, marketing passed",
+      "frontend_launch_e2e": "62 passed"
+    },
+    "live_url_probe": {
+      "https://moneybeeloan.com": {
+        "status": "HTTP 200",
+        "strict_transport_security": "not observed",
+        "content_security_policy": "not observed",
+        "server": "nginx/1.27.5 via Caddy"
+      },
+      "https://api.moneybeeloan.com/health/live": {
+        "status": "HTTP 200",
+        "strict_transport_security": "not observed",
+        "content_security_policy": "not observed",
+        "server": "uvicorn via Caddy"
+      }
+    },
+    "deployment_boundary": {
+      "live_edge_patch_status": "BLOCKED",
+      "reason": "No MoneyBee SSH/deployment credentials were present in this execution environment. Repository Caddy config has been hardened, but the live host was not modified or restarted.",
+      "required_next_step": "Deploy the hardened Caddyfile to the active live edge and re-run external header probes for moneybeeloan.com, app.moneybeeloan.com, lenders.moneybeeloan.com, admin.moneybeeloan.com, and api.moneybeeloan.com."
+    },
+    "provider_activation": {
+      "status": "BLOCKED",
+      "reason": "Production provider credentials, approval tickets, and staging certification evidence are not available in this repo. Providers remain disabled by default."
+    }
+  }
+}
