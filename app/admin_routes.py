@@ -773,6 +773,172 @@ async def create_commission_adjustment(
     return adjustment
 
 
+async def _load_commission_or_404(db: AsyncSession, commission_id: uuid.UUID) -> models.Commission:
+    commission = await db.get(models.Commission, commission_id)
+    if commission is None:
+        raise HTTPException(status_code=404, detail="Commission not found")
+    return commission
+
+
+async def _net_expected_amount(db: AsyncSession, commission: models.Commission):
+    adjustments_total = await db.scalar(
+        select(func.coalesce(func.sum(models.CommissionAdjustment.amount), 0)).where(
+            models.CommissionAdjustment.commission_id == commission.id
+        )
+    )
+    return commission.expected_amount + adjustments_total
+
+
+@router.post(
+    "/admin/commissions/{commission_id}/receipts",
+    response_model=schemas.CommissionRead,
+    tags=["admin", "funding"],
+)
+async def record_commission_receipt(
+    commission_id: uuid.UUID,
+    payload: schemas.CommissionReceiptInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    commission = await _load_commission_or_404(db, commission_id)
+    route = f"/admin/commissions/{commission_id}/receipts"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        return await _load_commission_or_404(db, commission_id)
+
+    commission.received_amount = commission.received_amount + payload.amount
+    net_expected = await _net_expected_amount(db, commission)
+    if commission.received_amount >= net_expected:
+        commission.status = "RECEIVED"
+    elif commission.received_amount > 0:
+        commission.status = "PARTIALLY_RECEIVED"
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="COMMISSION_RECEIPT_RECORDED",
+            resource_type="commission",
+            resource_id=str(commission_id),
+            details={
+                "amount": str(payload.amount),
+                "reference": payload.reference,
+                "received_amount": str(commission.received_amount),
+            },
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"commission_id": str(commission.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(commission)
+    return commission
+
+
+@router.post(
+    "/admin/commissions/{commission_id}/splits",
+    response_model=schemas.CommissionSplitRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["admin", "funding"],
+)
+async def create_commission_split(
+    commission_id: uuid.UUID,
+    payload: schemas.CommissionSplitInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.split.manage"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    commission = await _load_commission_or_404(db, commission_id)
+    route = f"/admin/commissions/{commission_id}/splits"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay:
+        existing = await db.scalar(
+            select(models.CommissionSplit).where(
+                models.CommissionSplit.id == uuid.UUID(replay.response_body["split_id"])
+            )
+        )
+        if existing is None:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return existing
+
+    existing_total = await db.scalar(
+        select(func.coalesce(func.sum(models.CommissionSplit.amount), 0)).where(
+            models.CommissionSplit.commission_id == commission_id
+        )
+    )
+    net_expected = await _net_expected_amount(db, commission)
+    if existing_total + payload.amount > net_expected:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Split amounts would exceed the commission's net expected "
+                f"amount ({net_expected})."
+            ),
+        )
+
+    split = models.CommissionSplit(
+        commission_id=commission_id,
+        recipient_type=payload.recipient_type,
+        recipient_reference=payload.recipient_reference,
+        percentage=payload.percentage,
+        amount=payload.amount,
+        status="PENDING",
+    )
+    db.add(split)
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="COMMISSION_SPLIT_CREATED",
+            resource_type="commission",
+            resource_id=str(commission_id),
+            details={
+                "recipient_type": payload.recipient_type,
+                "recipient_reference": payload.recipient_reference,
+                "amount": str(payload.amount),
+            },
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=201,
+            response_body={"split_id": str(split.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(split)
+    return split
+
+
 @router.get(
     "/admin/sla-alerts",
     response_model=list[schemas.SLAAlertRead],
