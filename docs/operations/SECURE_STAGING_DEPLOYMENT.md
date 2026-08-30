@@ -88,6 +88,18 @@ A separate reviewed release-lock PR must place exact backend, frontend, PostgreS
 Redis, and Caddy digests plus the reviewed ACME contact email into
 `deploy/release.lock.json`. All live and external capabilities must remain false.
 
+Compute the release lock `configuration_checksum` from the exact backend and
+frontend deployment fragments with:
+
+```bash
+python ops/compute-configuration-checksum.py \
+  --frontend-root ../Moneybee-frontend- \
+  --json
+```
+
+The staging readiness-packet workflow uses the same command and fails closed if the
+committed `deploy/release.lock.json` checksum differs from the reviewed fragments.
+
 ## Runtime environment gate
 
 Before any future deployment executor pulls an image or starts a container,

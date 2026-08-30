@@ -46,20 +46,10 @@ jobs:
         run: |
           set -euo pipefail
           expected="$(jq -r '.configuration_checksum' backend/deploy/release.lock.json)"
-          actual="$(
-            {
-              for file in \
-                backend/deploy/Caddyfile.staging \
-                backend/deploy/compose.backend.yml \
-                backend/deploy/compose.data.yml \
-                backend/deploy/compose.edge.yml \
-                frontend/deploy/compose.frontend.yml; do
-                printf '%s  ' "$file"
-                sha256sum "$file" | awk '{print $1}'
-              done
-            } | sha256sum | awk '{print $1}'
-          )"
-          test "$actual" = "$expected"
+          python backend/ops/compute-configuration-checksum.py \
+            --frontend-root frontend \
+            --expect "$expected" \
+            --json
       - name: Assemble review-only deployment packet
         run: |
           set -euo pipefail
