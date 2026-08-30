@@ -10,10 +10,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
-import sys
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -24,8 +24,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = ROOT.parent / "Moneybee-frontend-"
 DEFAULT_MARKETING_ROOT = FRONTEND_ROOT / "apps" / "marketing"
 IDENTITY_EVIDENCE = ROOT / "docs" / "evidence" / "identity-email-activation-2026-08-29.json"
+RUNTIME_LOCK = ROOT / "deploy" / "runtime-paths.lock.json"
+RELEASE_LOCK = ROOT / "deploy" / "release.lock.json"
 
 REQUIRED_LANDING_COUNT = 20
+SHA40 = re.compile(r"^[0-9a-f]{40}$")
+SHA256_DIGEST = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 REQUIRED_POLICY_SLUGS = {
     "privacy",
     "terms",
@@ -35,6 +39,18 @@ REQUIRED_POLICY_SLUGS = {
     "consents-and-disclosures",
     "accessibility",
     "complaints",
+}
+REQUIRED_RELEASE_IMAGES = {
+    "api",
+    "worker",
+    "migrate",
+    "marketing",
+    "borrower",
+    "lender",
+    "admin",
+    "postgres",
+    "redis",
+    "caddy",
 }
 REQUIRED_EXTERNAL_FLAGS = {
     "GOOGLE_SEARCH_CONSOLE_VERIFIED": "PASS",
@@ -47,6 +63,14 @@ REQUIRED_EXTERNAL_FLAGS = {
     "STAGING_PUBLIC_FORM_E2E": "PASS",
     "STAGING_SECURITY_HEADERS_E2E": "PASS",
     "PROVIDER_ACTIVATION_REVIEWED": "PASS",
+}
+REQUIRED_STAGING_FLAGS = {
+    "STAGING_CERTIFICATION": "PASS",
+    "STAGING_CANARY_REHEARSAL": "PASS",
+    "STAGING_ROLLBACK_REHEARSAL": "PASS",
+    "HUMAN_LAUNCH_APPROVAL": "PASS",
+    "BACKUP_RESTORE_REHEARSAL": "PASS",
+    "PITR_RESTORE_REHEARSAL": "PASS",
 }
 
 
@@ -93,6 +117,25 @@ def git_short_sha(path: Path) -> str:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def full_git_sha(path: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def repo_marketing_checks(marketing_root: Path) -> list[Check]:
@@ -214,6 +257,128 @@ def external_approval_checks(evidence: dict[str, str]) -> list[Check]:
     ]
 
 
+def release_gate_checks(evidence: dict[str, str], frontend_root: Path) -> list[Check]:
+    runtime = load_json(RUNTIME_LOCK)
+    release = load_json(RELEASE_LOCK)
+    source = release.get("source") if isinstance(release.get("source"), dict) else {}
+    images = release.get("images") if isinstance(release.get("images"), dict) else {}
+
+    checks = [
+        check(
+            "release.runtime_paths.verified",
+            "PASS" if runtime.get("status") == "VERIFIED" else "BLOCKED",
+            f"runtime lock status={runtime.get('status') or 'missing'}",
+        ),
+        check(
+            "release.lock.verified",
+            "PASS" if release.get("status") == "VERIFIED" else "BLOCKED",
+            f"release lock status={release.get('status') or 'missing'}",
+        ),
+    ]
+
+    expected_shas = {
+        "backend": (source.get("backend_sha"), full_git_sha(ROOT)),
+        "frontend": (source.get("frontend_sha"), full_git_sha(frontend_root)),
+    }
+    for repo, (locked, current) in expected_shas.items():
+        checks.append(
+            check(
+                f"release.source.{repo}_sha",
+                "PASS" if isinstance(locked, str) and SHA40.fullmatch(locked) and locked == current else "BLOCKED",
+                f"locked={locked or 'missing'} current={current}",
+            )
+        )
+
+    for image in sorted(REQUIRED_RELEASE_IMAGES):
+        value = images.get(image)
+        checks.append(
+            check(
+                f"release.image.{image}",
+                "PASS" if isinstance(value, str) and SHA256_DIGEST.fullmatch(value) else "BLOCKED",
+                "immutable digest recorded" if value else "immutable image digest missing",
+            )
+        )
+
+    backup_reference = release.get("backup_reference")
+    checks.extend(
+        [
+            check(
+                "release.backup.reference",
+                "PASS" if isinstance(backup_reference, str) and backup_reference.strip() else "BLOCKED",
+                "backup reference recorded" if backup_reference else "backup reference missing",
+            ),
+            check(
+                "release.backup.restore_tested",
+                "PASS" if release.get("backup_restore_tested") is True else "BLOCKED",
+                f"backup_restore_tested={release.get('backup_restore_tested')}",
+            ),
+        ]
+    )
+
+    for name, expected in REQUIRED_STAGING_FLAGS.items():
+        value = evidence_value(evidence, name)
+        checks.append(
+            check(
+                f"release.evidence.{name.lower()}",
+                "PASS" if value == expected else "BLOCKED",
+                f"{name}={value or 'missing'}",
+            )
+        )
+
+    return checks
+
+
+def write_evidence_file(
+    path: Path,
+    report: dict[str, Any],
+    evidence_reference: str,
+    frontend_root: Path,
+) -> None:
+    generated = datetime.fromisoformat(report["generated_at"])
+    checks = {
+        item["name"].upper().replace(".", "_"): item["status"]
+        for item in report["checks"]
+    }
+    payload = {
+        "$schema": "../readiness/evidence.schema.json",
+        "gate": "PRODUCTION_LAUNCH",
+        "status": "PASS" if report["final_status"] == "READY" else "BLOCKED",
+        "source_sha": report["backend_full_sha"],
+        "environment": "production",
+        "evidence_type": "production-launch-readiness-check",
+        "evidence_reference": evidence_reference,
+        "generated_at": report["generated_at"],
+        "expires_at": (generated + timedelta(days=30)).isoformat(),
+        "approved_by": None,
+        "metadata": {
+            "scope": "MoneyBee only",
+            "backend_branch": git_branch(ROOT),
+            "backend_sha": report["backend_full_sha"],
+            "frontend_branch": git_branch(frontend_root),
+            "frontend_sha": report["frontend_full_sha"],
+            "deployment_permitted": report["final_status"] == "READY",
+            "totals": report["totals"],
+            "checks": checks,
+            "blockers": [
+                item for item in report["checks"] if item["status"] in {"BLOCKED", "FAIL"}
+            ],
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def git_branch(path: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "branch", "--show-current"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
 def probe_url(url: str, timeout: float = 10.0) -> Check:
     request = Request(url, headers={"User-Agent": "MoneyBeeLaunchCheck/1.0"})
     try:
@@ -244,6 +409,11 @@ def main() -> int:
     parser.add_argument("--frontend-root", type=Path, default=FRONTEND_ROOT)
     parser.add_argument("--evidence-file", type=Path, default=IDENTITY_EVIDENCE)
     parser.add_argument("--url", action="append", default=[], help="Optional live URL to probe")
+    parser.add_argument("--write-evidence", type=Path, help="Write a dated non-secret readiness evidence JSON file")
+    parser.add_argument(
+        "--evidence-reference",
+        default="Generated by scripts/production_launch_check.py from local repository checks, release locks, optional live probes, and supplied non-secret evidence.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON only")
     args = parser.parse_args()
 
@@ -253,6 +423,7 @@ def main() -> int:
         *repo_marketing_checks(marketing_root),
         *identity_email_checks(evidence),
         *external_approval_checks(evidence),
+        *release_gate_checks(evidence, args.frontend_root),
         *(probe_url(url) for url in args.url),
     ]
     totals = {"PASS": 0, "FAIL": 0, "BLOCKED": 0, "SKIP": 0}
@@ -264,10 +435,19 @@ def main() -> int:
         "generated_at": datetime.now(UTC).isoformat(),
         "final_status": final_status,
         "backend_sha": git_short_sha(ROOT),
+        "backend_full_sha": full_git_sha(ROOT),
         "frontend_sha": git_short_sha(args.frontend_root),
+        "frontend_full_sha": full_git_sha(args.frontend_root),
         "totals": totals,
         "checks": [asdict(item) for item in checks],
     }
+    if args.write_evidence:
+        write_evidence_file(
+            args.write_evidence,
+            report,
+            args.evidence_reference,
+            args.frontend_root,
+        )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
