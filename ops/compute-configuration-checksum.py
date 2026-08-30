@@ -26,22 +26,41 @@ class ChecksumError(ValueError):
     pass
 
 
-def file_digest(path: Path) -> str:
+def git_blob_digest(repo_root: Path, relative_path: str, ref: str = "HEAD") -> str:
     try:
-        data = path.read_bytes()
-    except OSError as exc:
-        raise ChecksumError(f"{path}: {exc}") from exc
+        data = subprocess.check_output(
+            ["git", "-C", str(repo_root), "show", f"{ref}:{relative_path}"],
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", b"")
+        message = detail.decode("utf-8", errors="replace").strip() if detail else str(exc)
+        raise ChecksumError(f"{repo_root}:{ref}:{relative_path}: {message}") from exc
     return hashlib.sha256(data).hexdigest()
 
 
 def configuration_manifest(frontend_root: Path) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for relative in BACKEND_FILES:
-        path = BACKEND_ROOT / relative
-        entries.append({"scope": "backend", "path": relative, "sha256": file_digest(path)})
+        entries.append(
+            {
+                "scope": "backend",
+                "path": relative,
+                "source": "git_blob",
+                "ref": "HEAD",
+                "sha256": git_blob_digest(BACKEND_ROOT, relative),
+            }
+        )
     for relative in FRONTEND_FILES:
-        path = frontend_root / relative
-        entries.append({"scope": "frontend", "path": relative, "sha256": file_digest(path)})
+        entries.append(
+            {
+                "scope": "frontend",
+                "path": relative,
+                "source": "git_blob",
+                "ref": "HEAD",
+                "sha256": git_blob_digest(frontend_root, relative),
+            }
+        )
     return entries
 
 

@@ -97,8 +97,10 @@ python ops/compute-configuration-checksum.py \
   --json
 ```
 
-The staging readiness-packet workflow uses the same command and fails closed if the
-committed `deploy/release.lock.json` checksum differs from the reviewed fragments.
+The command hashes Git blobs at `HEAD:<path>`, not working-tree bytes, so the result is
+stable across LF and CRLF checkouts. The staging readiness-packet workflow uses the same
+command and fails closed if the committed `deploy/release.lock.json` checksum differs
+from the reviewed fragments.
 Only copy the checksum into a release-lock PR when the command reports the intended
 `backend_sha`, intended `frontend_sha`, and both `backend_dirty=false` and
 `frontend_dirty=false`.
