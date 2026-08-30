@@ -99,6 +99,9 @@ python ops/compute-configuration-checksum.py \
 
 The staging readiness-packet workflow uses the same command and fails closed if the
 committed `deploy/release.lock.json` checksum differs from the reviewed fragments.
+Only copy the checksum into a release-lock PR when the command reports the intended
+`backend_sha`, intended `frontend_sha`, and both `backend_dirty=false` and
+`frontend_dirty=false`.
 
 ## Runtime environment gate
 

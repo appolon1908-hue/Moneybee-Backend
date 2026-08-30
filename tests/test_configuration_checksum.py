@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -32,6 +33,25 @@ def test_configuration_checksum_is_deterministic():
         "deploy/compose.frontend.yml",
     ]
     assert checksum == tool.configuration_checksum(entries)
+    assert tool.canonical_lines(entries).startswith(
+        "backend/deploy/Caddyfile.staging  "
+    )
+
+
+def test_configuration_checksum_json_includes_source_provenance(capsys):
+    tool = load_tool()
+    frontend_root = Path(__file__).resolve().parents[2] / "Moneybee-frontend-"
+
+    result = tool.main(["--frontend-root", str(frontend_root), "--json"])
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["configuration_checksum"]) == 64
+    assert "backend/deploy/Caddyfile.staging" in payload["canonical"]
+    assert len(payload["backend_sha"]) == 40
+    assert len(payload["frontend_sha"]) == 40
+    assert isinstance(payload["backend_dirty"], bool)
+    assert payload["frontend_dirty"] is False
 
 
 def test_configuration_checksum_expectation_mismatch_exits_nonzero(capsys):

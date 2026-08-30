@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,10 +46,36 @@ def configuration_manifest(frontend_root: Path) -> list[dict[str, str]]:
 
 
 def configuration_checksum(entries: list[dict[str, str]]) -> str:
-    canonical = "\n".join(
+    return hashlib.sha256(canonical_lines(entries).encode("utf-8")).hexdigest()
+
+
+def canonical_lines(entries: list[dict[str, str]]) -> str:
+    return "\n".join(
         f"{entry['scope']}/{entry['path']}  {entry['sha256']}" for entry in entries
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def git_sha(path: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def git_dirty(path: Path) -> bool:
+    try:
+        status = subprocess.check_output(
+            ["git", "-C", str(path), "status", "--porcelain"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return bool(status.strip())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -71,7 +98,12 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = {
         "schema_version": 1,
+        "backend_sha": git_sha(BACKEND_ROOT),
+        "frontend_sha": git_sha(args.frontend_root),
+        "backend_dirty": git_dirty(BACKEND_ROOT),
+        "frontend_dirty": git_dirty(args.frontend_root),
         "configuration_checksum": checksum,
+        "canonical": canonical_lines(entries),
         "files": entries,
     }
     if args.json:
