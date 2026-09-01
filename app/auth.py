@@ -48,6 +48,7 @@ LEGACY_ROLE_PERMISSIONS = {
         "underwriting.review",
         "matching.run",
         "fraud.run",
+        "kyb.run",
     },
     "LENDER_ADMIN": {
         "lender.application.read",

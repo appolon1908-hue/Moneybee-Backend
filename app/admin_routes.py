@@ -14,6 +14,7 @@ from app.compliance_service import (
     update_recipient_tin,
 )
 from app.db import get_db
+from app.integrations.base import ProviderError
 from app.integrations.registry import provider_statuses
 
 
@@ -681,6 +682,69 @@ async def run_fraud_assessment(
     await db.commit()
     await db.refresh(assessment)
     return assessment
+
+
+@router.post(
+    "/admin/applications/{application_id}/business-verifications",
+    response_model=schemas.VerificationRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["admin", "verification"],
+)
+async def run_business_verification(
+    application_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("kyb.run"))],
+):
+    await services.require_capability(db, "kyb.live_verification")
+    application = await services.get_authorized_application(db, application_id, user)
+    try:
+        verification = await domain_logic.run_business_verification(db, application)
+    except ProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "PROVIDER_REQUEST_FAILED",
+                "provider": exc.provider,
+                "message": "The configured KYB provider could not complete the request.",
+            },
+        ) from exc
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="BUSINESS_VERIFICATION_RUN",
+            resource_type="application",
+            resource_id=str(application.id),
+            details={
+                "verification_id": str(verification.id),
+                "status": verification.status,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(verification)
+    return verification
+
+
+@router.get(
+    "/admin/applications/{application_id}/verifications",
+    response_model=list[schemas.VerificationRead],
+    tags=["admin", "verification"],
+)
+async def application_verifications(
+    application_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("application.read"))],
+):
+    await services.get_authorized_application(db, application_id, user)
+    return list(
+        (
+            await db.scalars(
+                select(models.Verification)
+                .where(models.Verification.application_id == application_id)
+                .order_by(models.Verification.created_at)
+            )
+        ).all()
+    )
 
 
 @router.get(

@@ -1,0 +1,9 @@
+{
+  "paths": {
+    "/api/v2/admin/applications/{application_id}/business-verifications": "348b562c49cef199b3c596e3c74c32831709d10488c059c3be26e64b72b34246",
+    "/api/v2/admin/applications/{application_id}/verifications": "7d996fe78eb3745c94b66293556da246ca2e7be3d769c92819acdd31566b7ada"
+  },
+  "schemas": {
+    "VerificationRead": "315aa9e8d41c36bc585cb18b3b14a3849cce165c88abd9565ed81dd767068a25"
+  }
+}

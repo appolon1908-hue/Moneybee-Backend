@@ -463,6 +463,20 @@ class FraudAssessmentRead(BaseModel):
     created_at: datetime
 
 
+class VerificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    owner_id: uuid.UUID | None
+    verification_type: str
+    provider: str
+    provider_reference: str | None
+    status: str
+    normalized_result: dict
+    created_at: datetime
+    updated_at: datetime
+
+
 class CommissionSplitRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

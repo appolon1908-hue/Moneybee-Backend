@@ -4,6 +4,8 @@ These capabilities must remain disabled during the complete implementation progr
 
 bank.live_connection = false
 
+kyb.live_verification = false
+
 credit.live_pull = false
 
 lenders.live_submission = false

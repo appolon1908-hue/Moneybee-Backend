@@ -464,14 +464,41 @@ that commit for detail.
       and 4 new schemas.
       **Confirmed still missing, not built this pass** — bigger items
       needing new models/services, not just a new route on existing data:
-      business/identity verification has no dedicated endpoint or model
-      at all (only fraud-assessments exists); `GET /me/sessions` needs a
-      `LoginEvent` table and a write-path wired into `current_principal`
-      that doesn't exist yet — the spec lists "login events" under
-      Security but nothing populates them; communications message
-      *templates* (admin-managed, as opposed to `/me/notification-
-      preferences`, which is per-user and already real) have no
-      model/service/endpoint anywhere.
+      `GET /me/sessions` needs a `LoginEvent` table and a write-path wired
+      into `current_principal` that doesn't exist yet — the spec lists
+      "login events" under Security but nothing populates them;
+      communications message *templates* (admin-managed, as opposed to
+      `/me/notification-preferences`, which is per-user and already real)
+      have no model/service/endpoint anywhere.
+- [x] **Business verification was a confirmed dead end, not just a missing
+      endpoint.** `app/domain_logic.py`'s `create_requirement_snapshot` has
+      always queried for a `Verification` row
+      (`verification_type="BUSINESS"`, `status="VERIFIED"`) to satisfy the
+      `BUSINESS_VERIFICATION` requirement — gated behind the
+      `kyb.live_verification` capability — but nothing anywhere ever wrote
+      one; the model and its downstream reader existed, the write path
+      didn't. Once that capability is ever certified, the requirement
+      would have been permanently uncompletable.
+      Added `domain_logic.run_business_verification()`: builds the
+      provider payload from `Business` + `Owner` records, calls
+      `kyb_adapter().verify_business()`, and upserts (not duplicates) the
+      `Verification` row on rerun. Owners are folded into the same
+      business-verification call rather than a separate identity-
+      verification endpoint, matching how the one concrete adapter this
+      repo has (`MiddeskAdapter`) actually models the relationship —
+      Middesk's real API takes beneficial owners as `people` on the same
+      `/v1/businesses` submission, not a separate identity check.
+      `POST /admin/applications/{application_id}/business-verifications`
+      (new `kyb.run` permission, added to `MONEYBEE_UNDERWRITER`) and
+      `GET /admin/applications/{application_id}/verifications`. Also found
+      and fixed in passing: `docs/codex/CAPABILITY_FREEZE.md` never listed
+      `kyb.live_verification` despite it being a real, checked capability
+      flag since before this pass — same gap as `bank.live_connection`
+      earlier in this mission, now closed the same way.
+      `tests/test_business_verification.py` (5 tests): fails closed
+      without the capability, persists and updates the same row on rerun
+      rather than duplicating, surfaces a real provider failure as 502,
+      and 409s when there's no business profile to verify yet.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a
