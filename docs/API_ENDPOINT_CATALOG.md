@@ -180,6 +180,7 @@ Generated from the FastAPI OpenAPI document. Do not edit endpoint rows by hand; 
 | Identity/session | `GET` | `/api/v2/me/notification-preferences` | `https://api.moneybeeloan.com/api/v2/me/notification-preferences` | OIDC bearer token plus local MoneyBee principal | None in app middleware | N/A; Notification Preferences |
 | Identity/session | `PUT` | `/api/v2/me/notification-preferences` | `https://api.moneybeeloan.com/api/v2/me/notification-preferences` | OIDC bearer token plus local MoneyBee principal | None in app middleware | Domain-specific transition guards; Update Notification Preferences |
 | Identity/session | `GET` | `/api/v2/me/permissions` | `https://api.moneybeeloan.com/api/v2/me/permissions` | OIDC bearer token plus local MoneyBee principal | None in app middleware | N/A; My Permissions |
+| Identity/session | `GET` | `/api/v2/me/sessions` | `https://api.moneybeeloan.com/api/v2/me/sessions` | OIDC bearer token plus local MoneyBee principal | None in app middleware | N/A; My Sessions |
 | Lender portal | `POST` | `/api/v2/lender/applications/{application_id}/offers` | `https://api.moneybeeloan.com/api/v2/lender/applications/{application_id}/offers` | OIDC bearer token plus local MoneyBee principal | None in app middleware | Domain-specific transition guards; Lender Offer |
 | Lender portal | `GET` | `/api/v2/lender/bank-review-queue` | `https://api.moneybeeloan.com/api/v2/lender/bank-review-queue` | OIDC bearer token plus local MoneyBee principal | None in app middleware | N/A; Lender Bank Review Queue |
 | Lender portal | `POST` | `/api/v2/lender/conditions/{condition_id}/approve` | `https://api.moneybeeloan.com/api/v2/lender/conditions/{condition_id}/approve` | OIDC bearer token plus local MoneyBee principal | None in app middleware | Domain-specific transition guards; Approve Condition |
@@ -223,4 +224,4 @@ Generated from the FastAPI OpenAPI document. Do not edit endpoint rows by hand; 
 | Public intake | `GET` | `/api/v2/public/products` | `https://api.moneybeeloan.com/api/v2/public/products` | No bearer token; idempotency key required on writes | Public intake fixed-window limit | N/A; Public Products |
 | Public intake | `POST` | `/api/v2/public/referral-partner-inquiries` | `https://api.moneybeeloan.com/api/v2/public/referral-partner-inquiries` | No bearer token; idempotency key required on writes | Public intake fixed-window limit | `Idempotency-Key` hashes and replays matching payloads; Referral Partner Inquiry |
 
-Total canonical endpoints: 196
+Total canonical endpoints: 197

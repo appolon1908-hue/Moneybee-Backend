@@ -105,6 +105,15 @@ async def my_permissions(user: User):
     return {"permissions": sorted(user.permissions)}
 
 
+@router.get(
+    "/me/sessions",
+    response_model=list[schemas.LoginEventRead],
+    tags=["identity"],
+)
+async def my_sessions(db: Db, user: User):
+    return await services.list_login_events(db, user)
+
+
 @router.post("/applications", response_model=schemas.ApplicationRead, tags=["applications"])
 async def create_application(payload: schemas.ApplicationCreate, db: Db, user: User):
     existing = await db.scalar(

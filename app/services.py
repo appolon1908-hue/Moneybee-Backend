@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import models, schemas
+from app import identity_models, models, schemas
 from app.auth import Principal
 from app.config import settings
 
@@ -406,6 +406,60 @@ async def list_application_consents(
                     )
                 )
                 .order_by(models.Consent.created_at)
+            )
+        ).all()
+    )
+
+
+async def record_login_event(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    issuer: str,
+    subject: str,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> None:
+    """Records one distinct sign-in. Deduplicated against the same
+    (issuer, subject) within a 12-hour window so a session repeatedly
+    calling GET /auth/context (once per page load, not once per API call)
+    doesn't produce a login event per call - this tracks sign-ins, not
+    request volume."""
+    window_start = datetime.now(UTC) - timedelta(hours=12)
+    recent = await db.scalar(
+        select(identity_models.LoginEvent).where(
+            identity_models.LoginEvent.issuer == issuer,
+            identity_models.LoginEvent.subject == subject,
+            identity_models.LoginEvent.created_at >= window_start,
+        )
+    )
+    if recent is not None:
+        return
+    db.add(
+        identity_models.LoginEvent(
+            user_id=user_id,
+            issuer=issuer,
+            subject=subject,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    )
+    await db.commit()
+
+
+async def list_login_events(
+    db: AsyncSession, principal: Principal, *, limit: int = 20
+) -> list[identity_models.LoginEvent]:
+    return list(
+        (
+            await db.scalars(
+                select(identity_models.LoginEvent)
+                .where(
+                    identity_models.LoginEvent.issuer == principal.issuer,
+                    identity_models.LoginEvent.subject == principal.subject,
+                )
+                .order_by(identity_models.LoginEvent.created_at.desc())
+                .limit(limit)
             )
         ).all()
     )

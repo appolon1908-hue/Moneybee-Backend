@@ -499,6 +499,40 @@ that commit for detail.
       without the capability, persists and updates the same row on rerun
       rather than duplicating, surfaces a real provider failure as 502,
       and 409s when there's no business profile to verify yet.
+- [x] **`GET /me/sessions` — the login-events gap flagged above, closed.**
+      New `identity_models.LoginEvent` table (migration
+      `20260901_0023_login_events`) and `services.record_login_event()` /
+      `list_login_events()`. This is a stateless-JWT architecture with no
+      in-app "login" step of its own — Keycloak/local-bypass issue the
+      token externally — so there's no natural place to record a sign-in.
+      Chose `GET /auth/context` as the recording signal: it's the endpoint
+      a frontend calls exactly once per session bootstrap, right after it
+      has a token, as opposed to `current_principal`, which every
+      authenticated request resolves through and would record a "login"
+      per API call. Deduplicated on `(issuer, subject)` within a 12-hour
+      window so a page left open and repeatedly re-polling `/auth/context`
+      doesn't produce a new row per call. `GET /me/sessions` returns the
+      caller's own last 20 events, deliberately excluding `subject`/
+      `user_id` from the response — a self-service view has no reason to
+      echo its own identity claims back. `tests/test_login_events.py` (3
+      tests). New OpenAPI additive manifest
+      (`docs/openapi/login-events-manifest.json`).
+      **Found in passing, deliberately not touched this pass:**
+      `models.UserAccount` — the table `GET /admin/users` reads from — is
+      orphaned. `grep -rn "models.UserAccount(" app/*.py` returns zero
+      matches: nothing anywhere in the app ever constructs one, so that
+      admin endpoint always returns an empty list against real traffic.
+      Both `identity_models.User.last_login_at` and
+      `models.UserAccount.last_login_at` are similarly dead columns —
+      declared, never written (the new `LoginEvent` table above is a
+      separate, additive mechanism, not a fix to either of these). This
+      looks like a leftover from an earlier identity model that
+      `identity_models.User`/`Organization` superseded rather than
+      something this pass's scope covers — repointing or wiring
+      `UserAccount` is a real product decision (does `GET /admin/users`
+      move to `identity_models.User`, or does something start populating
+      `UserAccount` rows, and on what event) worth a human's call rather
+      than a guess made to close out an unrelated endpoint sweep.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a
