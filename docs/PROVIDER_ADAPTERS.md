@@ -24,7 +24,14 @@ No mock adapter is selectable in production configuration.
 
 1. Select a provider in environment configuration.
 2. Install credentials through the approved secret manager; never commit them.
-3. Configure `FIELD_ENCRYPTION_KEY` before enabling banking.
+3. Configure `FIELD_ENCRYPTION_KEYS_JSON` (a `{"<version>": "<fernet key>"}` map)
+   and `FIELD_ENCRYPTION_ACTIVE_KEY_VERSION` before enabling banking.
+   Ciphertext is prefixed with the key version it was encrypted under
+   (`<version>:<token>`), so a new key can be added and made active without
+   invalidating values already encrypted under the previous one - decrypt
+   still resolves whichever version the ciphertext names. See
+   `app/encryption.py`'s `rewrap_secret()` for migrating a stored value onto
+   the newly active version.
 4. Create or update the provider-connection record and verify health.
 5. Run sandbox or staging contract tests.
 6. Enable only the matching capability flag.

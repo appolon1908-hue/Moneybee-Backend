@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     provider_webhook_secrets_json: str = "{}"
     provider_webhook_tolerance_seconds: int = 300
 
-    field_encryption_key: str | None = None
+    field_encryption_keys_json: str = "{}"
+    field_encryption_active_key_version: str | None = None
     provider_timeout_seconds: float = 30.0
 
     log_level: str = "INFO"
@@ -184,6 +185,19 @@ class Settings(BaseSettings):
         return {key.lower(): secret for key, secret in value.items() if secret}
 
     @property
+    def field_encryption_keys(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.field_encryption_keys_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be valid JSON") from exc
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(secret, str)
+            for key, secret in value.items()
+        ):
+            raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be a string map")
+        return {key: secret for key, secret in value.items() if secret}
+
+    @property
     def oidc_algorithms(self) -> list[str]:
         return [
             item.strip()
@@ -236,11 +250,19 @@ class Settings(BaseSettings):
                 [
                     self.plaid_client_id,
                     self.plaid_secret,
-                    self.field_encryption_key,
+                    self.field_encryption_active_key_version,
+                    self.field_encryption_keys,
                 ]
             ):
                 raise ValueError(
-                    "Plaid requires credentials and FIELD_ENCRYPTION_KEY"
+                    "Plaid requires credentials and a configured field encryption key"
+                )
+            if self.field_encryption_active_key_version and (
+                self.field_encryption_active_key_version not in self.field_encryption_keys
+            ):
+                raise ValueError(
+                    "FIELD_ENCRYPTION_ACTIVE_KEY_VERSION must name a key present in "
+                    "FIELD_ENCRYPTION_KEYS_JSON"
                 )
             if self.middleware_provider == "codestra" and not all(
                 [
