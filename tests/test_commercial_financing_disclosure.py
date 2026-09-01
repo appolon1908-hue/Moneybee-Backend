@@ -10,7 +10,6 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 from fastapi.testclient import TestClient
 
 from app.compliance_service import generate_commercial_financing_disclosure
-from app.db import SessionLocal
 from app.main import app
 
 
@@ -195,11 +194,23 @@ class _FakeOffer:
     prepayment_terms: str | None
 
 
+class _RecordingSession:
+    """Minimal unit-test session that records persistence without enforcing FKs."""
+
+    def __init__(self) -> None:
+        self.added: list[object] = []
+
+    def add(self, value: object) -> None:
+        self.added.append(value)
+
+    async def flush(self) -> None:
+        return None
+
+
 async def test_disclosure_text_still_includes_the_cost_figures_when_apr_is_unavailable():
-    # No offer.apr and term_months <= 0 -> estimated_apr resolves to None
-    # (the branch OfferInput's real validation keeps unreachable through
-    # the API, but the service itself must still render a correct
-    # disclosure rather than silently dropping the dollar figures).
+    # No offer.apr and term_months <= 0 -> estimated_apr resolves to None.
+    # This is a pure rendering edge case: the two tests above already prove
+    # persistence against real Application and Offer parents.
     offer = _FakeOffer(
         id=uuid.uuid4(),
         application_id=uuid.uuid4(),
@@ -211,11 +222,14 @@ async def test_disclosure_text_still_includes_the_cost_figures_when_apr_is_unava
         total_repayment=Decimal("11000"),
         prepayment_terms=None,
     )
-    with TestClient(app):
-        async with SessionLocal() as db:
-            disclosure = await generate_commercial_financing_disclosure(db, offer)
-            assert disclosure.estimated_apr is None
-            assert "Total amount financed: $10,000.00" in disclosure.disclosure_text
-            assert "Finance charge: $1,000.00" in disclosure.disclosure_text
-            assert "Total repayment amount: $11,000.00" in disclosure.disclosure_text
-            assert "Estimated APR: not available" in disclosure.disclosure_text
+    db = _RecordingSession()
+    disclosure = await generate_commercial_financing_disclosure(  # type: ignore[arg-type]
+        db,
+        offer,
+    )
+    assert db.added == [disclosure]
+    assert disclosure.estimated_apr is None
+    assert "Total amount financed: $10,000.00" in disclosure.disclosure_text
+    assert "Finance charge: $1,000.00" in disclosure.disclosure_text
+    assert "Total repayment amount: $11,000.00" in disclosure.disclosure_text
+    assert "Estimated APR: not available" in disclosure.disclosure_text
