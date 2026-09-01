@@ -42,7 +42,7 @@ def configure_logging() -> None:
         return
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
-    setattr(handler, "_moneybee_json", True)
+    handler._moneybee_json = True
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(logging.INFO)
