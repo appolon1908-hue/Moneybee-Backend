@@ -13,6 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout MoneyBee frontend for cross-repository launch contract tests
+        uses: actions/checkout@v4
+        with:
+          repository: appolon1908-hue/Moneybee-frontend-
+          path: Moneybee-frontend-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -21,6 +26,8 @@ jobs:
       - run: pip install ".[dev]"
       - run: ruff check app tests
       - run: pytest -q
+        env:
+          MONEYBEE_FRONTEND_ROOT: ${{ github.workspace }}/Moneybee-frontend-
       - name: Smoke-test critical API surfaces
         run: python scripts/smoke_api.py
       - name: Verify OpenAPI contract and additive manifests
