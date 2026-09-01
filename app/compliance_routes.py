@@ -139,8 +139,7 @@ async def _acknowledge_disclosure(
         )
     )
     await db.commit()
-    await db.refresh(disclosure)
-    return CommercialFinancingDisclosureRead.model_validate(disclosure)
+    return response
 
 
 @router.get(
@@ -570,8 +569,7 @@ async def record_tax_filing(
         )
     )
     await db.commit()
-    await db.refresh(record)
-    return _tax_record_read(record)
+    return response
 
 
 @router.get(
