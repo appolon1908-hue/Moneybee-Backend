@@ -101,7 +101,24 @@ jobs:
         run: python -m pytest -q
       - name: Migration round-trip and OpenAPI gates
         run: |
-          alembic downgrade -1
+          previous_revision="$(
+            python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+          heads = scripts.get_heads()
+          if len(heads) != 1:
+              raise SystemExit(f"Expected one head, found {heads}")
+          parent = scripts.get_revision(heads[0]).down_revision
+          if not isinstance(parent, str):
+              raise SystemExit(f"Head {heads[0]} does not have one parent: {parent!r}")
+          print(parent)
+          PY
+          )"
+          test -n "$previous_revision"
+          echo "ROUND_TRIP_PARENT=$previous_revision"
+          alembic downgrade "$previous_revision"
           alembic upgrade head
           python scripts/verify_openapi_contract.py
           python scripts/generate_endpoint_catalog.py --check
