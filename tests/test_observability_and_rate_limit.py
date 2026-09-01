@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.rate_limit import InMemoryRateLimitMiddleware, _bucket_for_path
+from app.rate_limit import InMemoryRateLimitMiddleware, _bucket_for_path, reset_rate_limit_state
 
 
 def test_unhandled_exception_returns_problem_json_and_logs(caplog):
@@ -76,6 +76,7 @@ def test_rate_limit_blocks_after_configured_threshold():
     async def ok(request):
         return PlainTextResponse("ok")
 
+    reset_rate_limit_state()
     inner = Starlette(routes=[Route("/api/v2/public/ping", ok)])
     limited = InMemoryRateLimitMiddleware(inner, limits_per_minute={"public": 2, "webhook": 2})
 
@@ -89,3 +90,4 @@ def test_rate_limit_blocks_after_configured_threshold():
     assert third.status_code == 429
     assert third.headers["content-type"] == "application/problem+json"
     assert "Retry-After" in third.headers
+    reset_rate_limit_state()

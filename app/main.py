@@ -92,10 +92,12 @@ def _api_v1_sunset_http_date() -> str:
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    correlation_id = request.headers.get("X-Correlation-ID", request_id)
     bind_request_id(request_id)
     timer = Timer()
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     if request.url.path.startswith("/api/v1/"):

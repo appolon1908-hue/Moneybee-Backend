@@ -15,12 +15,16 @@ RATE_LIMITED_PREFIXES: dict[str, str] = {
     "/api/v1/webhooks/": "webhook",
 }
 
-_LIMITS_PER_MINUTE: dict[str, int] = {
-    "public": settings.public_rate_limit_per_minute,
-    "webhook": settings.webhook_rate_limit_per_minute,
-}
+_hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
-WINDOW_SECONDS = 60.0
+
+def reset_rate_limit_state() -> None:
+    """Clears in-memory hit tracking. Tests call this between cases so one
+    test's requests don't count against the next test's limit - the state
+    is process-global (module-level, not per-middleware-instance) since the
+    app builds a single InMemoryRateLimitMiddleware instance for its
+    lifetime and tests reuse the same app across cases."""
+    _hits.clear()
 
 
 def _bucket_for_path(path: str) -> str | None:
@@ -28,6 +32,15 @@ def _bucket_for_path(path: str) -> str | None:
         if path.startswith(prefix):
             return bucket
     return None
+
+
+def _limit_for_bucket(bucket: str, overrides: dict[str, int] | None) -> int:
+    if overrides is not None:
+        return overrides.get(bucket, 0)
+    return {
+        "public": settings.public_rate_limit_per_minute,
+        "webhook": settings.webhook_rate_limit_per_minute,
+    }[bucket]
 
 
 def _client_key(request: Request) -> str:
@@ -50,37 +63,43 @@ class InMemoryRateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, limits_per_minute: dict[str, int] | None = None) -> None:
         super().__init__(app)
-        self._limits = limits_per_minute or _LIMITS_PER_MINUTE
-        self._hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self._limit_overrides = limits_per_minute
 
     async def dispatch(self, request: Request, call_next):
+        if self._limit_overrides is None and not settings.rate_limit_enabled:
+            return await call_next(request)
+
         bucket = _bucket_for_path(request.url.path)
         if bucket is None:
             return await call_next(request)
 
-        limit = self._limits.get(bucket)
+        limit = _limit_for_bucket(bucket, self._limit_overrides)
         if not limit or limit <= 0:
             return await call_next(request)
 
+        window_seconds = settings.rate_limit_window_seconds
         key = (bucket, _client_key(request))
         now = time.monotonic()
-        hits = self._hits[key]
-        while hits and now - hits[0] > WINDOW_SECONDS:
+        hits = _hits[key]
+        while hits and now - hits[0] > window_seconds:
             hits.popleft()
 
         if len(hits) >= limit:
-            retry_after = max(1, int(WINDOW_SECONDS - (now - hits[0])))
+            retry_after = max(1, int(window_seconds - (now - hits[0])))
             return JSONResponse(
                 status_code=429,
                 media_type="application/problem+json",
                 content={
-                    "type": "https://api.moneybeeloan.com/problems/rate-limited",
+                    "type": "https://api.moneybeeloan.com/problems/rate-limit",
                     "title": "Too many requests",
                     "status": 429,
                     "detail": "Rate limit exceeded for this endpoint.",
                     "instance": request.url.path,
                 },
-                headers={"Retry-After": str(retry_after)},
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Limit": str(limit),
+                },
             )
 
         hits.append(now)

@@ -43,16 +43,14 @@ class Settings(BaseSettings):
     )
     provider_webhook_secrets_json: str = "{}"
     provider_webhook_tolerance_seconds: int = 300
-    rate_limit_enabled: bool = True
-    rate_limit_window_seconds: int = 60
-    public_rate_limit_per_minute: int = 120
-    webhook_rate_limit_per_minute: int = 240
 
     field_encryption_keys_json: str = "{}"
     field_encryption_active_key_version: str | None = None
     provider_timeout_seconds: float = 30.0
 
     log_level: str = "INFO"
+    rate_limit_enabled: bool = True
+    rate_limit_window_seconds: int = 60
     public_rate_limit_per_minute: int = 60
     webhook_rate_limit_per_minute: int = 120
     trust_forwarded_for: bool = False
