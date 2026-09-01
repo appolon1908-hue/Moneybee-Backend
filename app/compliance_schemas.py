@@ -62,9 +62,14 @@ class CommissionTaxRecordPage(BaseModel):
     has_more: bool
 
 
-class CommissionTaxRecordTinInput(StrictComplianceCommand):
+class StrictCommissionTaxRecordTinInput(StrictComplianceCommand):
     recipient_name: str = Field(min_length=1, max_length=255)
     tin: str = Field(min_length=9, max_length=20)
+
+
+# The route imports this public alias while OpenAPI uses the distinct class name,
+# preventing a collision with the legacy compatibility command in app.schemas.
+CommissionTaxRecordTinInput = StrictCommissionTaxRecordTinInput
 
 
 class CommissionTaxRecordFilingInput(StrictComplianceCommand):
