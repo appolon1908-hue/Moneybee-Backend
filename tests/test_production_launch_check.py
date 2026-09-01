@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -15,9 +16,20 @@ def load_checker():
     return module
 
 
+def frontend_root() -> Path:
+    configured = os.environ.get("MONEYBEE_FRONTEND_ROOT")
+    if configured:
+        return Path(configured)
+    repository_root = Path(__file__).resolve().parents[1]
+    embedded_checkout = repository_root / "Moneybee-frontend-"
+    if embedded_checkout.exists():
+        return embedded_checkout
+    return repository_root.parent / "Moneybee-frontend-"
+
+
 def test_launch_check_separates_repo_ready_from_external_blockers():
     checker = load_checker()
-    frontend_root = Path(__file__).resolve().parents[2] / "Moneybee-frontend-"
+    frontend = frontend_root()
     evidence = checker.load_evidence(
         Path(__file__).resolve().parents[1]
         / "docs"
@@ -26,7 +38,7 @@ def test_launch_check_separates_repo_ready_from_external_blockers():
     )
 
     checks = [
-        *checker.repo_marketing_checks(frontend_root / "apps" / "marketing"),
+        *checker.repo_marketing_checks(frontend / "apps" / "marketing"),
         *checker.identity_email_checks(evidence),
         *checker.external_approval_checks(evidence),
     ]
