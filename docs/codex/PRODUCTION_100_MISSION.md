@@ -220,6 +220,45 @@ commission-rate defaults recorded in the spec doc.
       `CONNECTED` on `LOGIN_REPAIRED`) rather than through the outbox,
       since it's a plain internal write with no external delivery/retry
       semantics to justify that pattern.
+- [x] **Compliance: adverse-action notices, commercial-financing
+      disclosures, 1099 commission tax records** — pass: `2ac9ac0`. The
+      system review's compliance finding: a grep for "adverse action",
+      "ECOA", "Reg B", "1099", or "license" across the whole backend
+      returned zero matches anywhere. Added `app/compliance_models.py` /
+      `app/compliance_service.py` (migration `20260901_0022`) covering all
+      three:
+      - Adverse-action notices generate automatically on a lender's
+        `DECLINE` decision (`app/portal/lender.py`), covering Reg B Sec.
+        1002.9(a)(2)'s required elements (creditor identity, principal
+        reasons, the ECOA notice reproduced from 12 CFR Part 1002 Appendix
+        C). Does **not** cover the >$1MM-revenue business-credit exception
+        (Sec. 1002.9(a)(3)) or FCRA score-disclosure triggers — flagged
+        explicitly in the generator's docstring, not silently assumed.
+      - Commercial-financing disclosures generate automatically on offer
+        creation (`app/marketplace_routes.py`), computing amount financed,
+        finance charge, total repayment, and an APR (estimated from the
+        finance charge for factor-rate offers) per the model California SB
+        1235 follows. Does **not** select a state-specific
+        template/layout/eligibility threshold — jurisdiction is recorded
+        informationally pending real legal review of state variants.
+      - 1099 commission tax records aggregate `CommissionSplit` amounts per
+        recipient per tax year via a new admin-triggered generation
+        endpoint, applying the federal $600 (IRC Sec. 6041) threshold.
+        Idempotent — recomputes rather than accumulates on re-run.
+        Recipient TINs are stored via the versioned field encryption from
+        the Phase 1 key-rotation item and never returned in the clear.
+        Does **not** file with the IRS; this produces the input data a real
+        e-file integration (Track1099/Tax1099/IRS FIRE) would need, not the
+        filing itself. Docstring documents the attribution caveat: there's
+        no dedicated commission-receipt/disbursement-date table in this
+        schema (`POST /admin/commissions/{id}/receipts` just increments
+        `Commission.received_amount`), so `CommissionSplit.created_at` is
+        used as a tax-year proxy rather than a true payment date.
+      6 new admin endpoints, 6 new schemas, new additive OpenAPI manifest
+      (`docs/openapi/compliance-records-manifest.json`). Tested end-to-end
+      through the real API in `tests/test_adverse_action_notice.py`,
+      `tests/test_commercial_financing_disclosure.py`, and
+      `tests/test_commission_tax_records.py`.
 
 Also fixed one live bug found auditing an unrelated file during the
 payment-adapter pass: `app/integrations/registry.py`'s "bank" health
@@ -253,9 +292,9 @@ that commit for detail.
       (`app/auth.py`) and every new endpoint added in this mission.
 - [ ] Remaining target DB tables per the spec's "Database target" section
       not yet present — reconcile against `migrations/versions/` and add
-      what's missing (compliance: versioned disclosures/acceptances,
-      adverse actions; communications: templates/preferences; integrations:
-      reconciliation).
+      what's missing (compliance's adverse-action/disclosure/1099 tables
+      landed this pass — see the compliance item above; still open:
+      communications: templates/preferences; integrations: reconciliation).
 - [x] **Code-review hardening pass on the funding/contract/commission/renewal
       engine** — 4 findings, all closed, pass: `615a7de`:
       - `funding_funds_sent` / `confirm_funding`: a second call with a
