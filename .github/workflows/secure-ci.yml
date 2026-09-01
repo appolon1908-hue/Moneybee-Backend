@@ -29,6 +29,8 @@ jobs:
   application:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    outputs:
+      catalog_artifact_id: ${{ steps.upload-catalog.outputs.artifact-id }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -72,6 +74,7 @@ jobs:
       - name: Render endpoint catalog candidate
         run: python scripts/generate_endpoint_catalog.py
       - name: Upload endpoint catalog candidate
+        id: upload-catalog
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -90,6 +93,51 @@ jobs:
           alembic downgrade 20260823_0012
           alembic upgrade head
           python scripts/verify_openapi_contract.py
+
+  catalog-sync:
+    name: Sync exact generated endpoint catalog
+    needs: application
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.head_ref == 'claude/system-review-architecture-8vo66p' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.application.outputs.catalog_artifact_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Download exact generated catalog artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.application.outputs.catalog_artifact_id }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/moneybee-catalog /tmp/moneybee-catalog.zip
+          mkdir -p /tmp/moneybee-catalog
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > /tmp/moneybee-catalog.zip
+          unzip -q /tmp/moneybee-catalog.zip -d /tmp/moneybee-catalog
+          test -f /tmp/moneybee-catalog/API_ENDPOINT_CATALOG.md
+          cp /tmp/moneybee-catalog/API_ENDPOINT_CATALOG.md docs/API_ENDPOINT_CATALOG.md
+      - name: Commit generated catalog only when drift exists
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/API_ENDPOINT_CATALOG.md; then
+            echo "Endpoint catalog is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/API_ENDPOINT_CATALOG.md
+          git commit -m "docs(api): regenerate endpoint catalog"
+          git push origin "HEAD:${HEAD_REF}"
 
   deployment-policy:
     runs-on: ubuntu-latest
