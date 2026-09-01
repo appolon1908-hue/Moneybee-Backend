@@ -28,6 +28,7 @@
 | Migration | Classification | Reason |
 |---|---|---|
 | Existing chain through `0022` | SHORT LOCK | Rehearsal evidence exists, but lock behavior must be measured again against the current approved restore. |
+| `20260901_0022a` credential-reference stage | ONLINE SAFE | Adds one nullable compatibility column and creates the supported boundary for a separately approved reference-only backfill. |
 | `20260901_0023` bank credential reference | MAINTENANCE WINDOW REQUIRED | Fails closed on unresolved legacy credential rows and requires an approved credential-reference transition. Downgrade refuses to strand external references. |
 | `20260901_0024` provider retry and notice uniqueness | SHORT LOCK | Adds nullable retry columns and a uniqueness constraint after rejecting duplicate legacy notice evidence. Re-measure on current restored data. |
 

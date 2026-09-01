@@ -22,6 +22,7 @@ from app.integrations.middleware import (
     sign_outbound_event,
 )
 from app.integrations.middesk import MiddeskAdapter
+from app.integrations.providers import DocuSignAdapter
 from app.integrations.registry import provider_statuses
 from app.main import app
 from app.notification_policy import channels_for_event
@@ -47,6 +48,26 @@ def test_moneybee_database_stores_only_bank_credential_references():
     assert "credential_reference" in columns
     assert "access_token" not in columns
     assert "access_token_ciphertext" not in columns
+
+
+async def test_docusign_envelope_creation_uses_stable_provider_idempotency(monkeypatch):
+    captured = {}
+
+    async def fake_request(**kwargs):
+        captured.update(kwargs)
+        return {"envelopeId": "envelope-1"}
+
+    monkeypatch.setattr("app.integrations.providers.provider_request", fake_request)
+    monkeypatch.setattr(settings, "docusign_account_id", "account")
+    monkeypatch.setattr(settings, "docusign_access_token", "token")
+    monkeypatch.setattr(settings, "docusign_template_id", "template")
+    contract_id = str(uuid.uuid4())
+    await DocuSignAdapter().send_envelope(
+        contract_id=contract_id,
+        signer_email="signer@example.invalid",
+        signer_name="Signer",
+    )
+    assert captured["json"]["transactionId"] == contract_id
 
 
 def test_banking_adapter_api_fails_closed_without_ready_capability():

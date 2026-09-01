@@ -80,6 +80,31 @@ docker compose -f compose.data.yml -f compose.backend.yml -f compose.edge.yml co
 
 ## Migrate
 
+Bootstrap or reconcile the database identities first. This one-shot service
+uses the administrator secret only for provisioning; it passes separate
+secret-backed passwords to the idempotent role/ownership script and is never
+part of API or worker runtime:
+
+```bash
+docker compose -f compose.data.yml --profile bootstrap run --rm role-bootstrap
+```
+
+For an existing database with bank-provider rows, first stop at the supported
+compatibility boundary, create and verify each external secret, and apply an
+approved reference-only mapping (never credential values):
+
+```bash
+docker compose -f compose.data.yml -f compose.backend.yml --profile migrate run --rm \
+  migrate alembic upgrade 20260901_0022a
+python ../ops/stage-bank-credential-references.py \
+  --database-url "$APPROVED_MIGRATOR_DATABASE_URL" \
+  --mapping /approved/change-evidence/bank-credential-references.json
+```
+
+Rehearse and approve that write separately. Migration `0023` fails closed until
+every row has a verified `secret://` reference; it never copies or deletes a
+credential value.
+
 ```bash
 docker compose -f compose.data.yml -f compose.backend.yml --profile migrate up migrate
 ```

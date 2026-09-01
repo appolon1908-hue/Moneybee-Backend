@@ -23,6 +23,9 @@ PROPOSED_RUNTIME_ENV_FILE="${PROPOSED_RUNTIME_ENV_FILE:-/etc/moneybee/runtime.en
 PROPOSED_POSTGRES_DATA_PATH="${PROPOSED_POSTGRES_DATA_PATH:-/var/lib/moneybee/postgres}"
 PROPOSED_REDIS_DATA_PATH="${PROPOSED_REDIS_DATA_PATH:-/var/lib/moneybee/redis}"
 PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE="${PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE:-/etc/moneybee/secrets/postgres_admin_password}"
+PROPOSED_POSTGRES_MIGRATOR_PASSWORD_FILE="${PROPOSED_POSTGRES_MIGRATOR_PASSWORD_FILE:-/etc/moneybee/secrets/postgres_migrator_password}"
+PROPOSED_POSTGRES_RUNTIME_PASSWORD_FILE="${PROPOSED_POSTGRES_RUNTIME_PASSWORD_FILE:-/etc/moneybee/secrets/postgres_runtime_password}"
+PROPOSED_ROLES_SQL_PATH="${PROPOSED_ROLES_SQL_PATH:-/opt/moneybee/current/deploy/postgres/moneybee_roles.sql}"
 PROPOSED_REDIS_ACL_FILE="${PROPOSED_REDIS_ACL_FILE:-/etc/moneybee/secrets/redis.acl}"
 PROPOSED_CADDY_DATA_PATH="${PROPOSED_CADDY_DATA_PATH:-/var/lib/moneybee/caddy/data}"
 PROPOSED_CADDY_CONFIG_PATH="${PROPOSED_CADDY_CONFIG_PATH:-/var/lib/moneybee/caddy/config}"
@@ -47,6 +50,9 @@ ssh \
   "$PROPOSED_POSTGRES_DATA_PATH" \
   "$PROPOSED_REDIS_DATA_PATH" \
   "$PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE" \
+  "$PROPOSED_POSTGRES_MIGRATOR_PASSWORD_FILE" \
+  "$PROPOSED_POSTGRES_RUNTIME_PASSWORD_FILE" \
+  "$PROPOSED_ROLES_SQL_PATH" \
   "$PROPOSED_REDIS_ACL_FILE" \
   "$PROPOSED_CADDY_DATA_PATH" \
   "$PROPOSED_CADDY_CONFIG_PATH" \
@@ -118,11 +124,14 @@ path_report runtime_env_file "$4"
 path_report postgres_data_path "$5"
 path_report redis_data_path "$6"
 path_report postgres_admin_password_file "$7"
-path_report redis_acl_file "$8"
-path_report caddy_data_path "$9"
-path_report caddy_config_path "${10}"
-path_report clamav_database_path "${11}"
-path_report backup_root "${12}"
+path_report postgres_migrator_password_file "$8"
+path_report postgres_runtime_password_file "$9"
+path_report roles_sql_path "${10}"
+path_report redis_acl_file "${11}"
+path_report caddy_data_path "${12}"
+path_report caddy_config_path "${13}"
+path_report clamav_database_path "${14}"
+path_report backup_root "${15}"
 
 printf '%s\n' 'mounts.begin'
 findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null || true
@@ -140,6 +149,9 @@ PROPOSED_RUNTIME_ENV_FILE="$PROPOSED_RUNTIME_ENV_FILE" \
 PROPOSED_POSTGRES_DATA_PATH="$PROPOSED_POSTGRES_DATA_PATH" \
 PROPOSED_REDIS_DATA_PATH="$PROPOSED_REDIS_DATA_PATH" \
 PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE="$PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE" \
+PROPOSED_POSTGRES_MIGRATOR_PASSWORD_FILE="$PROPOSED_POSTGRES_MIGRATOR_PASSWORD_FILE" \
+PROPOSED_POSTGRES_RUNTIME_PASSWORD_FILE="$PROPOSED_POSTGRES_RUNTIME_PASSWORD_FILE" \
+PROPOSED_ROLES_SQL_PATH="$PROPOSED_ROLES_SQL_PATH" \
 PROPOSED_REDIS_ACL_FILE="$PROPOSED_REDIS_ACL_FILE" \
 PROPOSED_CADDY_DATA_PATH="$PROPOSED_CADDY_DATA_PATH" \
 PROPOSED_CADDY_CONFIG_PATH="$PROPOSED_CADDY_CONFIG_PATH" \
@@ -179,6 +191,9 @@ candidate = {
         "postgres_data_path": os.environ["PROPOSED_POSTGRES_DATA_PATH"],
         "redis_data_path": os.environ["PROPOSED_REDIS_DATA_PATH"],
         "postgres_admin_password_file": os.environ["PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE"],
+        "postgres_migrator_password_file": os.environ["PROPOSED_POSTGRES_MIGRATOR_PASSWORD_FILE"],
+        "postgres_runtime_password_file": os.environ["PROPOSED_POSTGRES_RUNTIME_PASSWORD_FILE"],
+        "roles_sql_path": os.environ["PROPOSED_ROLES_SQL_PATH"],
         "redis_acl_file": os.environ["PROPOSED_REDIS_ACL_FILE"],
         "caddy_data_path": os.environ["PROPOSED_CADDY_DATA_PATH"],
         "caddy_config_path": os.environ["PROPOSED_CADDY_CONFIG_PATH"],

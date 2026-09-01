@@ -821,9 +821,6 @@ async def create_commission_adjustment(
             status_code=422,
             detail="Adjustment amount must be non-zero",
         )
-    if await db.get(models.Commission, commission_id) is None:
-        raise HTTPException(status_code=404, detail="Commission not found")
-
     route = f"/admin/commissions/{commission_id}/adjustments"
     request_hash = hashlib.sha256(
         json.dumps(
@@ -849,6 +846,21 @@ async def create_commission_adjustment(
             raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
         return replay_adjustment
 
+    commission = await _load_commission_or_404(db, commission_id)
+    current_net = await _net_expected_amount(db, commission)
+    adjusted_net = current_net + payload.amount
+    split_total = await db.scalar(
+        select(func.coalesce(func.sum(models.CommissionSplit.amount), 0)).where(
+            models.CommissionSplit.commission_id == commission_id
+        )
+    )
+    if adjusted_net <= 0:
+        raise HTTPException(status_code=422, detail="Adjustment would make net commission non-positive")
+    if adjusted_net < commission.received_amount:
+        raise HTTPException(status_code=422, detail="Adjustment would make receipts exceed net commission")
+    if adjusted_net < split_total:
+        raise HTTPException(status_code=422, detail="Adjustment would make splits exceed net commission")
+
     adjustment = models.CommissionAdjustment(
         commission_id=commission_id,
         adjustment_type=payload.adjustment_type,
@@ -857,6 +869,12 @@ async def create_commission_adjustment(
         created_by=user.subject,
     )
     db.add(adjustment)
+    if commission.received_amount >= adjusted_net:
+        commission.status = "RECEIVED"
+    elif commission.received_amount > 0:
+        commission.status = "PARTIALLY_RECEIVED"
+    else:
+        commission.status = "EXPECTED"
     db.add(
         models.AuditEvent(
             actor_id=user.subject,

@@ -92,6 +92,7 @@ jobs:
         run: |
           sudo -u postgres createdb --owner=moneybee_migrator moneybee_legacy
           sudo -u postgres createdb --owner=moneybee_migrator moneybee_compatible
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_populated
           for database in moneybee_legacy moneybee_compatible; do
             DATABASE_URL="postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/$database" alembic upgrade 20260901_0022
             sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$database" -c \
@@ -126,6 +127,23 @@ jobs:
           DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic upgrade head
           after="$(PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_compatible -Atc "select column_name from information_schema.columns where table_name='bank_provider_states' order by ordinal_position")"
           test "$before" = "$after"
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' alembic upgrade 20260901_0022
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_populated -c \
+            'ALTER TABLE bank_provider_states RENAME COLUMN credential_reference TO access_token_ciphertext; ALTER TABLE bank_provider_states ALTER COLUMN access_token_ciphertext TYPE text;'
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' alembic upgrade 20260901_0022a
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_populated <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO bank_provider_states
+            (id, created_at, updated_at, connection_id, provider, access_token_ciphertext, metadata_payload)
+          VALUES
+            ('00000000-0000-0000-0000-000000000027', now(), now(), '00000000-0000-0000-0000-000000000028', 'fixture', 'legacy-fixture', '{}');
+          SET session_replication_role = origin;
+          SQL
+          printf '{"00000000-0000-0000-0000-000000000027":"secret://ci/verified-fixture"}\n' >/tmp/moneybee-credential-map.json
+          python ops/stage-bank-credential-references.py \
+            --database-url 'postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' \
+            --mapping /tmp/moneybee-credential-map.json
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' alembic upgrade head
       - name: Test identity downgrade and current forward-fix path
         run: |
           alembic downgrade 20260823_0011

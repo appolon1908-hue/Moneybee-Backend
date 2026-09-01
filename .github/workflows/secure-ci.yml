@@ -92,152 +92,6 @@ jobs:
       - name: OpenAPI gate
         run: python scripts/verify_openapi_contract.py
 
-  authenticated-acknowledgment-hardening:
-    name: Bind disclosure acknowledgment to authenticated principal
-    needs: application
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.head_ref == 'claude/system-review-architecture-8vo66p' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
-    env:
-      APP_ENV: test
-      DATABASE_URL: sqlite+aiosqlite:///./compliance-hardening.db
-      AUTO_CREATE_SCHEMA: "true"
-      LOCAL_AUTH_BYPASS: "true"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.head_ref }}
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install reviewed development dependencies
-        run: |
-          python -m pip install --upgrade pip wheel setuptools
-          python -m pip install -e ".[dev]"
-          python -m pip check
-      - name: Apply fixed authenticated-ownership patch
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              target = Path(path)
-              text = target.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one exact patch target, found {count}")
-              target.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-          replace_once(
-              "app/schemas.py",
-              '''class CommercialFinancingAcknowledgeInput(BaseModel):
-              acknowledged_by: str = Field(min_length=1, max_length=255)
-
-
-          ''',
-              "",
-          )
-          replace_once(
-              "app/admin_routes.py",
-              '''async def acknowledge_commercial_financing_disclosure(
-              offer_id: uuid.UUID,
-              payload: schemas.CommercialFinancingAcknowledgeInput,
-              db: Db,
-              user: Annotated[Principal, Depends(require_permission("application.edit"))],
-          ):
-          ''',
-              '''async def acknowledge_commercial_financing_disclosure(
-              offer_id: uuid.UUID,
-              db: Db,
-              user: Annotated[Principal, Depends(require_permission("application.edit"))],
-          ):
-          ''',
-          )
-          replace_once(
-              "app/admin_routes.py",
-              "        disclosure.acknowledged_by = payload.acknowledged_by\n",
-              "        disclosure.acknowledged_by = user.subject\n",
-          )
-          replace_once(
-              "tests/test_commercial_financing_disclosure.py",
-              '''        acknowledge = client.post(
-              f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
-              json={"acknowledged_by": "borrower-portal"},
-          )
-          assert acknowledge.status_code == 200
-          assert acknowledge.json()["acknowledged_at"] is not None
-          assert acknowledge.json()["acknowledged_by"] == "borrower-portal"
-          ''',
-              '''        acknowledge = client.post(
-              f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
-              json={"acknowledged_by": "spoofed-client-value"},
-          )
-          assert acknowledge.status_code == 200
-          assert acknowledge.json()["acknowledged_at"] is not None
-          assert acknowledge.json()["acknowledged_by"] == "local-admin"
-          ''',
-          )
-          PY
-      - name: Regenerate reviewed compliance contract evidence
-        run: |
-          python - <<'PY'
-          import hashlib
-          import json
-          from pathlib import Path
-
-          from app.main import app
-
-          path = "/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
-          schema = app.openapi()
-          digest = hashlib.sha256(
-              json.dumps(schema["paths"][path], sort_keys=True, separators=(",", ":")).encode()
-          ).hexdigest()
-          if "CommercialFinancingAcknowledgeInput" in schema.get("components", {}).get("schemas", {}):
-              raise SystemExit("spoofable acknowledgment request schema remains in OpenAPI")
-
-          manifest_path = Path("docs/openapi/compliance-records-manifest.json")
-          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-          manifest["paths"][path] = digest
-          manifest["schemas"].pop("CommercialFinancingAcknowledgeInput", None)
-          manifest_path.write_text(
-              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-              encoding="utf-8",
-          )
-          print(f"Authenticated acknowledgment path digest: {digest}")
-          PY
-          python scripts/generate_endpoint_catalog.py
-      - name: Validate hardened API and contract
-        run: |
-          python -m ruff check app tests scripts migrations ops
-          python -m pytest -q tests/test_commercial_financing_disclosure.py
-          python scripts/verify_openapi_contract.py
-          python scripts/generate_endpoint_catalog.py --check
-      - name: Commit the reviewed security patch
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            app/admin_routes.py \
-            app/schemas.py \
-            tests/test_commercial_financing_disclosure.py \
-            docs/openapi/compliance-records-manifest.json \
-            docs/API_ENDPOINT_CATALOG.md
-          if git diff --cached --quiet; then
-            echo "Authenticated acknowledgment ownership is already hardened."
-            exit 0
-          fi
-          git commit -m "fix(compliance): bind acknowledgment to authenticated principal"
-          git push origin "HEAD:${HEAD_REF}"
-
   deployment-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -334,6 +188,8 @@ jobs:
           mkdir -p /tmp/moneybee/postgres /tmp/moneybee/redis \
             /tmp/moneybee/caddy-data /tmp/moneybee/caddy-config /tmp/moneybee/clamav
           printf 'test-password' >/tmp/moneybee/postgres_password
+          printf 'migrator-password' >/tmp/moneybee/postgres_migrator_password
+          printf 'runtime-password' >/tmp/moneybee/postgres_runtime_password
           printf 'user health on >test-password +ping ~*\nuser default off\n' >/tmp/moneybee/redis.acl
           printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/migrator.env
           printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/runtime.env
@@ -353,6 +209,9 @@ jobs:
           export MONEYBEE_POSTGRES_DATA_PATH=/tmp/moneybee/postgres
           export MONEYBEE_REDIS_DATA_PATH=/tmp/moneybee/redis
           export MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE=/tmp/moneybee/postgres_password
+          export MONEYBEE_POSTGRES_MIGRATOR_PASSWORD_FILE=/tmp/moneybee/postgres_migrator_password
+          export MONEYBEE_POSTGRES_RUNTIME_PASSWORD_FILE=/tmp/moneybee/postgres_runtime_password
+          export MONEYBEE_ROLES_SQL_PATH="$PWD/deploy/postgres/moneybee_roles.sql"
           export MONEYBEE_REDIS_ACL_FILE=/tmp/moneybee/redis.acl
           export MONEYBEE_CLAMAV_DATABASE_PATH=/tmp/moneybee/clamav
           export MONEYBEE_CADDY_DATA_PATH=/tmp/moneybee/caddy-data

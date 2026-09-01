@@ -107,6 +107,11 @@ class DocuSignAdapter:
                 "Content-Type": "application/json",
             },
             json={
+                # DocuSign uses transactionId to deduplicate create-envelope
+                # retries. The contract UUID is stable across worker crashes
+                # and lost responses, so an accepted request is reconciled
+                # instead of producing a second legal envelope.
+                "transactionId": contract_id,
                 "templateId": settings.docusign_template_id,
                 "templateRoles": [
                     {

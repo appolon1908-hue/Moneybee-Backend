@@ -336,3 +336,78 @@ async def test_postgres_concurrent_splits_cannot_exceed_parent_capacity():
         assert sorted(result.status_code for result in results) == [201, 422]
         stored = client.get(f"/api/v2/admin/commissions/{commission_id}/splits").json()
         assert sum(float(item["amount"]) for item in stored) == 2500.00
+
+
+async def test_adjustment_reconciles_status_and_cannot_invalidate_committed_aggregates():
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+        received = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/receipts",
+            json={"amount": "4000.00", "reference": "fully-paid"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert received.status_code == 200
+
+        increase = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/adjustments",
+            json={"adjustment_type": "CORRECTION", "amount": "100.00", "reason": "Approved correction"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert increase.status_code == 201
+        current = next(
+            item for item in client.get("/api/v2/admin/commissions").json()
+            if item["id"] == commission_id
+        )
+        assert current["status"] == "PARTIALLY_RECEIVED"
+
+        invalid = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/adjustments",
+            json={"adjustment_type": "CORRECTION", "amount": "-101.00", "reason": "Invalid reduction"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert invalid.status_code == 422
+
+
+async def test_postgres_concurrent_adjustment_and_receipt_preserve_net_invariant():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL row-lock evidence")
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+
+        receipt, adjustment = await asyncio.gather(
+            asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/receipts",
+                json={"amount": "3500.00", "reference": "concurrent-adjustment"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ),
+            asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/adjustments",
+                json={"adjustment_type": "CORRECTION", "amount": "-1000.00", "reason": "Concurrent correction"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ),
+        )
+        assert sorted((receipt.status_code, adjustment.status_code)) in ([200, 422], [201, 422])
+        current = next(
+            item for item in client.get("/api/v2/admin/commissions").json()
+            if item["id"] == commission_id
+        )
+        async with SessionLocal() as db:
+            commission = await db.get(models.Commission, uuid.UUID(commission_id))
+            net = await db.scalar(
+                select(
+                    models.Commission.expected_amount
+                    + func.coalesce(func.sum(models.CommissionAdjustment.amount), 0)
+                )
+                .select_from(models.Commission)
+                .outerjoin(
+                    models.CommissionAdjustment,
+                    models.CommissionAdjustment.commission_id == models.Commission.id,
+                )
+                .where(models.Commission.id == uuid.UUID(commission_id))
+                .group_by(models.Commission.expected_amount)
+            )
+            assert commission is not None
+            assert commission.received_amount <= net
+            assert current["received_amount"] == str(commission.received_amount)

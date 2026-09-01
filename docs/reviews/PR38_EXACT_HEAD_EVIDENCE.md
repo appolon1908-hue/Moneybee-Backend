@@ -10,6 +10,9 @@ external delivery/provider writes remain disabled by default.
   and uses Alembic batch operations on SQLite. Its upgrade still refuses legacy
   plaintext credential rows and its downgrade still refuses to strand external
   credential references.
+- Migration `20260901_0022a` provides an explicit compatibility boundary for
+  populated legacy credentials. The reference-only staging tool verifies a
+  complete `secret://` mapping before `0023` may proceed.
 - Migration `20260901_0024` adds durable provider retry/lease state and prevents
   duplicate adverse-action notices for one underwriting review.
 - `moneybee_migrator` owns the application schema and existing application
@@ -22,7 +25,8 @@ external delivery/provider writes remain disabled by default.
   rounding, and documented monthly/weekly/biweekly/semimonthly/daily
   conventions. Irregular schedules require an authoritative total.
 - PostgreSQL row locks serialize commission receipts and split-capacity checks.
-  Receipt overpayment is rejected explicitly.
+  Adjustments use the same parent lock, cannot invalidate committed receipts or
+  splits, and recompute status atomically. Receipt overpayment is rejected.
 - Document and e-sign provider jobs persist attempts, bounded exponential
   backoff with jitter, retry time, leases, safe errors, and terminal state.
 - Compose files, locks, renderer, preflight validation, and CI use one canonical
@@ -30,6 +34,10 @@ external delivery/provider writes remain disabled by default.
   image references. No target-server source build is permitted.
 - Release images do not trust proxy headers in Uvicorn; the application-owned
   proxy policy remains authoritative.
+- A secret-backed one-shot Compose bootstrap service provisions/transfers roles
+  before Alembic; API and worker never receive the administrator identity.
+- DocuSign envelope creates carry the stable contract UUID as the provider
+  transaction ID, closing the accepted-response-lost duplicate window.
 
 ## Migration contract
 
@@ -73,8 +81,8 @@ python ops/verify-compose-contract.py
 
 Observed before the final commit:
 
-- SQLite/application tests: 230 passed, 7 skipped.
-- Clean PostgreSQL/runtime tests: 237 passed.
+- SQLite/application tests: 232 passed, 8 skipped.
+- Clean PostgreSQL/runtime tests: 240 passed.
 - API smoke: 56 passed, 4 intentionally unavailable surfaces skipped.
 - OpenAPI: 159 canonical paths and 39 reviewed additions.
 - Identity/email repository readiness: 20 passed, 21 operator-only checks
