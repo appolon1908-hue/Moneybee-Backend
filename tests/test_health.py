@@ -11,6 +11,15 @@ from app.main import app
 
 def test_liveness():
     with TestClient(app) as client:
-        response = client.get("/health/live")
+        response = client.get(
+            "/health/live",
+            headers={
+                "X-Request-ID": "test-request-id",
+                "X-Correlation-ID": "test-correlation-id",
+            },
+        )
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "environment": "test"}
+    assert response.headers["X-Request-ID"] == "test-request-id"
+    assert response.headers["X-Correlation-ID"] == "test-correlation-id"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"

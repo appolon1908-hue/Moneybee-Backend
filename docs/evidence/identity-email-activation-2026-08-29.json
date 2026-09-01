@@ -1,0 +1,58 @@
+{
+  "$schema": "../readiness/evidence.schema.json",
+  "gate": "AUTH_E2E",
+  "status": "PARTIAL",
+  "source_sha": "497fe74",
+  "environment": "production",
+  "evidence_type": "identity-email-domain-activation-attestation",
+  "evidence_reference": "fully-connected-domain-activation-guide-2026-08-29.md and Ralph Appolon identity-email attestation received 2026-08-29 03:48 America/La_Paz",
+  "generated_at": "2026-08-29T08:18:00Z",
+  "expires_at": "2026-09-28T08:18:00Z",
+  "approved_by": "Ralph Appolon",
+  "metadata": {
+    "scope": "MoneyBee only",
+    "canonical_identity_domain": "moneybeeloan.com",
+    "canonical_sender": "accounts@moneybeeloan.com",
+    "reply_to": "support@moneybeeloan.com",
+    "smtp_host": "mail.klyrow.com",
+    "smtp_port": 25,
+    "smtp_starttls": true,
+    "secrets_policy": "SMTP username/password are excluded from Git and must be read from approved secret storage only.",
+    "excluded_domains": [
+      "beyvra.com",
+      "booked4seasons.com"
+    ],
+    "checks": {
+      "KEYCLOAK_REGISTRATION_ENABLED": "PASS",
+      "KEYCLOAK_RESET_PASSWORD_ENABLED": "PASS",
+      "KEYCLOAK_EMAIL_VERIFICATION": "PASS",
+      "MONEYBEE_FROM_DOMAIN": "moneybeeloan.com",
+      "MONEYBEE_DOMAIN_FULLY_CONNECTED": "PASS",
+      "KLYROW_SMTP_CONNECTIVITY": "PASS",
+      "STARTTLS": "PASS",
+      "SPF": "PASS",
+      "DKIM": "PASS",
+      "DMARC": "PASS",
+      "DIRECT_APP_SMTP_ACCESS": "BLOCKED",
+      "DIRECT_APP_KLYROW_ACCESS": "BLOCKED",
+      "RESET_TOKEN_OUTSIDE_KEYCLOAK": "BLOCKED",
+      "PLAINTEXT_SMTP_SECRET_IN_GIT": "BLOCKED"
+    },
+    "not_attested": [
+      "MONEYBEE_POSTAL_DKIM_ROTATED",
+      "MONEYBEE_POSTAL_OLD_SELECTOR_REMOVED",
+      "MONEYBEE_POSTAL_BOUNCE_HANDLING",
+      "MONEYBEE_POSTAL_SUPPRESSION_HANDLING",
+      "KEYCLOAK_SMTP_TEST",
+      "KEYCLOAK_VERIFY_EMAIL_TEST",
+      "KEYCLOAK_PASSWORD_RESET_TEST",
+      "KEYCLOAK_EXPIRED_LINK_TEST",
+      "KEYCLOAK_WRONG_RECIPIENT_TEST",
+      "ACCOUNT_REGISTERED_OUTBOX",
+      "KLYROW_WELCOME_EMAIL_SANDBOX"
+    ],
+    "blocked_or_noncanonical": {
+      "booked4seasons.com": "Not MoneyBee scope; not fully connected according to supplied activation notes."
+    }
+  }
+}

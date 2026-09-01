@@ -4,7 +4,7 @@
     "/api/v2/admin/workspace": "d57e4c52a5dd4a78a2a0c318209f308f6379d68034fdb6365a85899def4cd1f7"
   },
   "schemas": {
-    "AdminWorkspace": "5d0dd88aa28cfbf463f2c0a71a4414e9103ac8e88e40b0fb7f3a53dec7adeac0"
+    "AdminWorkspace": "8b3c66aaaf20747b039377c9bc517c252b6c3fc4fa5faeb1c39155067932bed6"
   },
   "version": 1
 }

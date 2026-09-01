@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     )
     provider_webhook_secrets_json: str = "{}"
     provider_webhook_tolerance_seconds: int = 300
+    rate_limit_enabled: bool = True
+    rate_limit_window_seconds: int = 60
+    public_rate_limit_per_minute: int = 120
+    webhook_rate_limit_per_minute: int = 240
 
     field_encryption_keys_json: str = "{}"
     field_encryption_active_key_version: str | None = None

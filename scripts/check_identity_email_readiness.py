@@ -26,25 +26,32 @@ EXPECTED_SMTP_PLACEHOLDERS = {
     "password": "${KLYROW_SMTP_PASSWORD}",
 }
 
-LIVE_EVIDENCE_FLAGS = (
-    "MONEYBEE_POSTAL_DKIM_ROTATED",
-    "MONEYBEE_POSTAL_OLD_SELECTOR_REMOVED",
-    "MONEYBEE_POSTAL_SPF",
-    "MONEYBEE_POSTAL_DKIM",
-    "MONEYBEE_POSTAL_DMARC_ALIGNMENT",
-    "MONEYBEE_POSTAL_MX",
-    "MONEYBEE_POSTAL_RETURN_PATH",
-    "MONEYBEE_POSTAL_TLS",
-    "MONEYBEE_POSTAL_BOUNCE_HANDLING",
-    "MONEYBEE_POSTAL_SUPPRESSION_HANDLING",
-    "KEYCLOAK_SMTP_TEST",
-    "KEYCLOAK_VERIFY_EMAIL_TEST",
-    "KEYCLOAK_PASSWORD_RESET_TEST",
-    "KEYCLOAK_EXPIRED_LINK_TEST",
-    "KEYCLOAK_WRONG_RECIPIENT_TEST",
-    "ACCOUNT_REGISTERED_OUTBOX",
-    "KLYROW_WELCOME_EMAIL_SANDBOX",
-)
+LIVE_EVIDENCE_FLAGS = {
+    "MONEYBEE_POSTAL_DKIM_ROTATED": (),
+    "MONEYBEE_POSTAL_OLD_SELECTOR_REMOVED": (),
+    "MONEYBEE_POSTAL_SPF": ("SPF",),
+    "MONEYBEE_POSTAL_DKIM": ("DKIM",),
+    "MONEYBEE_POSTAL_DMARC_ALIGNMENT": ("DMARC",),
+    "MONEYBEE_POSTAL_MX": ("MONEYBEE_DOMAIN_FULLY_CONNECTED",),
+    "MONEYBEE_POSTAL_RETURN_PATH": ("MONEYBEE_DOMAIN_FULLY_CONNECTED",),
+    "MONEYBEE_POSTAL_TLS": ("STARTTLS",),
+    "MONEYBEE_POSTAL_BOUNCE_HANDLING": (),
+    "MONEYBEE_POSTAL_SUPPRESSION_HANDLING": (),
+    "KEYCLOAK_SMTP_TEST": (),
+    "KEYCLOAK_VERIFY_EMAIL_TEST": (),
+    "KEYCLOAK_PASSWORD_RESET_TEST": (),
+    "KEYCLOAK_EXPIRED_LINK_TEST": (),
+    "KEYCLOAK_WRONG_RECIPIENT_TEST": (),
+    "ACCOUNT_REGISTERED_OUTBOX": (),
+    "KLYROW_WELCOME_EMAIL_SANDBOX": (),
+}
+
+NEGATIVE_CONTROL_FLAGS = {
+    "DIRECT_APP_SMTP_ACCESS": "BLOCKED",
+    "DIRECT_APP_KLYROW_ACCESS": "BLOCKED",
+    "RESET_TOKEN_OUTSIDE_KEYCLOAK": "BLOCKED",
+    "PLAINTEXT_SMTP_SECRET_IN_GIT": "BLOCKED",
+}
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,24 @@ def skip_check(name: str, detail: str) -> CheckResult:
 
 def load_keycloak_policy() -> dict[str, Any]:
     return json.loads(KEYCLOAK_POLICY.read_text(encoding="utf-8"))
+
+
+def load_evidence_file(path: str | None) -> dict[str, str]:
+    if not path:
+        return {}
+    evidence_path = Path(path)
+    if not evidence_path.is_absolute():
+        evidence_path = ROOT / evidence_path
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    metadata = payload.get("metadata", {})
+    checks = metadata.get("checks", {})
+    if not isinstance(checks, dict):
+        raise ValueError("Evidence metadata.checks must be an object")
+    return {
+        str(key).strip().upper(): str(value).strip().upper()
+        for key, value in checks.items()
+        if str(key).strip()
+    }
 
 
 def check_keycloak_policy(policy: dict[str, Any]) -> list[CheckResult]:
@@ -146,14 +171,44 @@ def check_default_provider_locks() -> list[CheckResult]:
     return results
 
 
-def check_live_evidence(require_live_evidence: bool) -> list[CheckResult]:
+def evidence_value(
+    evidence: dict[str, str],
+    name: str,
+    aliases: tuple[str, ...] = (),
+) -> str:
+    keys = (name, *aliases)
+    for key in keys:
+        normalized = key.strip().upper()
+        value = os.environ.get(normalized, "").strip().upper()
+        if value:
+            return value
+        if normalized in evidence:
+            return evidence[normalized]
+    return ""
+
+
+def check_live_evidence(
+    require_live_evidence: bool,
+    evidence: dict[str, str],
+) -> list[CheckResult]:
     results = []
-    for name in LIVE_EVIDENCE_FLAGS:
-        value = os.environ.get(name, "").strip().upper()
+    for name, aliases in LIVE_EVIDENCE_FLAGS.items():
+        value = evidence_value(evidence, name, aliases)
         if value == "PASS":
-            results.append(pass_check(f"evidence.{name}", "PASS"))
+            detail = "PASS"
+            if aliases and name not in evidence and not os.environ.get(name):
+                detail = f"PASS via {', '.join(aliases)}"
+            results.append(pass_check(f"evidence.{name}", detail))
         elif require_live_evidence:
             results.append(fail_check(f"evidence.{name}", "set to PASS before production launch"))
+        else:
+            results.append(skip_check(f"evidence.{name}", "not required for repository CI"))
+    for name, expected in NEGATIVE_CONTROL_FLAGS.items():
+        value = evidence_value(evidence, name)
+        if value == expected:
+            results.append(pass_check(f"evidence.{name}", expected))
+        elif require_live_evidence:
+            results.append(fail_check(f"evidence.{name}", f"set to {expected} before production launch"))
         else:
             results.append(skip_check(f"evidence.{name}", "not required for repository CI"))
     return results
@@ -166,12 +221,17 @@ def main() -> int:
         action="store_true",
         help="fail unless all Postal/Keycloak live evidence flags are PASS",
     )
+    parser.add_argument(
+        "--evidence-file",
+        help="non-secret readiness evidence JSON with metadata.checks",
+    )
     args = parser.parse_args()
+    evidence = load_evidence_file(args.evidence_file)
 
     results = [
         *check_keycloak_policy(load_keycloak_policy()),
         *check_default_provider_locks(),
-        *check_live_evidence(args.require_live_evidence),
+        *check_live_evidence(args.require_live_evidence, evidence),
     ]
 
     totals = {"PASS": 0, "SKIP": 0, "FAIL": 0}

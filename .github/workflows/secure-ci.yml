@@ -67,6 +67,7 @@ jobs:
         run: |
           python scripts/check_no_private_keys.py
           python scripts/check_identity_email_readiness.py
+          python scripts/generate_endpoint_catalog.py --check
           python -m compileall -q app tests migrations ops scripts
           python -m ruff check app tests migrations scripts
       - name: Upgrade application test database
