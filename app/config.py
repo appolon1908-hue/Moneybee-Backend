@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     field_encryption_keys_json: str = "{}"
     field_encryption_active_key_version: str | None = None
     provider_timeout_seconds: float = 30.0
+    live_writes: bool = False
+    odoo_write: bool = False
 
     log_level: str = "INFO"
     rate_limit_enabled: bool = True
@@ -54,6 +56,7 @@ class Settings(BaseSettings):
     public_rate_limit_per_minute: int = 60
     webhook_rate_limit_per_minute: int = 120
     trust_forwarded_for: bool = False
+    trusted_proxy_cidrs_csv: str = ""
     api_v1_sunset_date: str = "2026-12-31"
 
     source_sha: str | None = None
@@ -180,6 +183,12 @@ class Settings(BaseSettings):
         }
 
     @property
+    def trusted_proxy_cidrs(self) -> tuple[str, ...]:
+        return tuple(
+            item.strip() for item in self.trusted_proxy_cidrs_csv.split(",") if item.strip()
+        )
+
+    @property
     def provider_webhook_allowlist(self) -> set[str]:
         return {
             item.strip().lower()
@@ -262,6 +271,12 @@ class Settings(BaseSettings):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
             if self.oidc_algorithms != ["RS256"]:
                 raise ValueError("Production OIDC tokens must use RS256")
+            if self.rate_limit_enabled and not self.redis_url.startswith(("redis://", "rediss://")):
+                raise ValueError("Distributed rate limiting requires REDIS_URL")
+            if self.trust_forwarded_for and not self.trusted_proxy_cidrs:
+                raise ValueError(
+                    "TRUST_FORWARDED_FOR requires at least one TRUSTED_PROXY_CIDRS_CSV entry"
+                )
             if self.bank_provider == "plaid" and not all(
                 [
                     self.plaid_client_id,
@@ -293,6 +308,8 @@ class Settings(BaseSettings):
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):
                 raise ValueError("Odoo configuration is incomplete")
+            if self.crm_provider == "odoo" and not self.odoo_write:
+                raise ValueError("CRM_PROVIDER=odoo requires ODOO_WRITE=true")
             if self.kyb_provider == "middesk" and not self.middesk_api_key:
                 raise ValueError("Middesk configuration is incomplete")
             if self.credit_provider == "experian" and not all(
@@ -331,6 +348,10 @@ class Settings(BaseSettings):
                 raise ValueError("S3 object storage configuration is incomplete")
             if self.malware_scan_provider == "clamav" and not self.clamav_host:
                 raise ValueError("ClamAV configuration is incomplete")
+            if self.app_env == "production" and self.object_storage_mode != "s3":
+                raise ValueError("Production requires private S3-compatible object storage")
+            if self.app_env == "production" and self.malware_scan_provider != "clamav":
+                raise ValueError("Production requires ClamAV document scanning")
             if self.payment_provider == "stripe" and not all(
                 [self.stripe_secret_key, self.stripe_webhook_secret]
             ):

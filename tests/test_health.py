@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.config import settings
-from app.db import SessionLocal
+from app.db import SessionLocal, engine
 from app.main import app
 
 
@@ -43,13 +43,16 @@ async def test_readiness_is_ok_when_the_database_is_reachable():
 
 async def test_readiness_flags_migration_head_drift(monkeypatch):
     monkeypatch.setattr(settings, "auto_create_schema", False)
-    async with SessionLocal() as db:
-        await db.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num TEXT)"))
-        await db.execute(text("DELETE FROM alembic_version"))
-        await db.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES ('0000_stale_head')")
-        )
-        await db.commit()
+    monkeypatch.setattr("app.main._expected_migration_heads", lambda: ("0000_expected",))
+
+    created_version_table = False
+    if engine.dialect.name == "sqlite":
+        async with SessionLocal() as db:
+            await db.execute(
+                text("CREATE TABLE IF NOT EXISTS alembic_version (version_num TEXT)")
+            )
+            await db.commit()
+        created_version_table = True
 
     try:
         with TestClient(app) as client:
@@ -58,8 +61,9 @@ async def test_readiness_flags_migration_head_drift(monkeypatch):
         body = response.json()
         assert body["status"] == "not_ready"
         assert "drifted" in body["checks"]["migrations"]
-        assert "0000_stale_head" in body["checks"]["migrations"]
+        assert "0000_expected" in body["checks"]["migrations"]
     finally:
-        async with SessionLocal() as db:
-            await db.execute(text("DROP TABLE IF EXISTS alembic_version"))
-            await db.commit()
+        if created_version_table:
+            async with SessionLocal() as db:
+                await db.execute(text("DROP TABLE alembic_version"))
+                await db.commit()

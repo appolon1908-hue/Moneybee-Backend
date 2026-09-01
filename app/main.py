@@ -28,7 +28,7 @@ from app.marketplace_routes import router as marketplace_router
 from app.payment_routes import router as payment_router
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
-from app.rate_limit import InMemoryRateLimitMiddleware
+from app.rate_limit import DistributedRateLimitMiddleware, RedisRateLimitBackend
 
 
 @asynccontextmanager
@@ -84,7 +84,29 @@ app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(payment_router, prefix="/api/v1", include_in_schema=False)
-app.add_middleware(InMemoryRateLimitMiddleware)
+app.add_middleware(DistributedRateLimitMiddleware)
+
+
+@app.middleware("http")
+async def live_write_gate(request: Request, call_next):
+    if (
+        settings.app_env in {"staging", "production"}
+        and not settings.live_writes
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    ):
+        return JSONResponse(
+            status_code=503,
+            media_type="application/problem+json",
+            content={
+                "type": "https://api.moneybeeloan.com/problems/live-writes-disabled",
+                "title": "Writes temporarily disabled",
+                "status": 503,
+                "detail": "MoneyBee write operations are disabled by the deployment safety gate.",
+                "instance": request.url.path,
+            },
+            headers={"Retry-After": "30"},
+        )
+    return await call_next(request)
 
 
 def _api_v1_sunset_http_date() -> str:
@@ -313,6 +335,16 @@ async def ready():
             healthy = False
     else:
         checks["migrations"] = "skipped (auto_create_schema)"
+
+    if settings.rate_limit_enabled and settings.app_env != "test":
+        try:
+            await RedisRateLimitBackend().redis.ping()
+            checks["redis_rate_limit"] = "ok"
+        except Exception:
+            checks["redis_rate_limit"] = "unreachable"
+            healthy = False
+    else:
+        checks["redis_rate_limit"] = "not_required"
 
     status_code = 200 if healthy else 503
     return JSONResponse(

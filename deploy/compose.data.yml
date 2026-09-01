@@ -5,10 +5,10 @@ services:
     image: ${MONEYBEE_POSTGRES_IMAGE:?set an immutable PostgreSQL image digest}
     environment:
       POSTGRES_DB: moneybee
-      POSTGRES_USER: moneybee
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_USER: moneybee_db_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
     secrets:
-      - postgres_password
+      - postgres_admin_password
     volumes:
       - type: bind
         source: ${MONEYBEE_POSTGRES_DATA_PATH:?runtime path is not verified}
@@ -25,7 +25,7 @@ services:
     pids_limit: 300
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U moneybee -d moneybee"]
+      test: ["CMD-SHELL", "pg_isready -U moneybee_db_admin -d moneybee"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -76,8 +76,8 @@ services:
           - moneybee-redis
 
 secrets:
-  postgres_password:
-    file: ${MONEYBEE_POSTGRES_PASSWORD_FILE:?runtime path is not verified}
+  postgres_admin_password:
+    file: ${MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE:?admin password path is not verified}
   redis_acl:
     file: ${MONEYBEE_REDIS_ACL_FILE:?runtime path is not verified}
 

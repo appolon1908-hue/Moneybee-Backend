@@ -18,7 +18,8 @@ dependencies = [
   "httpx>=0.28,<1",
   "alembic>=1.16,<2",
   "boto3>=1.40,<2",
-  "cryptography>=46,<51"
+  "cryptography>=46,<51",
+  "redis>=6.4,<7"
 ]
 
 [project.optional-dependencies]

@@ -19,7 +19,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install ".[dev]"
-      - run: ruff check app tests
+      - run: ruff check app tests migrations
       - run: pytest -q
       - name: Smoke-test critical API surfaces
         run: python scripts/smoke_api.py
@@ -52,15 +52,27 @@ jobs:
       AUTO_CREATE_SCHEMA: "false"
       LOCAL_AUTH_BYPASS: "false"
       LOCAL_IDENTITY_ENFORCEMENT: "true"
-      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee_test@localhost:5432/moneybee_test
+      DATABASE_URL: postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_test
     steps:
       - uses: actions/checkout@v4
       - name: Start runner PostgreSQL
         run: |
           sudo systemctl start postgresql.service
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER moneybee WITH PASSWORD 'moneybee_test'"
-          sudo -u postgres createdb --owner=moneybee moneybee_test
-          pg_isready --host=localhost --port=5432 --username=moneybee
+          sudo -u postgres psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE USER moneybee_migrator WITH PASSWORD 'migrator_test' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE USER moneybee_runtime WITH PASSWORD 'runtime_test' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          SQL
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_test
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_test <<'SQL'
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          GRANT USAGE, CREATE ON SCHEMA public TO moneybee_migrator;
+          GRANT CONNECT ON DATABASE moneybee_test TO moneybee_runtime;
+          GRANT USAGE ON SCHEMA public TO moneybee_runtime;
+          ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO moneybee_runtime;
+          ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO moneybee_runtime;
+          ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO moneybee_runtime;
+          SQL
+          pg_isready --host=localhost --port=5432 --username=moneybee_migrator
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -72,20 +84,20 @@ jobs:
           alembic upgrade 20260823_0011
           alembic upgrade 20260823_0012
       - name: Upgrade to the current ORM schema
-        run: alembic upgrade head
-      - name: Test identity, tenancy and verified account registration
         run: |
-          pytest -q \
-            tests/test_auth_identity.py \
-            tests/test_identity_tenancy_postgres.py \
-            tests/test_account_registration.py
-      - name: Test portal boundaries and finance ledger on PostgreSQL
+          alembic upgrade head
+          alembic check
+      - name: Test complete application under least-privilege runtime identity
         env:
           LOCAL_AUTH_BYPASS: "true"
+          DATABASE_URL: postgresql+asyncpg://moneybee_runtime:runtime_test@localhost:5432/moneybee_test
+        run: pytest -q
+      - name: Assert runtime cannot perform DDL or administrative operations
+        env:
+          PGPASSWORD: runtime_test
         run: |
-          pytest -q \
-            tests/test_portal_token_boundaries.py \
-            tests/test_financial_ledger.py
+          ! psql -h localhost -U moneybee_runtime -d moneybee_test -c 'CREATE TABLE runtime_must_not_create(id integer)'
+          test "$(psql -h localhost -U moneybee_runtime -d moneybee_test -Atc "select rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls from pg_roles where rolname=current_user")" = "f"
       - name: Test identity downgrade and current forward-fix path
         run: |
           alembic downgrade 20260823_0011
@@ -94,6 +106,7 @@ jobs:
         run: |
           alembic downgrade base
           alembic upgrade head
+          alembic check
 
   containers:
     needs: [verify, postgres-identity-tenancy]
@@ -129,3 +142,15 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
+      - name: Generate release SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: moneybee-${{ matrix.role }}:ci
+          format: cyclonedx-json
+          output-file: moneybee-${{ matrix.role }}.sbom.cdx.json
+          upload-artifact: false
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: moneybee-${{ matrix.role }}-sbom
+          path: moneybee-${{ matrix.role }}.sbom.cdx.json

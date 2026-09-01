@@ -374,14 +374,23 @@ async def evaluate_pending_renewals() -> list[str]:
 
 
 async def run() -> None:
+    renewal_tick = 0
     while True:
-        if not external_delivery_enabled():
-            await asyncio.sleep(5)
-            continue
-        event_id = await claim()
-        if event_id:
-            await deliver(event_id)
-        else:
+        did_work = False
+        if external_delivery_enabled():
+            event_id = await claim()
+            if event_id:
+                await deliver(event_id)
+                did_work = True
+        if esign_live_send_enabled():
+            did_work = bool(await send_pending_contract_envelope()) or did_work
+        did_work = bool(await process_pending_docusign_event()) or did_work
+        did_work = bool(await scan_pending_document()) or did_work
+        renewal_tick += 1
+        if renewal_tick >= 30:
+            did_work = bool(await evaluate_pending_renewals()) or did_work
+            renewal_tick = 0
+        if not did_work:
             await asyncio.sleep(2)
 
 
