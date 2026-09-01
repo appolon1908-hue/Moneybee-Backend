@@ -40,6 +40,8 @@ COMPOSE_DATA_PATHS = {
     "redis_data_path",
     "postgres_password_file",
     "redis_acl_file",
+    "moneybee_migrator_password_file",
+    "moneybee_app_password_file",
 }
 
 

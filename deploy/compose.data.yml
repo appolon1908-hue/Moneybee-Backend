@@ -5,14 +5,27 @@ services:
     image: ${MONEYBEE_POSTGRES_IMAGE:?set an immutable PostgreSQL image digest}
     environment:
       POSTGRES_DB: moneybee
+      # This is the initdb bootstrap superuser Postgres always needs - not
+      # what the api/worker/migrate services connect as day to day. Their
+      # DATABASE_URL/DATABASE_MIGRATION_URL point at moneybee_app/
+      # moneybee_migrator instead, created on first boot by
+      # deploy/postgres/init-app-roles.sh below (see .env.production.example).
       POSTGRES_USER: moneybee
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      MONEYBEE_MIGRATOR_PASSWORD_FILE: /run/secrets/moneybee_migrator_password
+      MONEYBEE_APP_PASSWORD_FILE: /run/secrets/moneybee_app_password
     secrets:
       - postgres_password
+      - moneybee_migrator_password
+      - moneybee_app_password
     volumes:
       - type: bind
         source: ${MONEYBEE_POSTGRES_DATA_PATH:?runtime path is not verified}
         target: /var/lib/postgresql/data
+      - type: bind
+        source: ./postgres/init-app-roles.sh
+        target: /docker-entrypoint-initdb.d/10-init-app-roles.sh
+        read_only: true
     init: true
     read_only: true
     tmpfs:
@@ -123,6 +136,10 @@ secrets:
     file: ${MONEYBEE_POSTGRES_PASSWORD_FILE:?runtime path is not verified}
   redis_acl:
     file: ${MONEYBEE_REDIS_ACL_FILE:?runtime path is not verified}
+  moneybee_migrator_password:
+    file: ${MONEYBEE_MIGRATOR_PASSWORD_FILE:?runtime path is not verified}
+  moneybee_app_password:
+    file: ${MONEYBEE_APP_PASSWORD_FILE:?runtime path is not verified}
 
 networks:
   moneybee_internal:

@@ -18,7 +18,9 @@
     "caddy_data_path": null,
     "caddy_config_path": null,
     "backup_root": null,
-    "vault_data_path": null
+    "vault_data_path": null,
+    "moneybee_migrator_password_file": null,
+    "moneybee_app_password_file": null
   },
   "networks": {
     "internal": "moneybee_internal",

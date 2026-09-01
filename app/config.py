@@ -11,6 +11,13 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "dev", "staging", "production"] = "local"
     database_url: str = "sqlite+aiosqlite:///./moneybee.db"
+    # Alembic only. Lets migrations run as a role with DDL rights
+    # (moneybee_migrator) while the running api/worker connect with
+    # database_url as a DML-only role (moneybee_app) that can never
+    # CREATE/ALTER/DROP anything - see deploy/postgres/init-app-roles.sh.
+    # Falls back to database_url so this stays optional everywhere except
+    # a hardened production deployment.
+    database_migration_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
     auto_create_schema: bool = True
     local_auth_bypass: bool = True

@@ -338,6 +338,51 @@ that commit for detail.
       resolves it correctly, the flow still fails closed with no
       credential store configured (the default), and `VaultCredentialStore`
       handles Vault's KV v2 request/response shape correctly.
+- [x] **Least-privilege Postgres roles, closing the other confirmed Codex
+      finding ("production still uses the moneybee superuser role").**
+      `POSTGRES_USER=moneybee` is the Postgres image's initdb bootstrap
+      user — always a superuser, unavoidably — and until now every service
+      (api, worker, and every migration) connected as exactly that role.
+      `deploy/postgres/init-app-roles.sh` (mounted into `compose.data.yml`'s
+      `postgres` service at `/docker-entrypoint-initdb.d/`, running once on
+      a fresh data volume) now creates two roles beneath it:
+      `moneybee_migrator` (owns the database, the only role with DDL —
+      `ALTER DATABASE moneybee OWNER TO moneybee_migrator`) and
+      `moneybee_app` (`SELECT`/`INSERT`/`UPDATE`/`DELETE` plus sequence
+      usage only — no `CREATE`/`ALTER`/`DROP` anywhere, enforced via
+      `ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator` so every table
+      a future migration creates is automatically covered with no
+      follow-up grants script needed). New `DATABASE_MIGRATION_URL`
+      setting (`app/config.py`, read by `migrations/env.py`, falling back
+      to `DATABASE_URL` when unset) lets the `migrate` service connect as
+      `moneybee_migrator` while `api`/`worker`'s `DATABASE_URL` points at
+      `moneybee_app`.
+      **Verified against a real PostgreSQL 16 instance, not just written
+      speculatively**: ran this repo's entire real Alembic migration
+      history (all 22 revisions) end to end as `moneybee_migrator` —
+      clean. Then ran the full `pytest` suite against that migrated
+      database with `DATABASE_URL` pointed at `moneybee_app` — 221 of 222
+      passed (the one difference from the normal SQLite run is `test_health
+      .py::test_readiness_flags_migration_head_drift`, which simulates
+      migration drift by issuing `CREATE TABLE IF NOT EXISTS
+      alembic_version` directly over the runtime connection — a trick that
+      only ever worked because every other environment's runtime
+      connection has unrestricted DDL; `moneybee_app` correctly refusing
+      it is the hardening working as intended, not a regression). Directly
+      confirmed with raw `psql` sessions: `moneybee_app` can `CREATE TABLE`
+      → `permission denied for schema public`; `moneybee_app` can `DROP`
+      a table `moneybee_migrator` created → `must be owner of table`;
+      `moneybee_app` can `INSERT`/`SELECT`/`UPDATE`/`DELETE` on a table
+      `moneybee_migrator` just created, with zero manual grants in between.
+      `ops/render-compose-env.py`, both lock files, and
+      `ops/validate-release-lock.py` extended for the two new secret
+      paths (`moneybee_migrator_password_file`/`moneybee_app_password_file`,
+      skipped like the existing Postgres/Redis secrets when
+      `data_mode: external`) — validated end to end against a full
+      synthetic `VERIFIED` lock pair.
+      `tests/test_database_migration_url.py` (4 tests) pins the
+      `DATABASE_MIGRATION_URL` env-var wiring and its fallback to
+      `DATABASE_URL`.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a

@@ -65,12 +65,16 @@ def main() -> int:
         "redis_acl_file": "MONEYBEE_REDIS_ACL_FILE",
         "caddy_data_path": "MONEYBEE_CADDY_DATA_PATH",
         "caddy_config_path": "MONEYBEE_CADDY_CONFIG_PATH",
+        "moneybee_migrator_password_file": "MONEYBEE_MIGRATOR_PASSWORD_FILE",
+        "moneybee_app_password_file": "MONEYBEE_APP_PASSWORD_FILE",
     }.items():
         if runtime["data_mode"] == "external" and key in {
             "postgres_data_path",
             "redis_data_path",
             "postgres_password_file",
             "redis_acl_file",
+            "moneybee_migrator_password_file",
+            "moneybee_app_password_file",
         }:
             continue
         emit(env_name, paths[key])

@@ -86,6 +86,15 @@ docker compose -f compose.data.yml -f compose.backend.yml --profile migrate up m
 
 Production uses Alembic. `AUTO_CREATE_SCHEMA` and `LOCAL_AUTH_BYPASS` must remain false — both are enforced by `ops/verify-runtime-env.py` above.
 
+`compose.data.yml`'s `postgres` service creates two roles on its first boot
+(`deploy/postgres/init-app-roles.sh`, `MONEYBEE_MIGRATOR_PASSWORD_FILE`/
+`MONEYBEE_APP_PASSWORD_FILE`): `moneybee_migrator` owns the database and is
+the only role with DDL rights, used exclusively by the `migrate` service
+above (`DATABASE_MIGRATION_URL` in `.env.production`); `moneybee_app` has
+DML only and is what `api`/`worker` actually connect as (`DATABASE_URL`).
+Neither the running application nor routine migrations use the
+`POSTGRES_USER` bootstrap superuser after that first boot.
+
 ## Start and verify
 
 ```bash
