@@ -31,6 +31,8 @@ REQUIRED_EXACT = {
     "EMAIL_PROVIDER": "disabled",
     "SMS_PROVIDER": "disabled",
     "OBJECT_STORAGE_MODE": "disabled",
+    "PAYMENT_PROVIDER": "disabled",
+    "MALWARE_SCAN_PROVIDER": "disabled",
 }
 OPTIONAL_FALSE = {
     "ENABLE_EXTERNAL_DELIVERY",

@@ -14,6 +14,8 @@ payments = false
 
 payouts = false
 
+documents.malware_scan_certified = false
+
 ## Rules
 
 Code may be implemented while the capability remains disabled.

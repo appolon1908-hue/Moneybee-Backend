@@ -1,0 +1,33 @@
+# The Dockerfiles COPY an explicit allowlist (app/, alembic.ini, migrations/,
+# pyproject.toml, README.md), never `COPY . .` - this file exists to keep
+# the build context small and as defense-in-depth if that ever changes.
+
+.git
+.github
+
+.env
+.env.*
+!.env.example
+
+*.db
+*.db-journal
+uploads/
+
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+
+tests/
+docs/
+deploy/
+ops/
+scripts/
+docker/
+
+.DS_Store
+.vscode/
+.idea/

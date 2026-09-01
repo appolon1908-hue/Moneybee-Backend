@@ -192,6 +192,8 @@ jobs:
           EMAIL_PROVIDER=disabled
           SMS_PROVIDER=disabled
           OBJECT_STORAGE_MODE=disabled
+          PAYMENT_PROVIDER=disabled
+          MALWARE_SCAN_PROVIDER=disabled
           ENABLE_EXTERNAL_DELIVERY=false
           FIELD_ENCRYPTION_KEYS_JSON={"1":"1-PUl067uf69NnCfy4HhS6H7xrHI9tBzsYFL-zv4mmU="}
           FIELD_ENCRYPTION_ACTIVE_KEY_VERSION=1
