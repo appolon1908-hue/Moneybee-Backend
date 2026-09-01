@@ -19,6 +19,7 @@ from app.admin_routes import router as admin_router
 from app.applications_routes import router as applications_router
 from app.banking_routes import router as banking_router
 from app.borrower_legacy_routes import router as borrower_legacy_router
+from app.compliance_routes import router as compliance_router
 from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
@@ -67,6 +68,7 @@ app.add_middleware(
 app.include_router(applications_router, prefix="/api/v2")
 app.include_router(marketplace_router, prefix="/api/v2")
 app.include_router(admin_router, prefix="/api/v2")
+app.include_router(compliance_router, prefix="/api/v2")
 app.include_router(borrower_legacy_router, prefix="/api/v2")
 app.include_router(banking_router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
@@ -77,6 +79,7 @@ app.include_router(payment_router, prefix="/api/v2")
 app.include_router(applications_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(marketplace_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(admin_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(compliance_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(borrower_legacy_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(banking_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
