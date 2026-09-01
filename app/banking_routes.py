@@ -18,6 +18,9 @@ router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_db)]
 User = Annotated[Principal, Depends(current_principal)]
 
+_PLAID_ITEM_REAUTH_CODES = {"ERROR", "PENDING_EXPIRATION", "PENDING_DISCONNECT"}
+_PLAID_ITEM_RECOVERED_CODES = {"LOGIN_REPAIRED"}
+
 
 def provider_http_error(exc: ProviderError) -> HTTPException:
     return HTTPException(
@@ -179,7 +182,9 @@ async def plaid_webhook(
         ) from exc
 
     payload_hash = hashlib.sha256(body).hexdigest()
-    event_code = str(payload.get("webhook_code") or payload.get("webhook_type") or "UNKNOWN")
+    webhook_type = str(payload.get("webhook_type") or "")
+    webhook_code = str(payload.get("webhook_code") or "")
+    event_code = webhook_code or webhook_type or "UNKNOWN"
     item_id = str(payload.get("item_id") or "unknown")
     provider_event_id = str(
         payload.get("webhook_id") or f"{item_id}:{event_code}:{payload_hash[:24]}"
@@ -218,5 +223,26 @@ async def plaid_webhook(
             idempotency_key=f"PlaidWebhookReceived:{provider_event_id}",
         )
     )
+
+    connection_status: str | None = None
+    if webhook_type == "ITEM" and item_id != "unknown":
+        connection = await db.scalar(
+            select(models.BankConnection).where(
+                models.BankConnection.provider == "plaid",
+                models.BankConnection.provider_reference == item_id,
+            )
+        )
+        if connection is not None:
+            if webhook_code in _PLAID_ITEM_REAUTH_CODES:
+                connection.status = "REAUTH_REQUIRED"
+                connection_status = connection.status
+            elif webhook_code in _PLAID_ITEM_RECOVERED_CODES:
+                connection.status = "CONNECTED"
+                connection_status = connection.status
+
     await db.commit()
-    return {"received": True, "duplicate": False}
+    return {
+        "received": True,
+        "duplicate": False,
+        **({"connection_status": connection_status} if connection_status else {}),
+    }
