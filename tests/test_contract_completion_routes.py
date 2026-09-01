@@ -26,12 +26,16 @@ def test_me_permissions_returns_effective_local_authorization():
     assert isinstance(payload["membership_types"], list)
 
 
-def test_public_products_fails_closed_to_empty_catalog_without_active_programs():
+def test_public_products_exposes_only_distinct_product_categories():
     with TestClient(app) as client:
         response = client.get("/api/v2/public/products")
 
     assert response.status_code == 200
-    assert response.json() == []
+    payload = response.json()
+    assert all(set(item) == {"product_type"} for item in payload)
+    product_types = [item["product_type"] for item in payload]
+    assert product_types == sorted(set(product_types))
+    assert all(product_types)
 
 
 def test_contract_completion_routes_are_v2_canonical_with_hidden_v1_aliases():
