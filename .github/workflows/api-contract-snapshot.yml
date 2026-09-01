@@ -1,0 +1,49 @@
+name: api-contract-snapshot
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install ".[dev]"
+      - name: Export generated OpenAPI and endpoint catalog without mutating reviewed sources
+        env:
+          APP_ENV: test
+          DATABASE_URL: sqlite+aiosqlite:///./snapshot-test.db
+          LOCAL_AUTH_BYPASS: "true"
+        run: |
+          mkdir -p api-contract-snapshot
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from app.main import app
+          from scripts.generate_endpoint_catalog import render_catalog
+
+          target = Path("api-contract-snapshot")
+          target.joinpath("openapi.generated.json").write_text(
+              json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          target.joinpath("API_ENDPOINT_CATALOG.generated.md").write_text(
+              render_catalog(),
+              encoding="utf-8",
+          )
+          PY
+      - name: Upload generated API contract snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: moneybee-api-contract-snapshot
+          path: api-contract-snapshot/
+          if-no-files-found: error
+          retention-days: 7
