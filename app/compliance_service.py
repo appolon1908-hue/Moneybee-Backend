@@ -124,16 +124,6 @@ async def generate_adverse_action_notice(
 # --- Commercial financing disclosure -----------------------------------
 
 
-def _payments_per_year(frequency: str) -> int:
-    return {
-        "WEEKLY": 52,
-        "BIWEEKLY": 26,
-        "MONTHLY": 12,
-        "QUARTERLY": 4,
-        "ANNUALLY": 1,
-    }.get(frequency.upper(), 12)
-
-
 async def generate_commercial_financing_disclosure(
     db: AsyncSession,
     offer: models.Offer,
@@ -170,14 +160,12 @@ async def generate_commercial_financing_disclosure(
         # federal Truth-in-Lending APR (which requires actuarial/US-Rule
         # amortization) - it's the "APR-equivalent" some state disclosure
         # laws accept as an estimate. Flag it as estimated in the text.
-        periods_per_year = Decimal(_payments_per_year(offer.payment_frequency))
         term_years = Decimal(offer.term_months) / Decimal(12)
         estimated_apr = (
             (finance_charge / amount_financed) / term_years * 100
             if term_years > 0
             else Decimal("0")
         )
-        _ = periods_per_year
     else:
         estimated_apr = None
 
@@ -187,13 +175,17 @@ async def generate_commercial_financing_disclosure(
         else "No prepayment discount or penalty terms were specified for this offer."
     )
 
+    apr_line = (
+        f"Estimated APR: {estimated_apr:.2f}%\n"
+        if estimated_apr is not None
+        else "Estimated APR: not available\n"
+    )
     disclosure_text = (
         f"COMMERCIAL FINANCING DISCLOSURE (estimate)\n\n"
         f"Total amount financed: ${amount_financed:,.2f}\n"
         f"Finance charge: ${finance_charge:,.2f}\n"
         f"Total repayment amount: ${total_repayment:,.2f}\n"
-        f"Estimated APR: {estimated_apr:.2f}%\n" if estimated_apr is not None
-        else "Estimated APR: not available\n"
+        f"{apr_line}"
     )
     disclosure_text += (
         f"Payment: ${Decimal(str(offer.payment_amount)):,.2f} {offer.payment_frequency.lower()}\n"

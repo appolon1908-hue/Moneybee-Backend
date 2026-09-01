@@ -1,5 +1,7 @@
 import os
 import uuid
+from dataclasses import dataclass
+from decimal import Decimal
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
@@ -7,6 +9,8 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi.testclient import TestClient
 
+from app.compliance_service import generate_commercial_financing_disclosure
+from app.db import SessionLocal
 from app.main import app
 
 
@@ -176,3 +180,42 @@ async def test_commercial_financing_disclosure_estimates_apr_from_a_factor_rate_
         # No offer.apr supplied -> estimated from finance_charge / amount_financed,
         # annualized over the 12-month term: (8000/40000) / 1.0 * 100 = 20%.
         assert body["estimated_apr"] == "20.0000"
+
+
+@dataclass
+class _FakeOffer:
+    id: uuid.UUID
+    application_id: uuid.UUID
+    amount: Decimal
+    term_months: int
+    payment_frequency: str
+    payment_amount: Decimal
+    apr: Decimal | None
+    total_repayment: Decimal | None
+    prepayment_terms: str | None
+
+
+async def test_disclosure_text_still_includes_the_cost_figures_when_apr_is_unavailable():
+    # No offer.apr and term_months <= 0 -> estimated_apr resolves to None
+    # (the branch OfferInput's real validation keeps unreachable through
+    # the API, but the service itself must still render a correct
+    # disclosure rather than silently dropping the dollar figures).
+    offer = _FakeOffer(
+        id=uuid.uuid4(),
+        application_id=uuid.uuid4(),
+        amount=Decimal("10000"),
+        term_months=0,
+        payment_frequency="MONTHLY",
+        payment_amount=Decimal("1000"),
+        apr=None,
+        total_repayment=Decimal("11000"),
+        prepayment_terms=None,
+    )
+    with TestClient(app):
+        async with SessionLocal() as db:
+            disclosure = await generate_commercial_financing_disclosure(db, offer)
+            assert disclosure.estimated_apr is None
+            assert "Total amount financed: $10,000.00" in disclosure.disclosure_text
+            assert "Finance charge: $1,000.00" in disclosure.disclosure_text
+            assert "Total repayment amount: $11,000.00" in disclosure.disclosure_text
+            assert "Estimated APR: not available" in disclosure.disclosure_text
