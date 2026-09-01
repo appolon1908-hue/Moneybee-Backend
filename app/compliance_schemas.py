@@ -61,3 +61,7 @@ class CommissionTaxRecordPage(BaseModel):
 class CommissionTaxRecordTinInput(BaseModel):
     recipient_name: str = Field(min_length=1, max_length=255)
     tin: str = Field(min_length=9, max_length=20)
+
+
+class CommissionTaxRecordFilingInput(BaseModel):
+    filing_reference: str = Field(min_length=1, max_length=255)
