@@ -246,12 +246,27 @@ async def live():
     return {"status": "ok", "environment": settings.app_env}
 
 
-def _expected_migration_head() -> str | None:
+def _expected_migration_heads() -> tuple[str, ...]:
+    """Return every code migration head using a repository-absolute location.
+
+    ``alembic.ini`` intentionally keeps a relative ``script_location`` for CLI
+    ergonomics. Health checks can execute from an installed package or a
+    different working directory, so resolving the location here prevents the
+    readiness endpoint from misclassifying a healthy migration graph as
+    unreadable. Supporting all heads also keeps readiness diagnostic when a
+    branch temporarily introduces more than one head.
+    """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
-    config = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
-    return ScriptDirectory.from_config(config).get_current_head()
+    repository_root = Path(__file__).resolve().parent.parent
+    config = Config(str(repository_root / "alembic.ini"))
+    config.set_main_option("script_location", str(repository_root / "migrations"))
+    return tuple(sorted(ScriptDirectory.from_config(config).get_heads()))
+
+
+def _format_migration_heads(heads: set[str]) -> str:
+    return ",".join(sorted(heads)) if heads else "none"
 
 
 @app.get("/health/ready", tags=["health"])
@@ -269,18 +284,23 @@ async def ready():
 
     if healthy and not settings.auto_create_schema:
         try:
-            expected_head = _expected_migration_head()
+            expected_heads = set(_expected_migration_heads())
             async with SessionLocal() as db:
                 result = await db.execute(text("SELECT version_num FROM alembic_version"))
-                row = result.first()
-            current_head = row[0] if row else None
-            if current_head != expected_head:
-                checks["migrations"] = f"drifted: db={current_head!r} code={expected_head!r}"
+                current_heads = {str(row[0]) for row in result.all() if row[0]}
+            if current_heads != expected_heads:
+                checks["migrations"] = (
+                    "drifted: "
+                    f"db={_format_migration_heads(current_heads)!r} "
+                    f"code={_format_migration_heads(expected_heads)!r}"
+                )
                 healthy = False
             else:
                 checks["migrations"] = "ok"
         except Exception as exc:
-            checks["migrations"] = f"unreadable: {exc.__class__.__name__}"
+            checks["migrations"] = (
+                f"unreadable: {exc.__class__.__name__}: {str(exc) or 'no detail'}"
+            )
             healthy = False
     else:
         checks["migrations"] = "skipped (auto_create_schema)"
