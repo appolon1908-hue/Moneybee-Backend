@@ -246,6 +246,15 @@ async def live():
     return {"status": "ok", "environment": settings.app_env}
 
 
+def _repository_root() -> Path:
+    """Locate repository assets when ``app`` is imported from source or a wheel."""
+    candidates = (Path.cwd(), Path(__file__).resolve().parent.parent)
+    for candidate in candidates:
+        if (candidate / "alembic.ini").is_file() and (candidate / "migrations").is_dir():
+            return candidate
+    raise RuntimeError("Unable to locate alembic.ini and migrations directory")
+
+
 def _expected_migration_heads() -> tuple[str, ...]:
     """Return every code migration head using a repository-absolute location.
 
@@ -259,7 +268,7 @@ def _expected_migration_heads() -> tuple[str, ...]:
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
-    repository_root = Path(__file__).resolve().parent.parent
+    repository_root = _repository_root()
     config = Config(str(repository_root / "alembic.ini"))
     config.set_main_option("script_location", str(repository_root / "migrations"))
     return tuple(sorted(ScriptDirectory.from_config(config).get_heads()))
