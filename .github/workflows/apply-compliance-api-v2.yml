@@ -1,0 +1,128 @@
+name: apply-compliance-api-v2
+
+on:
+  push:
+    branches:
+      - claude/system-review-architecture-8vo66p
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-compliance-api-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply-and-validate:
+    if: github.repository == 'appolon1908-hue/Moneybee-Backend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_apply_v2
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_apply_v2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_apply_v2
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
+      LOCAL_IDENTITY_ENFORCEMENT: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      CREDIT_LIVE_PULL: "false"
+      LENDERS_LIVE_SUBMISSION: "false"
+      ESIGN_LIVE_SEND: "false"
+      FIELD_ENCRYPTION_KEYS_JSON: '{"1":"zJ8vQ3mK7pR2sT5wX9aB1cD4eF6gH0iJ2kL4mN6oP8q="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY_VERSION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: claude/system-review-architecture-8vo66p
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+      - name: Apply repository completion script
+        run: |
+          python scripts/apply_compliance_api_completion.py
+          sed -i 's/from app.db import Db/from app.admin_routes import Db/' app/compliance_routes.py
+      - name: Format and static validation
+        run: |
+          python -m ruff format \
+            app/main.py \
+            app/admin_routes.py \
+            app/schemas.py \
+            app/compliance_routes.py \
+            tests/test_commercial_financing_disclosure.py \
+            tests/test_compliance_operations.py \
+            scripts/apply_compliance_api_completion.py \
+            scripts/sync_compliance_openapi_manifest.py
+          python -m ruff check --fix \
+            app/main.py \
+            app/admin_routes.py \
+            app/schemas.py \
+            app/compliance_routes.py \
+            tests/test_commercial_financing_disclosure.py \
+            tests/test_compliance_operations.py \
+            scripts/apply_compliance_api_completion.py \
+            scripts/sync_compliance_openapi_manifest.py
+          python -m ruff check app tests migrations scripts
+          python -m compileall -q app tests migrations scripts
+          python scripts/check_no_private_keys.py
+          python -c 'from app.main import app; assert app.openapi()["paths"]'
+      - name: Regenerate canonical contract evidence
+        run: |
+          python scripts/sync_compliance_openapi_manifest.py
+          python scripts/generate_endpoint_catalog.py
+          python scripts/sync_compliance_openapi_manifest.py --check
+          python scripts/generate_endpoint_catalog.py --check
+          python scripts/verify_openapi_contract.py
+      - name: PostgreSQL migration round trip
+        run: |
+          alembic upgrade head
+          alembic downgrade 20260823_0012
+          alembic upgrade head
+          test "$(alembic heads | grep -c '(head)')" -eq 1
+          alembic current
+      - name: Full backend suite
+        run: python -m pytest -q
+      - name: Commit validated source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            app/main.py \
+            app/admin_routes.py \
+            app/schemas.py \
+            app/compliance_routes.py \
+            tests/test_commercial_financing_disclosure.py \
+            tests/test_compliance_operations.py \
+            scripts/apply_compliance_api_completion.py \
+            scripts/sync_compliance_openapi_manifest.py \
+            docs/API_COMPLIANCE_OPERATIONS.md \
+            docs/openapi/compliance-records-manifest.json \
+            docs/API_ENDPOINT_CATALOG.md \
+            .github/workflows/secure-ci.yml
+          if git diff --cached --quiet; then
+            echo "Deterministic compliance API completion is already current."
+            exit 0
+          fi
+          git commit -m "feat(compliance): complete typed operations endpoints"
+          git push origin HEAD:claude/system-review-architecture-8vo66p
