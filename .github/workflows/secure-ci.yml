@@ -83,13 +83,14 @@ jobs:
         run: git diff --exit-code -- docs/API_ENDPOINT_CATALOG.md
       - name: Upgrade application test database
         run: alembic upgrade head
-      - name: Application tests
-        run: python -m pytest -q
-      - name: Migration and OpenAPI gates
+      - name: Migration round trip on clean schema
         run: |
           alembic downgrade 20260823_0012
           alembic upgrade head
-          python scripts/verify_openapi_contract.py
+      - name: Application tests
+        run: python -m pytest -q
+      - name: OpenAPI gate
+        run: python scripts/verify_openapi_contract.py
 
   authenticated-acknowledgment-hardening:
     name: Bind disclosure acknowledgment to authenticated principal
