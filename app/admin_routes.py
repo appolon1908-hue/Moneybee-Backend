@@ -1257,7 +1257,6 @@ async def get_commercial_financing_disclosure(
 )
 async def acknowledge_commercial_financing_disclosure(
     offer_id: uuid.UUID,
-    payload: schemas.CommercialFinancingAcknowledgeInput,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.edit"))],
 ):
@@ -1270,7 +1269,7 @@ async def acknowledge_commercial_financing_disclosure(
         raise HTTPException(status_code=404, detail="Disclosure not found")
     if disclosure.acknowledged_at is None:
         disclosure.acknowledged_at = models.utcnow()
-        disclosure.acknowledged_by = payload.acknowledged_by
+        disclosure.acknowledged_by = user.subject
         await db.commit()
         await db.refresh(disclosure)
     return disclosure

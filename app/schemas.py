@@ -569,10 +569,6 @@ class CommercialFinancingDisclosureRead(BaseModel):
     created_at: datetime
 
 
-class CommercialFinancingAcknowledgeInput(BaseModel):
-    acknowledged_by: str = Field(min_length=1, max_length=255)
-
-
 class CommissionTaxRecordRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

@@ -142,13 +142,17 @@ async def test_creating_an_offer_generates_a_commercial_financing_disclosure():
         assert "COMMERCIAL FINANCING DISCLOSURE" in body["disclosure_text"]
         assert body["acknowledged_at"] is None
 
+        # acknowledged_by is derived from the authenticated principal, not
+        # taken from the request body - a client-supplied value here must
+        # be silently ignored rather than let any caller attribute the
+        # acknowledgment to whoever they claim.
         acknowledge = client.post(
             f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
-            json={"acknowledged_by": "borrower-portal"},
+            json={"acknowledged_by": "spoofed-client-value"},
         )
         assert acknowledge.status_code == 200
         assert acknowledge.json()["acknowledged_at"] is not None
-        assert acknowledge.json()["acknowledged_by"] == "borrower-portal"
+        assert acknowledge.json()["acknowledged_by"] == "local-admin"
 
 
 async def test_commercial_financing_disclosure_estimates_apr_from_a_factor_rate_offer():
