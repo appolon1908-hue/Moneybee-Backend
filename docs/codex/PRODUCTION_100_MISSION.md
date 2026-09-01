@@ -314,6 +314,72 @@ that commit for detail.
         reverse proxy.
       - `evaluate_renewal_eligibility`: replaced the per-funding
         existing-opportunity query (N+1) with one batched `IN` query.
+- [x] **Code review of the compliance pass** (adverse-action/disclosure/1099,
+      Stripe+PayPal, ClamAV) — 1 confirmed finding, closed, pass: `7a9827b`:
+      `generate_commercial_financing_disclosure`'s `disclosure_text`
+      f-string had adjacent literals concatenated into one string *before*
+      a trailing `if estimated_apr is not None else ...` applied, so
+      whenever `estimated_apr` was `None` the ternary picked between "the
+      whole four-line block" and "just the APR-unavailable line" instead of
+      only the APR line — silently dropping amount financed/finance
+      charge/total repayment from a state-mandated cost disclosure. Not
+      reachable through the API today (`OfferInput` keeps amount/term above
+      zero, the only way `estimated_apr` goes `None`), but wrong in the
+      service function itself. Fixed by computing the APR line separately;
+      added a direct unit test against the service function that reproduces
+      the exact scenario (verified it fails pre-fix, passes post-fix).
+- [x] **Fixed a real vulnerability found via a parallel automated pass**:
+      the commercial-financing disclosure acknowledgment endpoint took
+      `acknowledged_by` straight from the request body, so any caller with
+      `application.edit` could attribute the acknowledgment to whoever they
+      typed rather than who actually acknowledged it — a real integrity gap
+      in a compliance record meant to prove a specific person accepted the
+      disclosure. A CI job on this branch had the exact fix scripted
+      (`authenticated-acknowledgment-hardening` in `secure-ci.yml`, added by
+      a parallel process) but only fires on the next PR sync; applied it
+      directly instead of leaving the gap live. `acknowledged_by` is now
+      derived from the authenticated principal; the now-pointless
+      `CommercialFinancingAcknowledgeInput` schema is gone. `docs/security/
+      COMPLIANCE_RECORDS_SECURITY_CONTRACT.md` (also landed by the parallel
+      process) documents this as a standing rule: acknowledgment/attribution
+      always comes from the authenticated principal, never a client value.
+- [x] **Docker/deploy readiness pass** — pass: `61c6a81`. Docker Hub image
+      pulls are blocked by this environment's own egress policy (confirmed
+      via the agent proxy's relay-failure log — a 403 policy denial on
+      `production.cloudfront.docker.com`, the CDN Docker Hub blob fetches
+      redirect through; tried docker.io directly and the public.ecr.aws
+      mirror, both denied identically), so this pass could not exercise an
+      actual `docker build` end-to-end. Everything checkable without a
+      registry pull was checked instead — all 4 Compose files validated
+      with `docker compose config` against both `.env.example` and CI's
+      exact synthetic fixtures, every `ops/*.py` script's CI invocation
+      reproduced locally — and it found real gaps:
+      - `ops/verify-runtime-env.py`'s fail-closed staging gate never
+        checked `PAYMENT_PROVIDER` or `MALWARE_SCAN_PROVIDER` — both
+        capabilities added earlier this pass could have been set live in a
+        staging env file and the gate would have said nothing. Added both
+        to `REQUIRED_EXACT`; verified locally it now rejects either live,
+        same as every other provider.
+      - `.env.example` / `.env.production.example` never got
+        `MALWARE_SCAN_PROVIDER`/`CLAMAV_HOST`/`CLAMAV_PORT`/
+        `CLAMAV_TIMEOUT_SECONDS` when the malware-scan capability landed —
+        `app/config.py` had the settings, nothing documented them.
+      - `docs/codex/CAPABILITY_FREEZE.md` was missing a frozen-capability
+        line for malware scanning — added
+        `documents.malware_scan_certified = false`.
+      - `deploy/README.md` documented a single `docker-compose.production.yml`
+        with a `build` step that doesn't exist and that CI's own
+        `deployment-policy` job actively forbids (`build:` keys are banned
+        in `deploy/compose.*.yml`). Rewritten to describe the real
+        three-Compose-file model and the actual
+        `validate → verify-runtime-env → render-compose-env → up` sequence.
+      - Local dev `docker-compose.yml` had no way to exercise the real
+        `app/integrations/malware_scan.py` path at all. Added an opt-in
+        `clamav` service (`--profile malware-scan`), off by default.
+      - No `.dockerignore` existed. Both Dockerfiles already `COPY` an
+        explicit allowlist rather than `COPY . .`, so this isn't closing a
+        live secret-leak path, but it shrinks build context and is
+        defense-in-depth if that ever changes.
 
 ## Phase 3 — See frontend companion doc for portal/dashboard completion
 
