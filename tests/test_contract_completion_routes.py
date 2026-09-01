@@ -40,9 +40,14 @@ def test_contract_completion_routes_are_v2_canonical_with_hidden_v1_aliases():
         compatibility_permissions = client.get("/api/v1/me/permissions")
         compatibility_products = client.get("/api/v1/public/products")
 
-    assert "/api/v2/me/permissions" in openapi["paths"]
-    assert "/api/v2/public/products" in openapi["paths"]
-    assert "/api/v1/me/permissions" not in openapi["paths"]
-    assert "/api/v1/public/products" not in openapi["paths"]
+    expected_v2_paths = {
+        "/api/v2/me/permissions",
+        "/api/v2/public/products",
+        "/api/v2/applications/{application_id}/status",
+        "/api/v2/offers/{offer_id}",
+    }
+    assert expected_v2_paths.issubset(openapi["paths"])
+    for path in expected_v2_paths:
+        assert path.replace("/api/v2", "/api/v1", 1) not in openapi["paths"]
     assert compatibility_permissions.status_code == 200
     assert compatibility_products.status_code == 200
