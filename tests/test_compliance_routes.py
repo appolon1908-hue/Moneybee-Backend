@@ -120,10 +120,10 @@ def test_compliance_overview_and_pages_are_explicit_and_paginated():
 
 
 async def test_borrower_can_read_and_idempotently_acknowledge_own_disclosure():
-    application_id, offer_id, disclosure_id = await _seed_disclosure()
     key = f"disclosure-{uuid.uuid4().hex}"
 
     with TestClient(app) as client:
+        application_id, offer_id, disclosure_id = await _seed_disclosure()
         read = client.get(
             f"/api/v2/borrower/offers/{offer_id}/commercial-financing-disclosure"
         )
@@ -171,9 +171,8 @@ async def test_borrower_can_read_and_idempotently_acknowledge_own_disclosure():
 
 
 async def test_tax_record_api_never_returns_tin_and_records_filing_evidence():
-    record_id = await _seed_tax_record()
-
     with TestClient(app) as client:
+        record_id = await _seed_tax_record()
         listed = client.get(
             "/api/v2/admin/compliance/commission-tax-records",
             params={"tax_year": 2029, "requires_1099": True, "tin_present": False},

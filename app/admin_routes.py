@@ -1271,7 +1271,10 @@ async def acknowledge_commercial_financing_disclosure(
         disclosure.acknowledged_at = models.utcnow()
         disclosure.acknowledged_by = user.subject
         await db.commit()
-        await db.refresh(disclosure)
+        # Not db.refresh(disclosure): SQLite drops tzinfo on a DateTime
+        # round-trip, so re-reading acknowledged_at here would serialize
+        # it without "Z" - inconsistent with how every other read of this
+        # same field represents it.
     return disclosure
 
 

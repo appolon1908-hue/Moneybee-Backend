@@ -139,8 +139,12 @@ async def _acknowledge_disclosure(
         )
     )
     await db.commit()
-    await db.refresh(disclosure)
-    return CommercialFinancingDisclosureRead.model_validate(disclosure)
+    # Not db.refresh(disclosure) + re-validate: SQLite drops tzinfo on a
+    # DateTime round-trip, so re-reading acknowledged_at here would
+    # serialize it differently (no "Z") than the idempotency snapshot
+    # above already captured from the same in-memory value - the one
+    # thing that must stay byte-identical on replay.
+    return response
 
 
 @router.get(
@@ -494,7 +498,10 @@ async def set_tax_record_tin(
         )
     )
     await db.commit()
-    await db.refresh(record)
+    # Not db.refresh(record): nothing server-generated changed, and SQLite
+    # drops tzinfo on a DateTime round-trip, so re-reading filed_at (if
+    # already set from an earlier filing) would serialize it without "Z" -
+    # an inconsistent representation of the same field across endpoints.
     return _tax_record_read(record)
 
 
@@ -570,8 +577,12 @@ async def record_tax_filing(
         )
     )
     await db.commit()
-    await db.refresh(record)
-    return _tax_record_read(record)
+    # Not db.refresh(record) + re-read: SQLite drops tzinfo on a DateTime
+    # round-trip, so re-reading filed_at here would serialize it
+    # differently (no "Z") than the idempotency snapshot above already
+    # captured from the same in-memory value - the one thing that must
+    # stay byte-identical on replay.
+    return response
 
 
 @router.get(

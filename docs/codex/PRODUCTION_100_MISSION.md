@@ -383,6 +383,49 @@ that commit for detail.
       `tests/test_database_migration_url.py` (4 tests) pins the
       `DATABASE_MIGRATION_URL` env-var wiring and its fallback to
       `DATABASE_URL`.
+- [x] **Fixed 2 real bugs found in a parallel process's new
+      `app/compliance_routes.py`** (an "operator and borrower compliance
+      API surface" that landed on this branch mid-pass): both
+      `record_tax_filing` and `_acknowledge_disclosure` set a datetime
+      field, built the idempotency-replay snapshot from it, then called
+      `db.commit()` + `db.refresh(record)` + re-serialized *again* before
+      returning — but SQLite drops tzinfo on a `DateTime` round-trip, so
+      the post-refresh re-serialization silently differed from the
+      snapshot already stored for replay (`"...671164Z"` vs
+      `"...671164"`, same instant, different string). Caught by the new
+      file's own `test_tax_record_api_never_returns_tin_and_records_filing
+      _evidence` asserting a replay response equals the original — failed
+      on a byte mismatch. Fixed by returning the pre-commit, already-built
+      response object instead of refreshing and re-serializing; applied
+      the same fix to the TIN-update endpoint and to
+      `admin_routes.py`'s `acknowledge_commercial_financing_disclosure`
+      (identical pattern, not caught by a test there but structurally the
+      same bug). Also fixed the same test-environment-pollution gotcha
+      this session has hit repeatedly: `tests/test_compliance_routes.py`'s
+      seed helpers were called before `with TestClient(app):` opened,
+      failing "no such table" outside full-suite run order.
+      Also added the missing OpenAPI additive manifest
+      (`docs/openapi/compliance-operator-api-manifest.json`) for this
+      file's 10 new paths/6 new schemas — nothing had covered them, so
+      `verify_openapi_contract.py` failed on merge.
+      **Not resolved, flagged instead**: this new file's admin endpoints
+      substantially overlap the 6 compliance endpoints this mission added
+      earlier in `app/admin_routes.py` (`/admin/compliance/commission-
+      tax-records/generate` vs `/admin/commission-tax-records/generate`,
+      same for `/tin`, list vs per-application reads for adverse-action
+      notices and disclosures) — two parallel, differently-permissioned
+      API surfaces for materially the same operations now both exist and
+      both work. The new surface is also a genuine improvement in one
+      real way the old one wasn't: a proper borrower-facing acknowledge
+      endpoint (`/borrower/offers/{offer_id}/commercial-financing-
+      disclosure/acknowledge`) — a borrower acknowledging their own
+      disclosure is the correct actor model; the admin-only acknowledge
+      this mission built earlier never had one. Deprecating/removing the
+      older admin_routes.py endpoints in favor of this surface looks like
+      the right call, but is a real product-surface decision (which paths
+      stay canonical, what a frontend already integrated against) worth a
+      human's sign-off rather than mine to make unilaterally by deleting
+      tested, working code.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a
