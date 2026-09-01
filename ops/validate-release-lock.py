@@ -26,11 +26,13 @@ REQUIRED_IMAGES = {
     "lender": "moneybee-lender",
     "admin": "moneybee-admin",
 }
-INFRA_IMAGES = {"postgres", "redis", "caddy"}
+INFRA_IMAGES = {"postgres", "redis", "caddy", "clamav"}
 REQUIRED_PATHS = {
     "release_root",
     "current_symlink",
-    "backend_env_file",
+    "migrator_env_file",
+    "runtime_env_file",
+    "clamav_database_path",
     "caddy_data_path",
     "caddy_config_path",
     "backup_root",
@@ -38,7 +40,7 @@ REQUIRED_PATHS = {
 COMPOSE_DATA_PATHS = {
     "postgres_data_path",
     "redis_data_path",
-    "postgres_password_file",
+    "postgres_admin_password_file",
     "redis_acl_file",
 }
 

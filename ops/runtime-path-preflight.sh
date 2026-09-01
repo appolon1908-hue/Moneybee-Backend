@@ -18,13 +18,15 @@ umask 077
 
 PROPOSED_RELEASE_ROOT="${PROPOSED_RELEASE_ROOT:-/opt/moneybee/releases}"
 PROPOSED_CURRENT_SYMLINK="${PROPOSED_CURRENT_SYMLINK:-/opt/moneybee/current}"
-PROPOSED_BACKEND_ENV_FILE="${PROPOSED_BACKEND_ENV_FILE:-/etc/moneybee/backend.env}"
+PROPOSED_MIGRATOR_ENV_FILE="${PROPOSED_MIGRATOR_ENV_FILE:-/etc/moneybee/migrator.env}"
+PROPOSED_RUNTIME_ENV_FILE="${PROPOSED_RUNTIME_ENV_FILE:-/etc/moneybee/runtime.env}"
 PROPOSED_POSTGRES_DATA_PATH="${PROPOSED_POSTGRES_DATA_PATH:-/var/lib/moneybee/postgres}"
 PROPOSED_REDIS_DATA_PATH="${PROPOSED_REDIS_DATA_PATH:-/var/lib/moneybee/redis}"
-PROPOSED_POSTGRES_PASSWORD_FILE="${PROPOSED_POSTGRES_PASSWORD_FILE:-/etc/moneybee/secrets/postgres_password}"
+PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE="${PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE:-/etc/moneybee/secrets/postgres_admin_password}"
 PROPOSED_REDIS_ACL_FILE="${PROPOSED_REDIS_ACL_FILE:-/etc/moneybee/secrets/redis.acl}"
 PROPOSED_CADDY_DATA_PATH="${PROPOSED_CADDY_DATA_PATH:-/var/lib/moneybee/caddy/data}"
 PROPOSED_CADDY_CONFIG_PATH="${PROPOSED_CADDY_CONFIG_PATH:-/var/lib/moneybee/caddy/config}"
+PROPOSED_CLAMAV_DATABASE_PATH="${PROPOSED_CLAMAV_DATABASE_PATH:-/var/lib/moneybee/clamav}"
 PROPOSED_BACKUP_ROOT="${PROPOSED_BACKUP_ROOT:-/var/backups/moneybee}"
 
 mkdir -p "$EVIDENCE_DIR"
@@ -40,13 +42,15 @@ ssh \
   bash -s -- \
   "$PROPOSED_RELEASE_ROOT" \
   "$PROPOSED_CURRENT_SYMLINK" \
-  "$PROPOSED_BACKEND_ENV_FILE" \
+  "$PROPOSED_MIGRATOR_ENV_FILE" \
+  "$PROPOSED_RUNTIME_ENV_FILE" \
   "$PROPOSED_POSTGRES_DATA_PATH" \
   "$PROPOSED_REDIS_DATA_PATH" \
-  "$PROPOSED_POSTGRES_PASSWORD_FILE" \
+  "$PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE" \
   "$PROPOSED_REDIS_ACL_FILE" \
   "$PROPOSED_CADDY_DATA_PATH" \
   "$PROPOSED_CADDY_CONFIG_PATH" \
+  "$PROPOSED_CLAMAV_DATABASE_PATH" \
   "$PROPOSED_BACKUP_ROOT" >"$raw" <<'REMOTE'
 set -u
 
@@ -109,14 +113,16 @@ done
 
 path_report release_root "$1"
 path_report current_symlink "$2"
-path_report backend_env_file "$3"
-path_report postgres_data_path "$4"
-path_report redis_data_path "$5"
-path_report postgres_password_file "$6"
-path_report redis_acl_file "$7"
-path_report caddy_data_path "$8"
-path_report caddy_config_path "$9"
-path_report backup_root "${10}"
+path_report migrator_env_file "$3"
+path_report runtime_env_file "$4"
+path_report postgres_data_path "$5"
+path_report redis_data_path "$6"
+path_report postgres_admin_password_file "$7"
+path_report redis_acl_file "$8"
+path_report caddy_data_path "$9"
+path_report caddy_config_path "${10}"
+path_report clamav_database_path "${11}"
+path_report backup_root "${12}"
 
 printf '%s\n' 'mounts.begin'
 findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null || true
@@ -129,13 +135,15 @@ TARGET_HOST="$TARGET_HOST" \
 SSH_USER="$SSH_USER" \
 PROPOSED_RELEASE_ROOT="$PROPOSED_RELEASE_ROOT" \
 PROPOSED_CURRENT_SYMLINK="$PROPOSED_CURRENT_SYMLINK" \
-PROPOSED_BACKEND_ENV_FILE="$PROPOSED_BACKEND_ENV_FILE" \
+PROPOSED_MIGRATOR_ENV_FILE="$PROPOSED_MIGRATOR_ENV_FILE" \
+PROPOSED_RUNTIME_ENV_FILE="$PROPOSED_RUNTIME_ENV_FILE" \
 PROPOSED_POSTGRES_DATA_PATH="$PROPOSED_POSTGRES_DATA_PATH" \
 PROPOSED_REDIS_DATA_PATH="$PROPOSED_REDIS_DATA_PATH" \
-PROPOSED_POSTGRES_PASSWORD_FILE="$PROPOSED_POSTGRES_PASSWORD_FILE" \
+PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE="$PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE" \
 PROPOSED_REDIS_ACL_FILE="$PROPOSED_REDIS_ACL_FILE" \
 PROPOSED_CADDY_DATA_PATH="$PROPOSED_CADDY_DATA_PATH" \
 PROPOSED_CADDY_CONFIG_PATH="$PROPOSED_CADDY_CONFIG_PATH" \
+PROPOSED_CLAMAV_DATABASE_PATH="$PROPOSED_CLAMAV_DATABASE_PATH" \
 PROPOSED_BACKUP_ROOT="$PROPOSED_BACKUP_ROOT" \
 python - <<'PY'
 import hashlib
@@ -166,13 +174,15 @@ candidate = {
     "proposed_paths": {
         "release_root": os.environ["PROPOSED_RELEASE_ROOT"],
         "current_symlink": os.environ["PROPOSED_CURRENT_SYMLINK"],
-        "backend_env_file": os.environ["PROPOSED_BACKEND_ENV_FILE"],
+        "migrator_env_file": os.environ["PROPOSED_MIGRATOR_ENV_FILE"],
+        "runtime_env_file": os.environ["PROPOSED_RUNTIME_ENV_FILE"],
         "postgres_data_path": os.environ["PROPOSED_POSTGRES_DATA_PATH"],
         "redis_data_path": os.environ["PROPOSED_REDIS_DATA_PATH"],
-        "postgres_password_file": os.environ["PROPOSED_POSTGRES_PASSWORD_FILE"],
+        "postgres_admin_password_file": os.environ["PROPOSED_POSTGRES_ADMIN_PASSWORD_FILE"],
         "redis_acl_file": os.environ["PROPOSED_REDIS_ACL_FILE"],
         "caddy_data_path": os.environ["PROPOSED_CADDY_DATA_PATH"],
         "caddy_config_path": os.environ["PROPOSED_CADDY_CONFIG_PATH"],
+        "clamav_database_path": os.environ["PROPOSED_CLAMAV_DATABASE_PATH"],
         "backup_root": os.environ["PROPOSED_BACKUP_ROOT"],
     },
     "review_required": True,

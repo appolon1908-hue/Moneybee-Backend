@@ -9,7 +9,7 @@ with the IRS.
 """
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,6 +68,14 @@ async def generate_adverse_action_notice(
     if review.submission_id is None:
         raise ValueError("Underwriting review has no associated lender submission")
 
+    existing = await db.scalar(
+        select(AdverseActionNotice).where(
+            AdverseActionNotice.underwriting_review_id == review.id
+        )
+    )
+    if existing is not None:
+        return existing
+
     submission = await db.get(models.LenderSubmission, review.submission_id)
     if submission is None:
         raise ValueError("Lender submission not found")
@@ -124,6 +132,65 @@ async def generate_adverse_action_notice(
 # --- Commercial financing disclosure -----------------------------------
 
 
+_PAYMENTS_PER_YEAR = {
+    "MONTHLY": Decimal(12),
+    "WEEKLY": Decimal(52),
+    "BIWEEKLY": Decimal(26),
+    "SEMIMONTHLY": Decimal(24),
+    "DAILY": Decimal(365),
+}
+_MONEY = Decimal("0.01")
+
+
+async def create_offer_with_disclosure(
+    db: AsyncSession,
+    values: dict,
+    *,
+    jurisdiction: str | None,
+) -> models.Offer:
+    """Persist an offer and its mandatory disclosure in one transaction."""
+    offer = models.Offer(**values)
+    db.add(offer)
+    await db.flush()
+    await generate_commercial_financing_disclosure(
+        db, offer, jurisdiction=jurisdiction
+    )
+    return offer
+
+
+def calculate_total_repayment(offer: models.Offer) -> Decimal:
+    """Return an authoritative or reproducibly calculated repayment total.
+
+    The schedule convention is 12 months, 52 weeks, 26 biweekly periods,
+    24 semimonthly periods, and 365 calendar days per year. A partial payment
+    period is not guessed: callers must provide ``total_repayment`` for terms
+    that do not produce an integral number of payments under that convention.
+    """
+    if offer.total_repayment is not None:
+        total = Decimal(str(offer.total_repayment))
+    else:
+        frequency = str(offer.payment_frequency).upper()
+        payments_per_year = _PAYMENTS_PER_YEAR.get(frequency)
+        if payments_per_year is None:
+            raise ValueError(f"Unsupported payment frequency: {offer.payment_frequency}")
+        payment = Decimal(str(offer.payment_amount))
+        if payment <= 0 or offer.term_months <= 0:
+            raise ValueError("Payment amount and term must be positive")
+        payment_count = Decimal(offer.term_months) * payments_per_year / Decimal(12)
+        if payment_count != payment_count.to_integral_value():
+            raise ValueError(
+                "Payment schedule has a partial period; provide total_repayment explicitly"
+            )
+        total = payment * payment_count
+    try:
+        total = total.quantize(_MONEY, rounding=ROUND_HALF_UP)
+    except InvalidOperation as exc:
+        raise ValueError("Total repayment cannot be represented as money") from exc
+    if total <= 0:
+        raise ValueError("Total repayment must be positive")
+    return total
+
+
 async def generate_commercial_financing_disclosure(
     db: AsyncSession,
     offer: models.Offer,
@@ -144,11 +211,7 @@ async def generate_commercial_financing_disclosure(
     even covers (thresholds and exemptions vary). Treat jurisdiction as
     informational until a lawyer maps it to a real per-state template."""
     amount_financed = Decimal(str(offer.amount))
-    total_repayment = (
-        Decimal(str(offer.total_repayment))
-        if offer.total_repayment is not None
-        else Decimal(str(offer.payment_amount)) * offer.term_months
-    )
+    total_repayment = calculate_total_repayment(offer)
     finance_charge = total_repayment - amount_financed
 
     if offer.apr is not None:

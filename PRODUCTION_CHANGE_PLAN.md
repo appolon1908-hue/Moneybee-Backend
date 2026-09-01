@@ -2,14 +2,14 @@
 
 ## Decision
 
-**BLOCKED — do not execute the production migration or application deployment.** The production-derived rehearsal proved the restored database can advance from Alembic `20260827_0016` to `20260901_0022`, but the metadata comparison still detects substantive model/schema drift. Off-host DR, PITR, production document quarantine/storage, and a post-change recovery rehearsal are also absent.
+**REPOSITORY CANDIDATE ONLY — do not execute a staging or production deployment from this document.** PR 38 closes the repository-level migration, privilege, compliance, concurrency, retry, and release-contract blockers. Environment-owned backup/restore, PITR, off-host DR, immutable registry digests, and an approved change window remain mandatory before deployment.
 
 ## Candidate release
 
-- Source baseline: `ff3a688b705450f9e2f33a88ad08e16b0c9f6143` plus the uncommitted reviewed changes in this working tree.
-- Current deployed source: `07dda9c6c9b09c00d1c91ba545a5ef9bfc804dd3`.
-- Current production Alembic revision: `20260827_0016`.
-- Candidate Alembic head: `20260901_0022`.
+- Source baseline: PR 38 exact head; record the final SHA after required checks and reviews pass.
+- Current deployed source: not re-verified by this repository-only change.
+- Current production Alembic revision: must be captured in the approved pre-change baseline.
+- Candidate Alembic head: `20260901_0024`.
 - Production images must not be updated until CI produces immutable digest references, an SBOM, and security results.
 
 ## Planned sequence after blockers close and owner approves
@@ -27,19 +27,21 @@
 
 | Migration | Classification | Reason |
 |---|---|---|
-| `0016 → 0022` existing chain | SHORT LOCK | Rehearsal completed in 1.633 seconds on the current small restored database, but production lock behavior must be rechecked immediately before change. |
-| Required model/schema compatibility migration | MAINTENANCE WINDOW REQUIRED | Not yet authored; it must reconcile bank credential storage and constraint/index identity without losing access to provider credentials. |
+| Existing chain through `0022` | SHORT LOCK | Rehearsal evidence exists, but lock behavior must be measured again against the current approved restore. |
+| `20260901_0023` bank credential reference | MAINTENANCE WINDOW REQUIRED | Fails closed on unresolved legacy credential rows and requires an approved credential-reference transition. Downgrade refuses to strand external references. |
+| `20260901_0024` provider retry and notice uniqueness | SHORT LOCK | Adds nullable retry columns and a uniqueness constraint after rejecting duplicate legacy notice evidence. Re-measure on current restored data. |
 
 ## Rollback
 
 - Application rollback is permitted only to an immutable prior digest that remains compatible with the post-migration schema.
 - Database rollback uses PITR to the recorded pre-change recovery point or a reviewed Alembic downgrade where proven safe. Never overwrite production without incident authorization.
-- Preserve the old credential column until the new reference path is populated and read compatibility is proven.
+- Migration `0023` preserves data by refusing unsafe upgrade/downgrade paths; use a reviewed forward fix if its protection triggers.
 - If readiness, runtime grants, or financial invariant tests fail, stop traffic to the candidate release and return to the compatible prior image; do not edit financial rows manually.
 
 ## Required approval evidence
 
-- Reviewed compatibility migration and production-derived rehearsal pass.
+- Exact-head GitHub checks and fresh code/human review pass.
+- Current production-derived rehearsal through `20260901_0024` passes.
 - Verified off-host backup retrieval and PITR recovery point.
 - Immutable image provenance/SBOM/security gate.
 - Approved external object storage and malware scanner.

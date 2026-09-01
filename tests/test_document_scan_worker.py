@@ -1,6 +1,7 @@
 import asyncio
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
@@ -11,7 +12,11 @@ from fastapi.testclient import TestClient
 from app import models, worker
 from app.config import settings
 from app.db import SessionLocal
+from app.integrations.base import ProviderError
+from app.integrations.base import MalwareScanResult
 from app.main import app
+from app.integration_models import OperationalException
+from sqlalchemy import select
 
 
 class _FakeStorage:
@@ -24,6 +29,11 @@ class _FakeStorage:
 
     async def delete_private(self, *, object_key: str) -> None:
         self.deleted_keys.append(object_key)
+
+
+class _FailingStorage:
+    async def get_private(self, *, object_key: str) -> bytes:
+        raise ProviderError("storage", "temporary outage")
 
 
 class _FakeClamd:
@@ -156,3 +166,105 @@ async def test_scan_pending_document_rejects_and_deletes_an_infected_file(monkey
         assert document.status == "REJECTED"
         assert "FOUND" in document.scan_result
     assert fake_storage.deleted_keys
+
+
+async def test_scan_failure_persists_backoff_and_does_not_starve_another_document(monkeypatch):
+    monkeypatch.setattr(settings, "malware_scan_provider", "clamav")
+    monkeypatch.setattr(worker, "storage_adapter", lambda: _FailingStorage())
+    with TestClient(app):
+        first_id = await _seed_quarantined_document()
+        assert await worker.scan_pending_document() is None
+        async with SessionLocal() as db:
+            first = await db.get(models.Document, uuid.UUID(first_id))
+            assert first.provider_attempt_count == 1
+            assert first.provider_last_error == "storage: temporary outage"
+            assert first.provider_next_attempt_at is not None
+            assert first.provider_terminal_at is None
+
+        server = _FakeClamd(b"stream: OK\0")
+        port = await server.start()
+        monkeypatch.setattr(settings, "clamav_host", "127.0.0.1")
+        monkeypatch.setattr(settings, "clamav_port", port)
+        monkeypatch.setattr(worker, "storage_adapter", lambda: _FakeStorage(b"safe"))
+        second_id = await _seed_quarantined_document()
+        try:
+            processed = await worker.scan_pending_document()
+            assert processed == second_id
+            async with SessionLocal() as db:
+                first = await db.get(models.Document, uuid.UUID(first_id))
+                first.provider_next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+                await db.commit()
+            assert await worker.scan_pending_document() == first_id
+            async with SessionLocal() as db:
+                first = await db.get(models.Document, uuid.UUID(first_id))
+                assert first.status == "CLEAN"
+                assert first.provider_last_error is None
+                assert first.provider_next_attempt_at is None
+        finally:
+            await server.stop()
+
+
+async def test_repeated_scan_failure_dead_letters_and_survives_worker_restart(monkeypatch):
+    monkeypatch.setattr(settings, "malware_scan_provider", "clamav")
+    monkeypatch.setattr(worker, "storage_adapter", lambda: _FailingStorage())
+    with TestClient(app):
+        document_id = await _seed_quarantined_document()
+        async with SessionLocal() as db:
+            document = await db.get(models.Document, uuid.UUID(document_id))
+            document.provider_attempt_count = worker.PROVIDER_MAX_ATTEMPTS - 1
+            await db.commit()
+        assert await worker.scan_pending_document() is None
+        async with SessionLocal() as db:
+            document = await db.get(models.Document, uuid.UUID(document_id))
+            assert document.provider_attempt_count == worker.PROVIDER_MAX_ATTEMPTS
+            assert document.provider_terminal_at is not None
+            assert document.provider_next_attempt_at is None
+            exception = await db.scalar(
+                select(OperationalException).where(
+                    OperationalException.fingerprint
+                    == f"DOCUMENT_SCAN_RETRY_EXHAUSTED:{document_id}"
+                )
+            )
+            assert exception is not None
+        monkeypatch.setattr(worker, "WORKER_ID", "replacement-worker")
+        assert await worker.scan_pending_document() is None
+        async with SessionLocal() as db:
+            document = await db.get(models.Document, uuid.UUID(document_id))
+            assert document.provider_attempt_count == worker.PROVIDER_MAX_ATTEMPTS
+
+
+def test_provider_backoff_is_bounded_deterministic_and_increases():
+    item_id = uuid.uuid4()
+    delays = [worker.provider_retry_delay_seconds(item_id, attempt) for attempt in range(1, 9)]
+    assert delays == [worker.provider_retry_delay_seconds(item_id, attempt) for attempt in range(1, 9)]
+    assert delays == sorted(delays)
+    assert all(2 ** attempt <= delay <= min(3600, 2 ** attempt + 2 ** attempt // 4)
+               for attempt, delay in enumerate(delays, 1))
+
+
+async def test_postgres_concurrent_workers_cannot_claim_the_same_document(monkeypatch):
+    if not settings.database_url.startswith("postgresql"):
+        import pytest
+
+        pytest.skip("PostgreSQL SKIP LOCKED evidence")
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingScanner:
+        async def scan(self, content: bytes) -> MalwareScanResult:
+            started.set()
+            await release.wait()
+            return MalwareScanResult(provider="fixture", clean=True, signature=None, raw="OK")
+
+    monkeypatch.setattr(settings, "malware_scan_provider", "clamav")
+    monkeypatch.setattr(worker, "storage_adapter", lambda: _FakeStorage(b"safe"))
+    monkeypatch.setattr(worker, "malware_scanner", lambda: BlockingScanner())
+    with TestClient(app):
+        document_id = await _seed_quarantined_document()
+        first = asyncio.create_task(worker.scan_pending_document())
+        await asyncio.wait_for(started.wait(), timeout=5)
+        second = await worker.scan_pending_document()
+        release.set()
+        assert await first == document_id
+        assert second is None

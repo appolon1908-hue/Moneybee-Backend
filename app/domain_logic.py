@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas, services
 from app.auth import Principal
+from app.compliance_service import generate_adverse_action_notice
 
 
 POLICY_VERSION = 2
@@ -265,6 +266,11 @@ async def create_underwriting_review(
     payload: schemas.UnderwritingReviewInput,
     principal: Principal,
 ) -> models.UnderwritingReview:
+    if payload.decision == "DECLINE" and payload.submission_id is not None and not payload.reason_codes:
+        raise HTTPException(
+            status_code=422,
+            detail="A lender decline requires at least one specific reason code",
+        )
     if payload.submission_id is not None:
         submission = await db.get(models.LenderSubmission, payload.submission_id)
         if submission is None or submission.application_id != application.id:
@@ -300,6 +306,8 @@ async def create_underwriting_review(
     )
     db.add(review)
     await db.flush()
+    if payload.decision == "DECLINE" and payload.submission_id is not None:
+        await generate_adverse_action_notice(db, review)
     db.add(
         models.AuditEvent(
             actor_id=principal.subject,

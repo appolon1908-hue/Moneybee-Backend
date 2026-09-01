@@ -3,7 +3,7 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -663,7 +663,7 @@ async def run_fraud_assessment(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("fraud.run"))],
 ):
-    application = await services.get_authorized_application(db, application_id, user)
+    application = await services.get_authorized_application(db, application_id, user, write=True)
     assessment = await domain_logic.evaluate_fraud(db, application)
     db.add(
         models.AuditEvent(
@@ -714,9 +714,42 @@ async def create_underwriting_review(
     payload: schemas.UnderwritingReviewInput,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("underwriting.review"))],
+    request: Request,
 ):
-    application = await services.get_authorized_application(db, application_id, user)
+    idempotency_key = request.headers.get("Idempotency-Key")
+    if idempotency_key is not None and not 8 <= len(idempotency_key) <= 160:
+        raise HTTPException(status_code=422, detail="Invalid Idempotency-Key length")
+    application = await services.get_authorized_application(db, application_id, user, write=True)
+    route = f"/admin/applications/{application_id}/underwriting/reviews"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    if idempotency_key is not None:
+        replay = await _funding_idempotency_replay(
+            db,
+            route=route,
+            actor_id=user.subject,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            review = await db.get(
+                models.UnderwritingReview,
+                uuid.UUID(replay.response_body["review_id"]),
+            )
+            if review is None:
+                raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+            return review
     review = await domain_logic.create_underwriting_review(db, application, payload, user)
+    if idempotency_key is not None:
+        db.add(
+            models.IdempotencyRecord(
+                key=idempotency_key,
+                actor_id=user.subject,
+                route=route,
+                request_hash=request_hash,
+                response_status=201,
+                response_body={"review_id": str(review.id)},
+            )
+        )
     await db.commit()
     await db.refresh(review)
     return review
@@ -853,7 +886,11 @@ async def create_commission_adjustment(
 
 
 async def _load_commission_or_404(db: AsyncSession, commission_id: uuid.UUID) -> models.Commission:
-    commission = await db.get(models.Commission, commission_id)
+    commission = await db.scalar(
+        select(models.Commission)
+        .where(models.Commission.id == commission_id)
+        .with_for_update()
+    )
     if commission is None:
         raise HTTPException(status_code=404, detail="Commission not found")
     return commission
@@ -895,8 +932,13 @@ async def record_commission_receipt(
     if replay:
         return await _load_commission_or_404(db, commission_id)
 
-    commission.received_amount = commission.received_amount + payload.amount
     net_expected = await _net_expected_amount(db, commission)
+    if commission.received_amount + payload.amount > net_expected:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Receipt would exceed the commission's net expected amount ({net_expected}).",
+        )
+    commission.received_amount = commission.received_amount + payload.amount
     if commission.received_amount >= net_expected:
         commission.status = "RECEIVED"
     elif commission.received_amount > 0:

@@ -2,6 +2,9 @@ import os
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
+
+import pytest
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
@@ -9,7 +12,10 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi.testclient import TestClient
 
-from app.compliance_service import generate_commercial_financing_disclosure
+from app.compliance_service import (
+    calculate_total_repayment,
+    generate_commercial_financing_disclosure,
+)
 from app.main import app
 
 
@@ -154,6 +160,42 @@ async def test_creating_an_offer_generates_a_commercial_financing_disclosure():
         assert acknowledge.json()["acknowledged_by"] == "local-admin"
 
 
+async def test_application_offer_route_uses_the_same_disclosure_service():
+    with TestClient(app) as client:
+        application_id, _submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        offer = client.post(
+            f"/api/v2/lender/applications/{application_id}/offers",
+            json={
+                "application_id": application_id,
+                "lender_id": lender_id,
+                "program_id": program_id,
+                "product_type": "WORKING_CAPITAL",
+                "amount": 12000,
+                "term_months": 12,
+                "payment_frequency": "MONTHLY",
+                "payment_amount": 1100,
+                "total_repayment": 13200,
+            },
+        )
+        assert offer.status_code == 200
+        disclosure = client.get(
+            f"/api/v2/admin/offers/{offer.json()['id']}/commercial-financing-disclosure"
+        )
+        assert disclosure.status_code == 200
+        assert disclosure.json()["total_repayment_amount"] == "13200.00"
+
+
+def test_offer_persistence_is_centralized_behind_disclosure_generation():
+    root = Path(__file__).parents[1]
+    offenders = []
+    for path in (root / "app").rglob("*.py"):
+        if path.name != "compliance_service.py" and "models.Offer(" in path.read_text(
+            encoding="utf-8"
+        ):
+            offenders.append(str(path.relative_to(root)))
+    assert offenders == []
+
+
 async def test_commercial_financing_disclosure_estimates_apr_from_a_factor_rate_offer():
     with TestClient(app) as client:
         application_id, submission_id, lender_id, program_id = _prepare_matched_submission(client)
@@ -237,3 +279,52 @@ async def test_disclosure_text_still_includes_the_cost_figures_when_apr_is_unava
     assert "Finance charge: $1,000.00" in disclosure.disclosure_text
     assert "Total repayment amount: $11,000.00" in disclosure.disclosure_text
     assert "Estimated APR: not available" in disclosure.disclosure_text
+
+
+@pytest.mark.parametrize(
+    ("frequency", "term_months", "payment", "expected"),
+    [
+        ("MONTHLY", 12, "100.00", "1200.00"),
+        ("WEEKLY", 12, "100.00", "5200.00"),
+        ("BIWEEKLY", 12, "100.00", "2600.00"),
+        ("SEMIMONTHLY", 12, "100.00", "2400.00"),
+        ("DAILY", 12, "100.00", "36500.00"),
+        ("MONTHLY", 1, "10.005", "10.01"),
+    ],
+)
+def test_total_repayment_uses_frequency_conventions(
+    frequency: str, term_months: int, payment: str, expected: str
+):
+    offer = _FakeOffer(
+        id=uuid.uuid4(), application_id=uuid.uuid4(), amount=Decimal("100"),
+        term_months=term_months, payment_frequency=frequency,
+        payment_amount=Decimal(payment), apr=None, total_repayment=None,
+        prepayment_terms=None,
+    )
+    assert calculate_total_repayment(offer) == Decimal(expected)  # type: ignore[arg-type]
+
+
+def test_explicit_total_repayment_is_authoritative():
+    offer = _FakeOffer(
+        id=uuid.uuid4(), application_id=uuid.uuid4(), amount=Decimal("100"),
+        term_months=5, payment_frequency="IRREGULAR", payment_amount=Decimal("0"),
+        apr=None, total_repayment=Decimal("123.456"), prepayment_terms=None,
+    )
+    assert calculate_total_repayment(offer) == Decimal("123.46")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("frequency", "term_months", "payment"),
+    [("IRREGULAR", 12, "10"), ("DAILY", 1, "10"), ("MONTHLY", 12, "0")],
+)
+def test_unreliable_or_invalid_schedule_is_rejected(
+    frequency: str, term_months: int, payment: str
+):
+    offer = _FakeOffer(
+        id=uuid.uuid4(), application_id=uuid.uuid4(), amount=Decimal("100"),
+        term_months=term_months, payment_frequency=frequency,
+        payment_amount=Decimal(payment), apr=None, total_repayment=None,
+        prepayment_terms=None,
+    )
+    with pytest.raises(ValueError):
+        calculate_total_repayment(offer)  # type: ignore[arg-type]

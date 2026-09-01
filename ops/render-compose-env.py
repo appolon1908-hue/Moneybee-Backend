@@ -43,22 +43,25 @@ def main() -> int:
         "postgres": "MONEYBEE_POSTGRES_IMAGE",
         "redis": "MONEYBEE_REDIS_IMAGE",
         "caddy": "MONEYBEE_CADDY_IMAGE",
+        "clamav": "MONEYBEE_CLAMAV_IMAGE",
     }.items():
         emit(env_name, images[key])
 
     for key, env_name in {
-        "backend_env_file": "MONEYBEE_BACKEND_ENV_FILE",
+        "migrator_env_file": "MONEYBEE_MIGRATOR_ENV_FILE",
+        "runtime_env_file": "MONEYBEE_RUNTIME_ENV_FILE",
         "postgres_data_path": "MONEYBEE_POSTGRES_DATA_PATH",
         "redis_data_path": "MONEYBEE_REDIS_DATA_PATH",
-        "postgres_password_file": "MONEYBEE_POSTGRES_PASSWORD_FILE",
+        "postgres_admin_password_file": "MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE",
         "redis_acl_file": "MONEYBEE_REDIS_ACL_FILE",
+        "clamav_database_path": "MONEYBEE_CLAMAV_DATABASE_PATH",
         "caddy_data_path": "MONEYBEE_CADDY_DATA_PATH",
         "caddy_config_path": "MONEYBEE_CADDY_CONFIG_PATH",
     }.items():
         if runtime["data_mode"] == "external" and key in {
             "postgres_data_path",
             "redis_data_path",
-            "postgres_password_file",
+            "postgres_admin_password_file",
             "redis_acl_file",
         }:
             continue

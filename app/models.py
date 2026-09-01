@@ -490,6 +490,18 @@ class Document(Base, Record):
     scan_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     scan_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    provider_lease_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_terminal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Contract(Base, Record):
@@ -510,6 +522,18 @@ class Contract(Base, Record):
         DateTime(timezone=True), nullable=True
     )
     signed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    provider_lease_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_terminal_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

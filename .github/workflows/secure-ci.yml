@@ -68,7 +68,7 @@ jobs:
           python scripts/check_no_private_keys.py
           python scripts/check_identity_email_readiness.py
           python -m compileall -q app tests migrations ops scripts
-          python -m ruff check app tests migrations scripts
+          python -m ruff check app tests migrations scripts ops
       - name: Render endpoint catalog candidate
         run: python scripts/generate_endpoint_catalog.py
       - name: Upload endpoint catalog candidate
@@ -213,7 +213,7 @@ jobs:
           python scripts/generate_endpoint_catalog.py
       - name: Validate hardened API and contract
         run: |
-          python -m ruff check app tests scripts migrations
+          python -m ruff check app tests scripts migrations ops
           python -m pytest -q tests/test_commercial_financing_disclosure.py
           python scripts/verify_openapi_contract.py
           python scripts/generate_endpoint_catalog.py --check
@@ -247,7 +247,8 @@ jobs:
         run: |
           bash -n ops/runtime-path-preflight.sh
           bash -n ops/deploy-staging.sh
-          python -m py_compile ops/validate-release-lock.py ops/render-compose-env.py ops/verify-runtime-env.py
+          python -m py_compile ops/validate-release-lock.py ops/render-compose-env.py ops/verify-runtime-env.py ops/verify-compose-contract.py
+          python ops/verify-compose-contract.py
           python ops/validate-release-lock.py \
             --runtime-lock deploy/runtime-paths.lock.json \
             --release-lock deploy/release.lock.json \
@@ -263,13 +264,13 @@ jobs:
               "images": {
                   "api": "ghcr.io/appolon1908-hue/moneybee-api@sha256:" + "2" * 64
               },
-              "migration_head": "20260826_0015",
+              "migration_head": "20260901_0024",
               "configuration_checksum": "3" * 64,
               "backup_reference": "staging-backup-test",
           }
           open("/tmp/moneybee-env-gate/release.json", "w").write(json.dumps(lock))
           PY
-          cat >/tmp/moneybee-env-gate/backend.env <<'ENV'
+          cat >/tmp/moneybee-env-gate/runtime.env <<'ENV'
           APP_ENV=staging
           DATABASE_URL=postgresql+asyncpg://moneybee:password@moneybee-postgres:5432/moneybee
           REDIS_URL=redis://moneybee-redis:6379/0
@@ -297,20 +298,20 @@ jobs:
           FIELD_ENCRYPTION_ACTIVE_KEY_VERSION=1
           SOURCE_SHA=1111111111111111111111111111111111111111
           API_IMAGE_DIGEST=ghcr.io/appolon1908-hue/moneybee-api@sha256:2222222222222222222222222222222222222222222222222222222222222222
-          MIGRATION_HEAD=20260826_0015
+          MIGRATION_HEAD=20260901_0024
           CONFIGURATION_CHECKSUM=3333333333333333333333333333333333333333333333333333333333333333
           BACKUP_REFERENCE=staging-backup-test
           BACKUP_STATUS=PASS
           RESTORE_STATUS=PASS
           STAGING_STATUS=NOT_CONFIGURED
           ENV
-          chmod 600 /tmp/moneybee-env-gate/backend.env
+          chmod 600 /tmp/moneybee-env-gate/runtime.env
           python ops/verify-runtime-env.py \
-            --env-file /tmp/moneybee-env-gate/backend.env \
+            --env-file /tmp/moneybee-env-gate/runtime.env \
             --release-lock /tmp/moneybee-env-gate/release.json
-          sed -i 's/CRM_PROVIDER=disabled/CRM_PROVIDER=odoo/' /tmp/moneybee-env-gate/backend.env
+          sed -i 's/CRM_PROVIDER=disabled/CRM_PROVIDER=odoo/' /tmp/moneybee-env-gate/runtime.env
           if python ops/verify-runtime-env.py \
-            --env-file /tmp/moneybee-env-gate/backend.env \
+            --env-file /tmp/moneybee-env-gate/runtime.env \
             --release-lock /tmp/moneybee-env-gate/release.json; then
             echo "Runtime environment gate accepted a live provider." >&2
             exit 1
@@ -330,21 +331,29 @@ jobs:
           ZERO: "0000000000000000000000000000000000000000000000000000000000000000"
         run: |
           mkdir -p /tmp/moneybee/postgres /tmp/moneybee/redis \
-            /tmp/moneybee/caddy-data /tmp/moneybee/caddy-config
+            /tmp/moneybee/caddy-data /tmp/moneybee/caddy-config /tmp/moneybee/clamav
           printf 'test-password' >/tmp/moneybee/postgres_password
           printf 'user health on >test-password +ping ~*\nuser default off\n' >/tmp/moneybee/redis.acl
-          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/backend.env
+          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/migrator.env
+          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/runtime.env
           export MONEYBEE_API_IMAGE="ghcr.io/appolon1908-hue/moneybee-api@sha256:$ZERO"
           export MONEYBEE_WORKER_IMAGE="ghcr.io/appolon1908-hue/moneybee-worker@sha256:$ZERO"
           export MONEYBEE_MIGRATE_IMAGE="ghcr.io/appolon1908-hue/moneybee-migrate@sha256:$ZERO"
+          export MONEYBEE_MARKETING_IMAGE="ghcr.io/appolon1908-hue/moneybee-marketing@sha256:$ZERO"
+          export MONEYBEE_BORROWER_IMAGE="ghcr.io/appolon1908-hue/moneybee-borrower@sha256:$ZERO"
+          export MONEYBEE_LENDER_IMAGE="ghcr.io/appolon1908-hue/moneybee-lender@sha256:$ZERO"
+          export MONEYBEE_ADMIN_IMAGE="ghcr.io/appolon1908-hue/moneybee-admin@sha256:$ZERO"
           export MONEYBEE_POSTGRES_IMAGE="postgres@sha256:$ZERO"
           export MONEYBEE_REDIS_IMAGE="redis@sha256:$ZERO"
           export MONEYBEE_CADDY_IMAGE="caddy@sha256:$ZERO"
-          export MONEYBEE_BACKEND_ENV_FILE=/tmp/moneybee/backend.env
+          export MONEYBEE_CLAMAV_IMAGE="clamav@sha256:$ZERO"
+          export MONEYBEE_MIGRATOR_ENV_FILE=/tmp/moneybee/migrator.env
+          export MONEYBEE_RUNTIME_ENV_FILE=/tmp/moneybee/runtime.env
           export MONEYBEE_POSTGRES_DATA_PATH=/tmp/moneybee/postgres
           export MONEYBEE_REDIS_DATA_PATH=/tmp/moneybee/redis
-          export MONEYBEE_POSTGRES_PASSWORD_FILE=/tmp/moneybee/postgres_password
+          export MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE=/tmp/moneybee/postgres_password
           export MONEYBEE_REDIS_ACL_FILE=/tmp/moneybee/redis.acl
+          export MONEYBEE_CLAMAV_DATABASE_PATH=/tmp/moneybee/clamav
           export MONEYBEE_CADDY_DATA_PATH=/tmp/moneybee/caddy-data
           export MONEYBEE_CADDY_CONFIG_PATH=/tmp/moneybee/caddy-config
           export CADDY_ACME_EMAIL=ci@example.invalid

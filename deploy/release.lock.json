@@ -21,7 +21,8 @@
     "admin": null,
     "postgres": null,
     "redis": null,
-    "caddy": null
+    "caddy": null,
+    "clamav": null
   },
   "urls": {
     "marketing": "https://staging.moneybeeloan.com",

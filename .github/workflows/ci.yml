@@ -19,12 +19,16 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install ".[dev]"
-      - run: ruff check app tests migrations
+      - run: python -m ruff check app tests migrations scripts ops
       - run: pytest -q
       - name: Smoke-test critical API surfaces
         run: python scripts/smoke_api.py
       - name: Verify OpenAPI contract and additive manifests
-        run: python scripts/verify_openapi_contract.py
+        run: |
+          python scripts/verify_openapi_contract.py
+          python scripts/generate_endpoint_catalog.py --check
+          python scripts/check_no_private_keys.py
+          python scripts/check_identity_email_readiness.py
       - name: Upload reviewed OpenAPI sources
         uses: actions/upload-artifact@v4
         with:
@@ -42,7 +46,7 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
-      - run: python -m compileall -q app migrations
+      - run: python -m compileall -q app tests migrations scripts ops
       - run: docker build -t moneybee-backend:test .
 
   postgres-identity-tenancy:
@@ -52,26 +56,23 @@ jobs:
       AUTO_CREATE_SCHEMA: "false"
       LOCAL_AUTH_BYPASS: "false"
       LOCAL_IDENTITY_ENFORCEMENT: "true"
-      DATABASE_URL: postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_test
+      DATABASE_URL: postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee
     steps:
       - uses: actions/checkout@v4
       - name: Start runner PostgreSQL
         run: |
           sudo systemctl start postgresql.service
-          sudo -u postgres psql -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE USER moneybee_migrator WITH PASSWORD 'migrator_test' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-          CREATE USER moneybee_runtime WITH PASSWORD 'runtime_test' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-          SQL
-          sudo -u postgres createdb --owner=moneybee_migrator moneybee_test
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_test <<'SQL'
-          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-          GRANT USAGE, CREATE ON SCHEMA public TO moneybee_migrator;
-          GRANT CONNECT ON DATABASE moneybee_test TO moneybee_runtime;
-          GRANT USAGE ON SCHEMA public TO moneybee_runtime;
-          ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO moneybee_runtime;
-          ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO moneybee_runtime;
-          ALTER DEFAULT PRIVILEGES FOR ROLE moneybee_migrator IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO moneybee_runtime;
-          SQL
+          sudo -u postgres createdb moneybee
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee -c \
+            'CREATE ROLE moneybee_legacy NOLOGIN; CREATE TABLE public.legacy_owned(id integer); ALTER TABLE public.legacy_owned OWNER TO moneybee_legacy;'
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee \
+            -v migrator_password=migrator_test -v runtime_password=runtime_test \
+            -f deploy/postgres/moneybee_roles.sql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee \
+            -v migrator_password=migrator_test -v runtime_password=runtime_test \
+            -f deploy/postgres/moneybee_roles.sql
+          PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee \
+            -v ON_ERROR_STOP=1 -c 'ALTER TABLE public.legacy_owned ADD COLUMN migrated boolean DEFAULT false; DROP TABLE public.legacy_owned'
           pg_isready --host=localhost --port=5432 --username=moneybee_migrator
       - uses: actions/setup-python@v7
         with:
@@ -87,26 +88,66 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+      - name: Verify migration 0023 legacy fail-closed and compatibility paths
+        run: |
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_legacy
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_compatible
+          for database in moneybee_legacy moneybee_compatible; do
+            DATABASE_URL="postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/$database" alembic upgrade 20260901_0022
+            sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$database" -c \
+              'ALTER TABLE bank_provider_states RENAME COLUMN credential_reference TO access_token_ciphertext; ALTER TABLE bank_provider_states ALTER COLUMN access_token_ciphertext TYPE text;'
+          done
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_legacy <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO bank_provider_states
+            (id, created_at, updated_at, connection_id, provider, access_token_ciphertext, metadata_payload)
+          VALUES
+            ('00000000-0000-0000-0000-000000000023', now(), now(), '00000000-0000-0000-0000-000000000024', 'fixture', 'legacy-fixture', '{}');
+          SET session_replication_role = origin;
+          SQL
+          if DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_legacy' alembic upgrade head; then
+            echo 'Migration accepted unresolved legacy credential rows' >&2
+            exit 1
+          fi
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic upgrade head
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_compatible <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO bank_provider_states
+            (id, created_at, updated_at, connection_id, provider, credential_reference, metadata_payload)
+          VALUES
+            ('00000000-0000-0000-0000-000000000025', now(), now(), '00000000-0000-0000-0000-000000000026', 'fixture', 'secret://verified/fixture', '{}');
+          SET session_replication_role = origin;
+          SQL
+          if DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic downgrade 20260901_0022; then
+            echo 'Downgrade stranded an external credential reference' >&2
+            exit 1
+          fi
+          before="$(PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_compatible -Atc "select column_name from information_schema.columns where table_name='bank_provider_states' order by ordinal_position")"
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic upgrade head
+          after="$(PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_compatible -Atc "select column_name from information_schema.columns where table_name='bank_provider_states' order by ordinal_position")"
+          test "$before" = "$after"
+      - name: Test identity downgrade and current forward-fix path
+        run: |
+          alembic downgrade 20260823_0011
+          alembic upgrade head
       - name: Test complete application under least-privilege runtime identity
         env:
           LOCAL_AUTH_BYPASS: "true"
-          DATABASE_URL: postgresql+asyncpg://moneybee_runtime:runtime_test@localhost:5432/moneybee_test
+          DATABASE_URL: postgresql+asyncpg://moneybee_runtime:runtime_test@localhost:5432/moneybee
         run: pytest -q
       - name: Assert runtime cannot perform DDL or administrative operations
         env:
           PGPASSWORD: runtime_test
         run: |
-          ! psql -h localhost -U moneybee_runtime -d moneybee_test -c 'CREATE TABLE runtime_must_not_create(id integer)'
-          test "$(psql -h localhost -U moneybee_runtime -d moneybee_test -Atc "select rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls from pg_roles where rolname=current_user")" = "f"
-      - name: Test identity downgrade and current forward-fix path
-        run: |
-          alembic downgrade 20260823_0011
-          alembic upgrade head
+          ! psql -h localhost -U moneybee_runtime -d moneybee -c 'CREATE TABLE runtime_must_not_create(id integer)'
+          ! psql -h localhost -U moneybee_runtime -d moneybee -c 'TRUNCATE capability_flags'
+          ! psql -h localhost -U moneybee_runtime -d moneybee -c 'GRANT moneybee_runtime TO moneybee_migrator'
+          test "$(psql -h localhost -U moneybee_runtime -d moneybee -Atc "select rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls from pg_roles where rolname=current_user")" = "f"
       - name: Test empty database to head
         run: |
-          alembic downgrade base
-          alembic upgrade head
-          alembic check
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_empty
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_empty' alembic upgrade head
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_empty' alembic check
 
   containers:
     needs: [verify, postgres-identity-tenancy]

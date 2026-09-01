@@ -232,6 +232,14 @@ async def test_send_pending_contract_envelope_leaves_draft_when_provider_disable
         # esign_provider defaults to "disabled" in tests -> ProviderError ->
         # left as DRAFT for the next attempt, never silently marked sent.
         assert contract.status == "DRAFT"
+        attempted = await db.scalar(
+            select(models.Contract)
+            .where(models.Contract.provider_attempt_count > 0)
+            .order_by(models.Contract.provider_attempt_count.desc())
+        )
+        assert attempted is not None
+        assert attempted.provider_last_error is not None
+        assert attempted.provider_next_attempt_at is not None
 
 
 async def test_process_pending_docusign_event_signs_contract_and_advances_funding():

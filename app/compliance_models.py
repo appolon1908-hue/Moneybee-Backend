@@ -17,6 +17,11 @@ class AdverseActionNotice(Base, Record):
     the fact."""
 
     __tablename__ = "adverse_action_notices"
+    __table_args__ = (
+        UniqueConstraint(
+            "underwriting_review_id", name="uq_adverse_action_notice_review"
+        ),
+    )
 
     application_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("applications.id"), index=True

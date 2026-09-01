@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas, services
 from app.auth import Principal, current_principal, require_permission
-from app.compliance_service import generate_commercial_financing_disclosure
+from app.compliance_service import create_offer_with_disclosure
 from app.db import get_db
 
 
@@ -65,8 +65,6 @@ async def lender_offer(
                 "message": "The lender organization does not own this resource.",
             },
         )
-    item = models.Offer(**payload.model_dump())
-    db.add(item)
     application = await db.get(models.Application, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
@@ -76,6 +74,9 @@ async def lender_offer(
         models.ApplicationStatus.OFFERS_AVAILABLE,
         user,
         reason="Lender created offer",
+    )
+    item = await create_offer_with_disclosure(
+        db, payload.model_dump(), jurisdiction=application.state
     )
     await db.commit()
     await db.refresh(item)
@@ -263,7 +264,6 @@ async def create_submission_offer(
         raise HTTPException(status_code=422, detail="Application ID mismatch")
     if payload.lender_id != submission.lender_id:
         raise HTTPException(status_code=422, detail="Lender ID mismatch")
-    item = models.Offer(**payload.model_dump())
     submission.status = "OFFERED"
     application = await db.get(models.Application, submission.application_id)
     if application is None:
@@ -275,10 +275,8 @@ async def create_submission_offer(
         user,
         reason="Lender created offer from submission",
     )
-    db.add(item)
-    await db.flush()
-    await generate_commercial_financing_disclosure(
-        db, item, jurisdiction=application.state
+    item = await create_offer_with_disclosure(
+        db, payload.model_dump(), jurisdiction=application.state
     )
     db.add(
         models.OutboxEvent(

@@ -22,16 +22,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     connection = op.get_bind()
-    columns = {
-        row[0]
-        for row in connection.execute(
-            sa.text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = current_schema() "
-                "AND table_name = 'bank_provider_states'"
-            )
-        )
-    }
+    columns = {column["name"] for column in sa.inspect(connection).get_columns("bank_provider_states")}
     if "credential_reference" in columns and "access_token_ciphertext" not in columns:
         return
     if "access_token_ciphertext" not in columns:
@@ -46,37 +37,45 @@ def upgrade() -> None:
             "external secret references before applying this migration"
         )
 
-    if "credential_reference" not in columns:
-        op.add_column(
+    if connection.dialect.name == "sqlite":
+        with op.batch_alter_table("bank_provider_states") as batch_op:
+            if "credential_reference" not in columns:
+                batch_op.add_column(
+                    sa.Column("credential_reference", sa.String(length=500), nullable=True)
+                )
+            batch_op.alter_column(
+                "credential_reference",
+                existing_type=sa.String(length=500),
+                nullable=False,
+            )
+            batch_op.alter_column(
+                "access_token_ciphertext",
+                existing_type=sa.Text(),
+                nullable=True,
+            )
+    else:
+        if "credential_reference" not in columns:
+            op.add_column(
+                "bank_provider_states",
+                sa.Column("credential_reference", sa.String(length=500), nullable=True),
+            )
+        op.alter_column(
             "bank_provider_states",
-            sa.Column("credential_reference", sa.String(length=500), nullable=True),
+            "credential_reference",
+            existing_type=sa.String(length=500),
+            nullable=False,
         )
-    op.alter_column(
-        "bank_provider_states",
-        "credential_reference",
-        existing_type=sa.String(length=500),
-        nullable=False,
-    )
-    op.alter_column(
-        "bank_provider_states",
-        "access_token_ciphertext",
-        existing_type=sa.Text(),
-        nullable=True,
-    )
+        op.alter_column(
+            "bank_provider_states",
+            "access_token_ciphertext",
+            existing_type=sa.Text(),
+            nullable=True,
+        )
 
 
 def downgrade() -> None:
     connection = op.get_bind()
-    columns = {
-        row[0]
-        for row in connection.execute(
-            sa.text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = current_schema() "
-                "AND table_name = 'bank_provider_states'"
-            )
-        )
-    }
+    columns = {column["name"] for column in sa.inspect(connection).get_columns("bank_provider_states")}
     if "access_token_ciphertext" not in columns:
         return
     new_rows = connection.execute(
@@ -90,10 +89,19 @@ def downgrade() -> None:
             "downgrade would strand externally referenced credentials; restore "
             "legacy ciphertexts first or roll back the application only"
         )
-    op.alter_column(
-        "bank_provider_states",
-        "access_token_ciphertext",
-        existing_type=sa.Text(),
-        nullable=False,
-    )
-    op.drop_column("bank_provider_states", "credential_reference")
+    if connection.dialect.name == "sqlite":
+        with op.batch_alter_table("bank_provider_states") as batch_op:
+            batch_op.alter_column(
+                "access_token_ciphertext",
+                existing_type=sa.Text(),
+                nullable=False,
+            )
+            batch_op.drop_column("credential_reference")
+    else:
+        op.alter_column(
+            "bank_provider_states",
+            "access_token_ciphertext",
+            existing_type=sa.Text(),
+            nullable=False,
+        )
+        op.drop_column("bank_provider_states", "credential_reference")

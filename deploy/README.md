@@ -1,14 +1,19 @@
 # MoneyBee Hetzner deployment
 
-Target layout:
+Historical source checkouts are not deployment inputs. The target consumes
+only reviewed lock files, external environment/secret files, and immutable
+image digests.
+
+Reference release layout:
 
 ```text
 /opt/moneybee/
-├── Moneybee-Backend/
-└── Moneybee-frontend-/
+├── releases/
+└── current -> releases/<release-id>
 ```
 
-The production Compose file is run from `Moneybee-Backend/deploy` and expects the frontend repository as the sibling directory shown above.
+All API, worker, migrator, and frontend services are pulled by digest. No
+Compose service builds source on the target.
 
 ## Mandatory preflight
 
@@ -49,12 +54,13 @@ placeholder pending that separately reviewed executor.
 ## Prepare
 
 ```bash
-cd /opt/moneybee/Moneybee-Backend/deploy
-cp ../.env.production.example .env.production
-chmod 600 .env.production
+install -m 600 /dev/null /etc/moneybee/migrator.env
+install -m 600 /dev/null /etc/moneybee/runtime.env
 ```
 
-Replace every placeholder. Keep the canonical issuer `https://auth.codestra.co/realms/codestra`. The production API base URL is `https://api.moneybeeloan.com/api/v2`.
+Populate both files through the approved secret mechanism. The migrator file
+uses only `moneybee_migrator`; API and worker use only `moneybee_runtime`.
+Keep the canonical issuer `https://auth.codestra.co/realms/codestra`.
 
 ## Validate
 
@@ -66,7 +72,7 @@ that evidence actually existing):
 python ops/validate-release-lock.py \
   --runtime-lock runtime-paths.lock.json --release-lock release.lock.json
 python ops/verify-runtime-env.py \
-  --env-file .env.production --release-lock release.lock.json
+  --env-file /etc/moneybee/runtime.env --release-lock release.lock.json
 eval "$(python ops/render-compose-env.py \
   --runtime-lock runtime-paths.lock.json --release-lock release.lock.json)"
 docker compose -f compose.data.yml -f compose.backend.yml -f compose.edge.yml config
