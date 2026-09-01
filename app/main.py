@@ -64,26 +64,28 @@ app.add_middleware(
         "X-Organization-ID",
     ],
 )
-app.include_router(applications_router, prefix="/api/v2")
-app.include_router(marketplace_router, prefix="/api/v2")
-app.include_router(admin_router, prefix="/api/v2")
-app.include_router(borrower_legacy_router, prefix="/api/v2")
-app.include_router(banking_router, prefix="/api/v2")
-app.include_router(integration_router, prefix="/api/v2")
-app.include_router(portal_router, prefix="/api/v2")
-app.include_router(public_intake_router, prefix="/api/v2")
-app.include_router(financial_router, prefix="/api/v2")
-app.include_router(payment_router, prefix="/api/v2")
-app.include_router(applications_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(marketplace_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(admin_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(borrower_legacy_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(banking_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(payment_router, prefix="/api/v1", include_in_schema=False)
+API_ROUTERS = (
+    applications_router,
+    marketplace_router,
+    admin_router,
+    borrower_legacy_router,
+    banking_router,
+    integration_router,
+    portal_router,
+    public_intake_router,
+    financial_router,
+    payment_router,
+)
+
+# V1 is a complete compatibility alias of the canonical V2 contract. Keeping a
+# single registry prevents version drift and avoids duplicating business logic.
+for version, include_in_schema in (("v2", True), ("v1", False)):
+    for api_router in API_ROUTERS:
+        app.include_router(
+            api_router,
+            prefix=f"/api/{version}",
+            include_in_schema=include_in_schema,
+        )
 app.add_middleware(DistributedRateLimitMiddleware)
 
 
