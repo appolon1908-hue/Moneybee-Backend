@@ -127,6 +127,32 @@ class SMSAdapter(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class PayoutResult:
+    provider: str
+    payout_id: str
+    status: str
+    raw: dict
+
+
+class PaymentAdapter(Protocol):
+    name: str
+
+    async def send_payout(
+        self,
+        *,
+        idempotency_key: str,
+        amount: str,
+        currency: str,
+        destination: str,
+        description: str,
+    ) -> PayoutResult:
+        ...
+
+    async def get_payout_status(self, payout_id: str) -> PayoutResult:
+        ...
+
+
 class ObjectStorageAdapter(Protocol):
     async def put_private(
         self,

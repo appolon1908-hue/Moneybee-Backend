@@ -17,6 +17,7 @@ conditions are required before a live route can call a vendor.
 | Email | SendGrid | disabled | `communications.live_email` |
 | SMS | Twilio | disabled | `communications.live_sms` |
 | Documents | Private S3-compatible storage | disabled | no upload route yet |
+| Payments | Stripe or PayPal | disabled | `payments` / `payouts` |
 
 No mock adapter is selectable in production configuration.
 
@@ -67,6 +68,15 @@ The generic CRM, KYB, credit, and lender adapters require the selected vendors'
 schemas, authentication contracts, idempotency behavior, webhook verification, error
 taxonomy, rate limits, and sandbox certification. Enabling a generic adapter before
 those mappings are approved is not a production launch.
+
+The Stripe/PayPal payment adapters additionally need a business decision this repo
+cannot make on its own: whether MoneyBee originates transfers itself (this adapter's
+purpose) or stays a system of record while lenders wire funds directly, and if the
+former, how payees get onboarded (Stripe Connect account, PayPal email) before a
+`send_payout` call has a real `destination` to target. `app/admin_routes.py`'s
+funding endpoints record a `provider_reference` string today regardless of which
+model is chosen - wiring this adapter into that flow is a separate, deliberate change
+once that decision is made, not implied by the adapter existing.
 
 ## Rollback
 

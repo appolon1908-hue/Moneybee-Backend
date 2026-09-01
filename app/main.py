@@ -25,6 +25,7 @@ from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
 from app.logging_config import Timer, bind_request_id, configure_logging, request_logger
 from app.marketplace_routes import router as marketplace_router
+from app.payment_routes import router as payment_router
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
 from app.rate_limit import InMemoryRateLimitMiddleware
@@ -72,6 +73,7 @@ app.include_router(integration_router, prefix="/api/v2")
 app.include_router(portal_router, prefix="/api/v2")
 app.include_router(public_intake_router, prefix="/api/v2")
 app.include_router(financial_router, prefix="/api/v2")
+app.include_router(payment_router, prefix="/api/v2")
 app.include_router(applications_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(marketplace_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(admin_router, prefix="/api/v1", include_in_schema=False)
@@ -81,6 +83,7 @@ app.include_router(integration_router, prefix="/api/v1", include_in_schema=False
 app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
+app.include_router(payment_router, prefix="/api/v1", include_in_schema=False)
 app.add_middleware(InMemoryRateLimitMiddleware)
 
 

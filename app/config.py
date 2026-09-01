@@ -149,6 +149,15 @@ class Settings(BaseSettings):
     object_storage_access_key: str | None = None
     object_storage_secret_key: str | None = None
 
+    payment_provider: Literal["disabled", "stripe", "paypal"] = "disabled"
+    stripe_api_base_url: str = "https://api.stripe.com"
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    paypal_api_base_url: str = "https://api-m.sandbox.paypal.com"
+    paypal_client_id: str | None = None
+    paypal_client_secret: str | None = None
+    paypal_webhook_id: str | None = None
+
     @staticmethod
     def _csv_set(value: str) -> frozenset[str]:
         return frozenset(item.strip() for item in value.split(",") if item.strip())
@@ -315,6 +324,18 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("S3 object storage configuration is incomplete")
+            if self.payment_provider == "stripe" and not all(
+                [self.stripe_secret_key, self.stripe_webhook_secret]
+            ):
+                raise ValueError("Stripe configuration is incomplete")
+            if self.payment_provider == "paypal" and not all(
+                [
+                    self.paypal_client_id,
+                    self.paypal_client_secret,
+                    self.paypal_webhook_id,
+                ]
+            ):
+                raise ValueError("PayPal configuration is incomplete")
         return self
 
 

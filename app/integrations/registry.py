@@ -4,6 +4,7 @@ from app.integrations.experian import ExperianCommercialAdapter
 from app.integrations.middleware import CodestraProvider
 from app.integrations.middesk import MiddeskAdapter
 from app.integrations.odoo import OdooCommunityAdapter
+from app.integrations.payments import PayPalAdapter, StripeAdapter
 from app.integrations.plaid import PlaidAdapter
 from app.integrations.providers import (
     DocuSignAdapter,
@@ -83,6 +84,14 @@ def storage_adapter() -> S3ObjectStorageAdapter:
     raise ProviderError("storage", "Object storage is disabled")
 
 
+def payment_adapter() -> StripeAdapter | PayPalAdapter:
+    if settings.payment_provider == "stripe":
+        return StripeAdapter()
+    if settings.payment_provider == "paypal":
+        return PayPalAdapter()
+    raise ProviderError("payment", "Payment provider is disabled")
+
+
 def provider_statuses() -> list[ProviderHealth]:
     return [
         ProviderHealth(
@@ -103,7 +112,8 @@ def provider_statuses() -> list[ProviderHealth]:
             bool(
                 settings.plaid_client_id
                 and settings.plaid_secret
-                and settings.field_encryption_key
+                and settings.field_encryption_active_key_version
+                and settings.field_encryption_keys
             ),
         ),
         ProviderHealth(
@@ -204,6 +214,24 @@ def provider_statuses() -> list[ProviderHealth]:
                 and settings.object_storage_bucket
                 and settings.object_storage_access_key
                 and settings.object_storage_secret_key
+            ),
+        ),
+        ProviderHealth(
+            "payment",
+            settings.payment_provider,
+            settings.payment_provider != "disabled",
+            bool(
+                (
+                    settings.payment_provider == "stripe"
+                    and settings.stripe_secret_key
+                    and settings.stripe_webhook_secret
+                )
+                or (
+                    settings.payment_provider == "paypal"
+                    and settings.paypal_client_id
+                    and settings.paypal_client_secret
+                    and settings.paypal_webhook_id
+                )
             ),
         ),
     ]
