@@ -10,27 +10,39 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import models
+from app.config import settings
 from app.db import SessionLocal
 from app.integrations.plaid import PlaidAdapter
 from app.main import app
 
 
 async def _set_bank_live_connection_capability(enabled: bool) -> None:
+    """Configure the single-database capability row for this test environment.
+
+    Capability keys are globally unique in the current schema even though
+    runtime lookups are environment-scoped. Migrated PostgreSQL test databases
+    therefore already contain the production-seeded row, while auto-created
+    SQLite databases do not. Rebinding that one row to the active test
+    environment avoids inventing a duplicate key and keeps provider readiness
+    outside these webhook unit tests.
+    """
     async with SessionLocal() as db:
         existing = await db.scalar(
             select(models.CapabilityFlag).where(
-                models.CapabilityFlag.key == "bank.live_connection",
-                models.CapabilityFlag.environment == "test",
+                models.CapabilityFlag.key == "bank.live_connection"
             )
         )
         if existing is not None:
+            existing.environment = settings.app_env
             existing.enabled = enabled
+            existing.provider = None
         else:
             db.add(
                 models.CapabilityFlag(
                     key="bank.live_connection",
-                    environment="test",
+                    environment=settings.app_env,
                     enabled=enabled,
+                    provider=None,
                 )
             )
         await db.commit()

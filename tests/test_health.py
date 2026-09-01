@@ -35,7 +35,10 @@ async def test_readiness_is_ok_when_the_database_is_reachable():
     body = response.json()
     assert body["status"] == "ready"
     assert body["checks"]["database"] == "ok"
-    assert body["checks"]["migrations"] == "skipped (auto_create_schema)"
+    expected_migration_status = (
+        "skipped (auto_create_schema)" if settings.auto_create_schema else "ok"
+    )
+    assert body["checks"]["migrations"] == expected_migration_status
 
 
 async def test_readiness_flags_migration_head_drift(monkeypatch):
