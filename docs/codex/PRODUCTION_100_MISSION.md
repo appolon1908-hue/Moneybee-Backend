@@ -70,30 +70,30 @@ need its own pass.
       `Sunset: <date>`, and a `Link: <v2-equivalent>; rel="successor-version"`
       response header, configurable via `api_v1_sunset_date`) instead of
       being a silent, undated full alias of v2 (pass: backend)
-- [ ] ~~Field-encryption key versioning~~ — **corrected, not done as
-      planned**: checked every caller of `app/encryption.py` before
-      touching it and found there are none anywhere in `app/` or `tests/`.
-      `resolve_access_token()` in `app/integrations/plaid.py` deliberately
-      raises `ProviderError("plaid", "An external credential store must
-      resolve bank credential references")` — the DB only ever stores an
-      opaque `credential_reference` (`app/models.py:793`), never a raw
-      provider secret. `encrypt_secret`/`decrypt_secret` are unwired
-      scaffolding for a credential store that doesn't exist yet, not an
-      active gap with nothing to rotate. Re-scoped under Phase 2's "real
-      provider adapters" item below — versioning is worth building at the
-      same time credentials are first actually persisted, not before.
-- [ ] Converge the two error-response shapes (RFC 7807 validation errors vs.
-      `{code, message}` auth/identity errors) on one envelope — **checked
-      the blast radius before starting**: 22 assertions across 12 test
-      files depend on the current `{code, message}` shape via
-      `HTTPException.detail`. Real fix, but a dedicated pass on its own,
-      not a quick Phase 1 item — deferred, not skipped.
-- [ ] ~~`/health/ready` widened~~ — **corrected, not done as planned**:
-      there is currently nothing beyond Postgres to widen it to. Redis is
-      configured (`redis_url`) but unused anywhere in `app/`, and every
-      provider adapter is still a stub (see above). Re-scoped: widen this
-      alongside whichever Phase 2 item first gives the app a second real
-      runtime dependency, not before.
+- [x] **Field-encryption key versioning** — pass: `8e8aad2`. Done now that
+      there's a real reason to (this pass's other work started actually
+      persisting encrypted secrets — see the 1099 TIN item below).
+      `FIELD_ENCRYPTION_KEYS_JSON` (a `{"<version>": "<fernet key>"}` map)
+      + `FIELD_ENCRYPTION_ACTIVE_KEY_VERSION`; ciphertext is prefixed with
+      its key version so decrypt always resolves the right key regardless
+      of which version encrypted it — rotating no longer requires a
+      flag-day re-encryption of every stored secret.
+- [x] **Converge the two error-response shapes** onto one RFC 7807
+      envelope — pass: `a4c9575`. The 22-assertion blast radius noted
+      below had grown to 16 call sites across 9 files by the time this
+      landed (some of the original 22 had since been superseded); all
+      updated. One handler (`app/main.py`'s `http_exception_problem`)
+      now normalizes every `HTTPException` regardless of how it was
+      raised — required zero frontend changes since
+      `packages/api-client/src/core.ts`'s error parsing already read
+      `problem.code`/`problem.context` defensively, ahead of this
+      landing.
+- [x] **`/health/ready` widened** — pass: `2ed3c14`. Now also compares the
+      database's `alembic_version` against the code's expected head via
+      Alembic's `ScriptDirectory` (skipped when `auto_create_schema` is
+      on, matching the same dev-only switch the startup validator treats
+      specially) — catches "new code shipped, migration never ran," a
+      real deploy failure mode plain DB-connectivity checking can't see.
 
 ## Phase 2 — Backend spec completion (per `docs/MONEYBEE_V3_BACKEND_SPEC.md` §"Not yet complete")
 
@@ -181,9 +181,67 @@ assumed solid, for whoever takes this toward real DocuSign traffic:
 the payload field-name mapping in `app/worker.py`'s
 `process_pending_docusign_event()`, and the `RENEWAL_ELIGIBILITY_DAYS`/
 commission-rate defaults recorded in the spec doc.
-- [ ] **Object storage + malware scanning** for document uploads (adapter
-      interface exists in `app/integrations/base.py`; scanning step and
-      real S3-compatible wiring do not).
+- [x] **Object storage + malware scanning** — pass: `7e79cab`. Audited
+      first (per this doc's own note above about checking before assuming
+      a gap): the S3-compatible client and the presigned-upload flow
+      (`app/portal/borrower.py` + `app/integrations/storage.py`) were
+      already real and complete, contradicting this line's original
+      claim. What was actually missing: nothing consumed the
+      `DocumentUploaded` outbox event, so every uploaded document was
+      permanently stuck `QUARANTINED` forever. Added `ClamAVScanner`
+      (talks clamd's INSTREAM wire protocol directly, tested against a
+      real in-process TCP server) and `worker.scan_pending_document()`
+      to actually close that loop — fails closed (stays `QUARANTINED`) on
+      any error or when scanning isn't configured, matching
+      `app/readiness.py`'s existing "not certified" launch gate, which
+      is left in place on purpose: this makes the capability real and
+      testable, it doesn't certify a live ClamAV deployment.
+- [x] **Payment/payout rail (Stripe + PayPal)** — pass: `84c35b7`. The
+      system review's single biggest flagged gap: no payment rail existed
+      anywhere; `funding_funds_sent`/`confirm_funding` only ever recorded
+      a `provider_reference` string typed in by hand. Added both adapters
+      matching every other provider's frozen-capability pattern (real
+      code, `PAYMENT_PROVIDER` stays `disabled`, `payments`/`payouts`
+      stay `false` per `docs/codex/CAPABILITY_FREEZE.md`) plus inbound
+      webhooks with each provider's own native signature verification.
+      Deliberately **not** wired into the funding engine — whether
+      MoneyBee originates transfers itself or stays a system of record
+      while lenders wire funds is a business decision, documented as an
+      open question in `docs/PROVIDER_ADAPTERS.md` rather than guessed at.
+- [x] **Plaid webhook receiver** — pass: `9cf922a`. The system review
+      flagged this as missing; it wasn't — `POST /webhooks/plaid` already
+      existed in `app/banking_routes.py` with real signature verification,
+      just grepped past during the review (only checked
+      `app/portal/webhooks.py`). The real gap: it recorded every webhook
+      but never consumed the `PlaidWebhookReceived` outbox event it wrote,
+      so an `ITEM`/`ERROR` webhook — Plaid's "this bank connection needs
+      re-auth" signal — went nowhere. Now updates the matching
+      `BankConnection.status` inline (`REAUTH_REQUIRED` /
+      `CONNECTED` on `LOGIN_REPAIRED`) rather than through the outbox,
+      since it's a plain internal write with no external delivery/retry
+      semantics to justify that pattern.
+
+Also fixed one live bug found auditing an unrelated file during the
+payment-adapter pass: `app/integrations/registry.py`'s "bank" health
+check still referenced the pre-rotation `settings.field_encryption_key`
+attribute name, removed by the key-versioning item above — silently
+short-circuited past in every test (nothing sets `plaid_client_id`
+there) but would have thrown `AttributeError` the moment real Plaid
+credentials were configured. Fixed alongside the payment adapters
+(`84c35b7`).
+
+**Note on branch history**: partway through this pass, a separate
+automated process ("Codestra remediation") pushed real, substantial work
+to this same branch — structured-observability scaffolding, a
+production-launch-check script, an endpoint-catalog generator, and a rate
+-limiting test suite — but left two pieces half-wired: `app/config.py` had
+`public_rate_limit_per_minute`/`webhook_rate_limit_per_minute` declared
+twice with different defaults (the second silently shadowed the first),
+and the new rate-limit test suite imported a `reset_rate_limit_state()`
+that didn't exist and referenced `rate_limit_enabled`/
+`rate_limit_window_seconds` settings that were declared but never read.
+Merged and finished both (pass: `444f476`) rather than reverting — see
+that commit for detail.
 - [ ] **Real provider adapters** promoted from scaffolded/generic-HTTP to
       fully tested per-provider implementations (Plaid, Experian, Middesk,
       Odoo) — confirm each against provider sandbox contracts, not just
