@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     object_storage_access_key: str | None = None
     object_storage_secret_key: str | None = None
 
+    malware_scan_provider: Literal["disabled", "clamav"] = "disabled"
+    clamav_host: str | None = None
+    clamav_port: int = 3310
+    clamav_timeout_seconds: float = 30.0
+
     payment_provider: Literal["disabled", "stripe", "paypal"] = "disabled"
     stripe_api_base_url: str = "https://api.stripe.com"
     stripe_secret_key: str | None = None
@@ -324,6 +329,8 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("S3 object storage configuration is incomplete")
+            if self.malware_scan_provider == "clamav" and not self.clamav_host:
+                raise ValueError("ClamAV configuration is incomplete")
             if self.payment_provider == "stripe" and not all(
                 [self.stripe_secret_key, self.stripe_webhook_secret]
             ):

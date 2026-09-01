@@ -7,12 +7,13 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_, select
 
 from app.auth import Principal
+from app.config import settings
 from app.db import SessionLocal
 from app.integration_models import IntegrationInboxMessage, OperationalException
 from app.integrations.base import ProviderError
 from app.integrations.middleware import canonical_event_type
-from app.integrations.registry import esign_adapter, middleware_adapter
-from app.models import Contract, Funding, IntegrationEvent, Owner, OutboxEvent, OutboxStatus
+from app.integrations.registry import esign_adapter, malware_scanner, middleware_adapter, storage_adapter
+from app.models import Contract, Document, Funding, IntegrationEvent, Owner, OutboxEvent, OutboxStatus
 from app.services import (
     effective_capabilities,
     evaluate_renewal_eligibility,
@@ -226,6 +227,49 @@ async def send_pending_contract_envelope() -> str | None:
         ) or None
         transition_contract(db, contract, "SENT", SYSTEM_PRINCIPAL)
         return str(contract.id)
+
+
+async def scan_pending_document() -> str | None:
+    """Claims and scans at most one QUARANTINED document per call - the
+    step app/portal/borrower.py's upload flow writes a DocumentUploaded
+    outbox event for (destination="document-scanner") but that nothing
+    ever consumed, leaving every uploaded document permanently
+    QUARANTINED. Fails closed: if malware scanning isn't configured,
+    documents simply stay QUARANTINED rather than being waved through -
+    matches the intent already encoded in the default status and in
+    app/readiness.py's "not certified" note. Returns the document id
+    processed, or None if there was nothing to do."""
+    if settings.malware_scan_provider == "disabled":
+        return None
+    async with SessionLocal() as db, db.begin():
+        document = await db.scalar(
+            select(Document)
+            .where(Document.status == "QUARANTINED")
+            .order_by(Document.created_at)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if document is None:
+            return None
+        try:
+            content = await storage_adapter().get_private(object_key=document.storage_key)
+            result = await malware_scanner().scan(content)
+        except ProviderError:
+            # Left as QUARANTINED - the next call retries it. A storage or
+            # scanner outage must never move a document to CLEAN.
+            return str(document.id)
+        document.scan_provider = result.provider
+        document.scan_result = result.raw
+        document.scanned_at = datetime.now(UTC)
+        if result.clean:
+            document.status = "CLEAN"
+        else:
+            document.status = "REJECTED"
+            try:
+                await storage_adapter().delete_private(object_key=document.storage_key)
+            except ProviderError:
+                pass
+        return str(document.id)
 
 
 def _docusign_envelope_id(payload: dict) -> str | None:

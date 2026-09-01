@@ -163,10 +163,31 @@ class ObjectStorageAdapter(Protocol):
     ) -> dict:
         ...
 
+    async def get_private(self, *, object_key: str) -> bytes:
+        ...
+
+    async def delete_private(self, *, object_key: str) -> None:
+        ...
+
     async def presigned_download(
         self,
         *,
         object_key: str,
         expires_seconds: int,
     ) -> str:
+        ...
+
+
+@dataclass(frozen=True)
+class MalwareScanResult:
+    provider: str
+    clean: bool
+    signature: str | None
+    raw: str
+
+
+class MalwareScanner(Protocol):
+    name: str
+
+    async def scan(self, content: bytes) -> MalwareScanResult:
         ...

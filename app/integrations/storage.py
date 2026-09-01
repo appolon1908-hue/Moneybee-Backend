@@ -47,6 +47,29 @@ class S3ObjectStorageAdapter:
             "object_key": object_key,
         }
 
+    async def get_private(self, *, object_key: str) -> bytes:
+        client = self._client()
+        try:
+            response = await asyncio.to_thread(
+                client.get_object,
+                Bucket=settings.object_storage_bucket,
+                Key=object_key,
+            )
+        except Exception as exc:
+            raise ProviderError("s3", "Stored object could not be retrieved") from exc
+        return await asyncio.to_thread(response["Body"].read)
+
+    async def delete_private(self, *, object_key: str) -> None:
+        client = self._client()
+        try:
+            await asyncio.to_thread(
+                client.delete_object,
+                Bucket=settings.object_storage_bucket,
+                Key=object_key,
+            )
+        except Exception as exc:
+            raise ProviderError("s3", "Stored object could not be deleted") from exc
+
     async def presigned_upload(
         self,
         *,

@@ -487,6 +487,9 @@ class Document(Base, Record):
     sha256: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(40), default="QUARANTINED")
     uploaded_by: Mapped[str] = mapped_column(String(200))
+    scan_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    scan_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Contract(Base, Record):
