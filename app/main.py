@@ -13,6 +13,7 @@ from app import financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
 from app import public_intake_models  # noqa: F401
 from app.config import settings
+from app.contract_routes import router as contract_router
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
@@ -58,11 +59,13 @@ app.add_middleware(
     ],
 )
 app.include_router(router, prefix="/api/v2")
+app.include_router(contract_router, prefix="/api/v2")
 app.include_router(integration_router, prefix="/api/v2")
 app.include_router(portal_router, prefix="/api/v2")
 app.include_router(public_intake_router, prefix="/api/v2")
 app.include_router(financial_router, prefix="/api/v2")
 app.include_router(router, prefix="/api/v1", include_in_schema=False)
+app.include_router(contract_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
