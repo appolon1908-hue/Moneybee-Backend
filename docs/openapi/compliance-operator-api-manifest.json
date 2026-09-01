@@ -5,7 +5,7 @@
     "/api/v2/admin/compliance/commission-tax-records": "ffcc03b47e5804ab4014853a750c97791924ef83504bdc099c19972bc4e85df6",
     "/api/v2/admin/compliance/commission-tax-records/generate": "3a9562f5c35e60d53637492c724ea138fdf412334d91e08866e573b7d650757f",
     "/api/v2/admin/compliance/commission-tax-records/{record_id}/filing": "c843441db448198990d68054b2807778e1948f051eaa21e07bdeb80b63de5baa",
-    "/api/v2/admin/compliance/commission-tax-records/{record_id}/tin": "769db8b8cdf778ad518c8010d9959ffb99176cf77a5ddd1f7ba63e9d85790e4c",
+    "/api/v2/admin/compliance/commission-tax-records/{record_id}/tin": "431433a96acc97ed2fb9d9825618c6c2b431589027f6a0ae3daf18db3ea003f4",
     "/api/v2/admin/compliance/offers/{offer_id}/commercial-financing-disclosure/acknowledge": "aba3f5cf09be080dc302cf34a0840c8de96cb38e9c22cbafb739a73b306c72ba",
     "/api/v2/admin/compliance/overview": "ae340884e1b14b4afc57263314a5222c057377534e7475abdddc53d2f42e5a7c",
     "/api/v2/borrower/offers/{offer_id}/commercial-financing-disclosure": "49632ecc30fd8042147a25deec849b04972ff7b8256836bd0de105a1265e1bd9",
@@ -14,7 +14,7 @@
   "schemas": {
     "AdverseActionNoticePage": "9f210d1bda7711c4052052b1667f25e726c07b3981fb589bd6b196aaf7a28efb",
     "CommercialFinancingDisclosurePage": "030b2ea10883ff9c676d83738fb4a08739748b2ff2f9161dc3b76191ffbf3551",
-    "CommissionTaxRecordFilingInput": "e9da2830c01a3bffb03c80144beae2fba13c5fa330f8e985cfbe68d89eaa0a0e",
+    "CommissionTaxRecordFilingInput": "291291477d857e7944929f385a9de77f8f8e2c6bbbc86b3062d14b188419add7",
     "CommissionTaxRecordOperatorRead": "662e20e55c7187a111c625cad3d171b65d4d2f391475ff86bf470fab4bbf4000",
     "CommissionTaxRecordPage": "cc325422af522c80495d6d93d8fd6cfbf9a69d00248de92a3289433ee95174fc",
     "ComplianceOverviewRead": "a42a5a1f0ad7fd272ca37db501aa84be59cbbcfc49d136c12072892e39163dde",
