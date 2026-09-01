@@ -38,7 +38,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if "credential_reference" not in _columns():
+    columns = _columns()
+    if "credential_reference" not in columns:
+        return
+    # Canonical revision 0009 already owned credential_reference. This staging
+    # revision adds it only to the deployed legacy ciphertext shape.
+    if "access_token_ciphertext" not in columns:
         return
     populated = op.get_bind().execute(
         sa.text(

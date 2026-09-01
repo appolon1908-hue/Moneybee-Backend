@@ -44,6 +44,12 @@ jobs:
           DATABASE_URL: sqlite+aiosqlite:///./migration-test.db
         run: |
           alembic upgrade head
+          alembic downgrade 20260901_0022
+          python - <<'PY'
+          import sqlite3
+          columns = {row[1] for row in sqlite3.connect("migration-test.db").execute("PRAGMA table_info(bank_provider_states)")}
+          assert "credential_reference" in columns
+          PY
           alembic downgrade base
           alembic upgrade head
       - run: python -m compileall -q app tests migrations scripts ops

@@ -12,7 +12,9 @@ external delivery/provider writes remain disabled by default.
   credential references.
 - Migration `20260901_0022a` provides an explicit compatibility boundary for
   populated legacy credentials. The reference-only staging tool verifies a
-  complete `secret://` mapping before `0023` may proceed.
+  complete `secret://` mapping before `0023` may proceed. Its downgrade
+  preserves the canonical column introduced at revision `0009` and removes the
+  staged column only from the deployed legacy ciphertext shape.
 - Migration `20260901_0024` adds durable provider retry/lease state and prevents
   duplicate adverse-action notices for one underwriting review.
 - `moneybee_migrator` owns the application schema and existing application
