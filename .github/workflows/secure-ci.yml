@@ -67,9 +67,20 @@ jobs:
         run: |
           python scripts/check_no_private_keys.py
           python scripts/check_identity_email_readiness.py
-          python scripts/generate_endpoint_catalog.py --check
           python -m compileall -q app tests migrations ops scripts
           python -m ruff check app tests migrations scripts
+      - name: Render endpoint catalog candidate
+        run: python scripts/generate_endpoint_catalog.py
+      - name: Upload endpoint catalog candidate
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: moneybee-endpoint-catalog-${{ github.run_id }}
+          path: docs/API_ENDPOINT_CATALOG.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify generated endpoint catalog is committed
+        run: git diff --exit-code -- docs/API_ENDPOINT_CATALOG.md
       - name: Upgrade application test database
         run: alembic upgrade head
       - name: Application tests
