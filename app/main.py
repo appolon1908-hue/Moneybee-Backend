@@ -2,6 +2,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from email.utils import format_datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -168,14 +169,51 @@ async def live():
     return {"status": "ok", "environment": settings.app_env}
 
 
+def _expected_migration_head() -> str | None:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
 @app.get("/health/ready", tags=["health"])
 async def ready():
+    checks: dict[str, str] = {}
+    healthy = True
+
     try:
         async with SessionLocal() as db:
             await db.execute(text("SELECT 1"))
-        return {"status": "ready", "environment": settings.app_env}
+        checks["database"] = "ok"
     except Exception:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "not_ready", "environment": settings.app_env},
-        )
+        checks["database"] = "unreachable"
+        healthy = False
+
+    if healthy and not settings.auto_create_schema:
+        try:
+            expected_head = _expected_migration_head()
+            async with SessionLocal() as db:
+                result = await db.execute(text("SELECT version_num FROM alembic_version"))
+                row = result.first()
+            current_head = row[0] if row else None
+            if current_head != expected_head:
+                checks["migrations"] = f"drifted: db={current_head!r} code={expected_head!r}"
+                healthy = False
+            else:
+                checks["migrations"] = "ok"
+        except Exception as exc:
+            checks["migrations"] = f"unreadable: {exc.__class__.__name__}"
+            healthy = False
+    else:
+        checks["migrations"] = "skipped (auto_create_schema)"
+
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ready" if healthy else "not_ready",
+            "environment": settings.app_env,
+            "checks": checks,
+        },
+    )
