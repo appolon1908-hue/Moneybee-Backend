@@ -285,6 +285,37 @@ that commit for detail.
       fully tested per-provider implementations (Plaid, Experian, Middesk,
       Odoo) — confirm each against provider sandbox contracts, not just
       the internal `Protocol` shape.
+- [ ] **CONFIRMED BLOCKER — bank-connection exchange/sync flow is
+      non-functional against the only real bank adapter this repo has.**
+      Found while cross-checking an independent parallel "Codex" pass's
+      certification report (`report.html`/`VALIDATION.md`, produced in a
+      separate working copy this repo can't see) against this repo's actual
+      state — it flagged "incompatible bank credential storage" as a
+      blocker; investigated and confirmed it's real, not stale. Root cause:
+      commit `283b789` ("fix(security): keep bank credentials outside
+      MoneyBee") deliberately redesigned `app/banking.py` to require
+      adapters return an opaque `credential_reference` pointing into an
+      external credential store, correctly 503-ing
+      (`BANK_CREDENTIAL_STORE_UNAVAILABLE`) otherwise — but
+      `PlaidAdapter.exchange_public_token` (`app/integrations/plaid.py`)
+      was never updated to match; it still returns Plaid's real API shape
+      (`access_token`/`item_id`/`request_id`), which has no
+      `credential_reference` field at all. `PlaidAdapter.resolve_access_token`
+      is an unconditional stub. Result: even with real Plaid credentials
+      configured and `bank.live_connection` certified, the exchange/sync
+      flow always fails — and nothing in the test suite exercised this path
+      before (`exchange_public_token`/`BankExchangeInput` had zero test
+      references). Pinned down and asserted in
+      `tests/test_banking_credential_reference_contract.py` so it's
+      tracked, not silently broken.
+      **Deliberately not fixed here**: the correct fix is integrating a
+      real external secrets store (AWS Secrets Manager, HashiCorp Vault,
+      etc.) behind `resolve_access_token`/`exchange_public_token` —
+      storing the token encrypted in MoneyBee's own database instead
+      (reusing the versioned field-encryption from Phase 1) would directly
+      reverse the security decision `283b789` deliberately made, so that's
+      not this repo's call to make unilaterally. Needs a vendor/vault
+      decision from a human before this can be implemented for real.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a
