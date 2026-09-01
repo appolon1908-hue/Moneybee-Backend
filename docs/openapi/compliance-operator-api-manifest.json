@@ -17,6 +17,7 @@
     "CommissionTaxRecordFilingInput": "e9da2830c01a3bffb03c80144beae2fba13c5fa330f8e985cfbe68d89eaa0a0e",
     "CommissionTaxRecordOperatorRead": "662e20e55c7187a111c625cad3d171b65d4d2f391475ff86bf470fab4bbf4000",
     "CommissionTaxRecordPage": "cc325422af522c80495d6d93d8fd6cfbf9a69d00248de92a3289433ee95174fc",
-    "ComplianceOverviewRead": "a42a5a1f0ad7fd272ca37db501aa84be59cbbcfc49d136c12072892e39163dde"
+    "ComplianceOverviewRead": "a42a5a1f0ad7fd272ca37db501aa84be59cbbcfc49d136c12072892e39163dde",
+    "StrictCommissionTaxRecordTinInput": "87a6fa2b70690f68b1a57e3598acf16389ba2b906bdabbe229311666ff4c4f2f"
   }
 }
