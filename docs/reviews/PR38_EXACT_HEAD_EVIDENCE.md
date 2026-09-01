@@ -39,7 +39,10 @@ external delivery/provider writes remain disabled by default.
 - A secret-backed one-shot Compose bootstrap service provisions/transfers roles
   before Alembic; API and worker never receive the administrator identity.
 - DocuSign envelope creates carry the stable contract UUID as the provider
-  transaction ID, closing the accepted-response-lost duplicate window.
+  transaction ID, closing the accepted-response-lost duplicate window. Connect
+  callback event names are normalized and envelope-summary status is preferred.
+- Offer acceptance locks and verifies the generated disclosure and refuses to
+  create funding until authenticated acknowledgment evidence exists.
 
 ## Migration contract
 
@@ -85,7 +88,7 @@ Observed before the final commit:
 
 - SQLite/application tests: 232 passed, 8 skipped.
 - Clean PostgreSQL/runtime tests: 240 passed.
-- API smoke: 56 passed, 4 intentionally unavailable surfaces skipped.
+- API smoke: 57 passed, 4 intentionally unavailable surfaces skipped.
 - OpenAPI: 159 canonical paths and 39 reviewed additions.
 - Identity/email repository readiness: 20 passed, 21 operator-only checks
   skipped, 0 failed.

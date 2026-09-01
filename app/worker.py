@@ -377,10 +377,13 @@ def _docusign_envelope_id(payload: dict) -> str | None:
 def _docusign_envelope_status(payload: dict) -> str | None:
     status = (
         payload.get("status")
-        or payload.get("event")
         or payload.get("data", {}).get("envelopeSummary", {}).get("status")
+        or payload.get("event")
     )
-    return str(status).lower() if status else None
+    if not status:
+        return None
+    normalized = str(status).lower()
+    return normalized.removeprefix("envelope-")
 
 
 DOCUSIGN_STATUS_TO_CONTRACT_STATUS = {

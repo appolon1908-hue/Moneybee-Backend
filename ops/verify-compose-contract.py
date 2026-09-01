@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import copy
 from pathlib import Path
 import re
 import subprocess
@@ -74,6 +75,26 @@ def main() -> int:
         runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
         release_path.write_text(json.dumps(release), encoding="utf-8")
         result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "ops" / "render-compose-env.py"),
+                "--runtime-lock", str(runtime_path),
+                "--release-lock", str(release_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        external_runtime = copy.deepcopy(runtime)
+        external_runtime["data_mode"] = "external"
+        for key in (
+            "postgres_data_path", "redis_data_path",
+            "postgres_admin_password_file", "postgres_migrator_password_file",
+            "postgres_runtime_password_file", "roles_sql_path", "redis_acl_file",
+        ):
+            external_runtime["paths"][key] = None
+        runtime_path.write_text(json.dumps(external_runtime), encoding="utf-8")
+        subprocess.run(
             [
                 sys.executable,
                 str(ROOT / "ops" / "render-compose-env.py"),

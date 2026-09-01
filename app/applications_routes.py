@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import domain_logic, models, schemas, services
+from app import compliance_models, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
 from app.commands import AcceptOfferCommand, command_context, parse_expected_version
 from app.config import settings
@@ -289,6 +289,16 @@ async def accept_offer(
             offer.version += 1
             await db.commit()
             raise HTTPException(status_code=409, detail="Offer has expired")
+    disclosure = await db.scalar(
+        select(compliance_models.CommercialFinancingDisclosure)
+        .where(compliance_models.CommercialFinancingDisclosure.offer_id == offer.id)
+        .with_for_update()
+    )
+    if disclosure is None or disclosure.acknowledged_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Commercial financing disclosure must be acknowledged before acceptance",
+        )
     existing_funding = await db.scalar(
         select(models.Funding).where(models.Funding.application_id == application.id)
     )

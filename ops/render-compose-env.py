@@ -65,6 +65,9 @@ def main() -> int:
             "postgres_data_path",
             "redis_data_path",
             "postgres_admin_password_file",
+            "postgres_migrator_password_file",
+            "postgres_runtime_password_file",
+            "roles_sql_path",
             "redis_acl_file",
         }:
             continue

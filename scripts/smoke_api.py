@@ -523,6 +523,9 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
     offer_id = offer.json().get("id") if offer.status_code == 201 else ""
     application = client.get(f"/api/v2/applications/{application_id}")
     expected_version = application.json().get("version") if application.status_code == 200 else None
+    disclosure_ack = client.post(
+        f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
     results.extend(
         [
             _expect(
@@ -530,6 +533,12 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
                 client.get(f"/api/v2/applications/{application_id}/offers"),
                 200,
                 lambda payload: any(item["id"] == offer_id for item in payload),
+            ),
+            _expect(
+                "portal.borrower_offer.disclosure_acknowledge",
+                disclosure_ack,
+                200,
+                lambda payload: payload["acknowledged_at"] is not None,
             ),
             _expect(
                 "portal.borrower_offer.accept",

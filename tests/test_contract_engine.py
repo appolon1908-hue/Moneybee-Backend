@@ -123,6 +123,10 @@ def _create_and_accept_offer(
             "total_repayment": 60000,
         },
     ).json()["id"]
+    acknowledged = client.post(
+        f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
+    assert acknowledged.status_code == 200
     accepted = client.post(
         f"/api/v2/offers/{offer_id}/accept",
         headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -264,7 +268,13 @@ async def test_process_pending_docusign_event_signs_contract_and_advances_fundin
                 provider="docusign",
                 event_id=uuid.uuid4().hex,
                 event_type="envelope-completed",
-                payload={"envelopeId": envelope_id, "status": "completed"},
+                payload={
+                    "event": "envelope-completed",
+                    "data": {
+                        "envelopeId": envelope_id,
+                        "envelopeSummary": {"status": "completed"},
+                    },
+                },
                 payload_hash=uuid.uuid4().hex,
                 signature_valid=True,
                 status="RECEIVED",

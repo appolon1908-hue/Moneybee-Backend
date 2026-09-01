@@ -122,6 +122,10 @@ async def _reach_funded_commission(client: TestClient) -> str:
             "total_repayment": 60000,
         },
     ).json()["id"]
+    acknowledged = client.post(
+        f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
+    assert acknowledged.status_code == 200
     accepted = client.post(
         f"/api/v2/offers/{offer_id}/accept",
         headers={"Idempotency-Key": uuid.uuid4().hex},
