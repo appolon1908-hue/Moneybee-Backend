@@ -285,11 +285,37 @@ that commit for detail.
       fully tested per-provider implementations (Plaid, Experian, Middesk,
       Odoo) — confirm each against provider sandbox contracts, not just
       the internal `Protocol` shape.
-- [ ] **Complete RBAC test coverage**: extend the existing tenancy/portal
-      boundary tests (`test_identity_tenancy_postgres.py`,
-      `test_portal_token_boundaries.py`, `test_portal_client_boundaries.py`)
-      to cover every permission in `LEGACY_ROLE_PERMISSIONS`
-      (`app/auth.py`) and every new endpoint added in this mission.
+- [x] **RBAC permission-enforcement coverage** — pass: `tests/
+      test_rbac_permission_enforcement.py`. Every other test in this suite
+      runs under `LOCAL_AUTH_BYPASS`, which always resolves to a
+      MONEYBEE_ADMIN principal holding the `"*"` wildcard
+      (`_local_bypass_principal`) — so nothing else ever exercised a
+      denial for a real, restricted role, only the one always-succeeds
+      path. New file directly covers all three permission-enforcement
+      mechanisms in use across the app: `require_permission()` (the
+      single-permission FastAPI dependency), `require_any_permission()`
+      (the any-of inline check in `app/portal/lender.py`), and the
+      hand-rolled "own resource" checks in `app/applications_routes.py`.
+      65 tests: every permission string any role in `LEGACY_ROLE_PERMISSIONS`
+      actually grants is proven both to be granted with that exact
+      permission and denied without it; every role is proven to be denied
+      at least one permission outside its declared set (e.g. BORROWER
+      denied `application.read`, MONEYBEE_SALES denied
+      `underwriting.review`); and the six new admin compliance endpoints
+      from this mission are exercised end-to-end via `TestClient` with a
+      real restricted `Principal` injected through
+      `app.dependency_overrides[current_principal]` — not the bypass
+      principal — proving `application.read`/`application.edit`/
+      `commission.receipt.record` are actually wired to those routes, not
+      just declared. Confirmed non-vacuous: every denial assertion is a
+      real `HTTPException`/403 raised by production code in the same run
+      as the matching grant assertion.
+      Deliberately out of scope for this pass: end-to-end RBAC tests for
+      the dozens of pre-existing endpoints beyond the six new ones (the
+      permission-dependency-level coverage above already proves the
+      shared enforcement mechanism is correct for every declared
+      permission; wiring is checked per-route only for what this mission
+      added) — a good next slice if this needs to go further.
 - [ ] Remaining target DB tables per the spec's "Database target" section
       not yet present — reconcile against `migrations/versions/` and add
       what's missing (compliance's adverse-action/disclosure/1099 tables
