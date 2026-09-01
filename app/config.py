@@ -315,12 +315,24 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Codestra middleware configuration is incomplete")
+            if self.crm_provider == "generic_http" and not all(
+                [self.crm_base_url, self.crm_api_key]
+            ):
+                raise ValueError("Generic HTTP CRM configuration is incomplete")
             if self.crm_provider == "odoo" and not all(
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):
                 raise ValueError("Odoo configuration is incomplete")
+            if self.kyb_provider == "generic_http" and not all(
+                [self.kyb_base_url, self.kyb_api_key]
+            ):
+                raise ValueError("Generic HTTP KYB configuration is incomplete")
             if self.kyb_provider == "middesk" and not self.middesk_api_key:
                 raise ValueError("Middesk configuration is incomplete")
+            if self.credit_provider == "generic_http" and not all(
+                [self.credit_base_url, self.credit_api_key]
+            ):
+                raise ValueError("Generic HTTP credit configuration is incomplete")
             if self.credit_provider == "experian" and not all(
                 [
                     self.experian_base_url,
@@ -333,6 +345,20 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Experian configuration is incomplete")
+            if self.lender_provider == "generic_http" and not all(
+                [self.lender_base_url, self.lender_api_key]
+            ):
+                raise ValueError("Generic HTTP lender configuration is incomplete")
+            if self.esign_provider == "docusign" and not all(
+                [
+                    self.docusign_rest_base_url,
+                    self.docusign_account_id,
+                    self.docusign_access_token,
+                    self.docusign_template_id,
+                    self.docusign_signer_role,
+                ]
+            ):
+                raise ValueError("DocuSign configuration is incomplete")
             if self.email_provider == "sendgrid" and not all(
                 [self.sendgrid_api_key, self.sendgrid_from_email]
             ):

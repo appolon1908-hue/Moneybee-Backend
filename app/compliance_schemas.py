@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas import AdverseActionNoticeRead, CommercialFinancingDisclosureRead
 
 
+class StrictComplianceCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class ComplianceOverviewRead(BaseModel):
     adverse_action_notices: int
     adverse_action_notices_pending_delivery: int
@@ -58,10 +62,10 @@ class CommissionTaxRecordPage(BaseModel):
     has_more: bool
 
 
-class CommissionTaxRecordTinInput(BaseModel):
+class CommissionTaxRecordTinInput(StrictComplianceCommand):
     recipient_name: str = Field(min_length=1, max_length=255)
     tin: str = Field(min_length=9, max_length=20)
 
 
-class CommissionTaxRecordFilingInput(BaseModel):
+class CommissionTaxRecordFilingInput(StrictComplianceCommand):
     filing_reference: str = Field(min_length=1, max_length=255)

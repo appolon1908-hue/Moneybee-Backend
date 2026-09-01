@@ -72,8 +72,17 @@ def token_client_id(claims: Mapping[str, Any]) -> str:
     return str(claims.get("azp") or claims.get("client_id") or "").strip()
 
 
-def _portal_names_for_path(path: str) -> frozenset[PortalName] | None:
+def _canonical_api_path(path: str) -> str:
     normalized = path.rstrip("/") or "/"
+    if normalized == "/api/v1":
+        return "/api/v2"
+    if normalized.startswith("/api/v1/"):
+        return f"/api/v2/{normalized.removeprefix('/api/v1/')}"
+    return normalized
+
+
+def _portal_names_for_path(path: str) -> frozenset[PortalName] | None:
+    normalized = _canonical_api_path(path)
     if normalized == "/api/v2/auth/bootstrap":
         return frozenset({"borrower"})
     if normalized == "/api/v2/borrower" or normalized.startswith("/api/v2/borrower/"):
