@@ -464,12 +464,9 @@ that commit for detail.
       and 4 new schemas.
       **Confirmed still missing, not built this pass** — bigger items
       needing new models/services, not just a new route on existing data:
-      `GET /me/sessions` needs a `LoginEvent` table and a write-path wired
-      into `current_principal` that doesn't exist yet — the spec lists
-      "login events" under Security but nothing populates them;
-      communications message *templates* (admin-managed, as opposed to
-      `/me/notification-preferences`, which is per-user and already real)
-      have no model/service/endpoint anywhere.
+      `GET /me/sessions` needed a `LoginEvent` table and a write path (built
+      below, same pass); business/identity verification needed a real write
+      path behind the existing read (also built below, same pass).
 - [x] **Business verification was a confirmed dead end, not just a missing
       endpoint.** `app/domain_logic.py`'s `create_requirement_snapshot` has
       always queried for a `Verification` row
@@ -533,6 +530,30 @@ that commit for detail.
       move to `identity_models.User`, or does something start populating
       `UserAccount` rows, and on what event) worth a human's call rather
       than a guess made to close out an unrelated endpoint sweep.
+- [x] **"API contract target" section of `docs/MONEYBEE_V3_BACKEND_SPEC.md`
+      is now fully covered, path by path.** After the batches above, went
+      back through every bullet in that section (public/identity,
+      applications, banking/documents/risk, marketplace, operations) against
+      `app.openapi()`'s real registered paths one more time to confirm
+      nothing was missed. Everything named there now exists and is tested.
+      One bullet needed a judgment call rather than a new route: "business
+      verification, identity verification, credit, and fraud assessment" —
+      identity verification of individual owners is folded into the same
+      business-verification call (see above) rather than a separate
+      endpoint, matching how `MiddeskAdapter` — the one concrete KYB adapter
+      this repo has — actually models it (owners as `people` on the same
+      submission, not a separate identity check).
+      **Not in scope for this sweep, and not a contract-target gap:** the
+      spec's separate "Database target" section lists "Communications:
+      messages, templates, preferences" — `/me/notification-preferences`
+      (per-user, real) covers "preferences"; per-user messages exist in the
+      portal messaging surface; but admin-managed message *templates* have
+      no model, service, or endpoint anywhere, and no path naming them
+      appears in the API contract target list this sweep was diffing
+      against. Left as a real backlog item, not a guessed-at addition —
+      building it means picking a template schema (channel enum, merge
+      fields, versioning, who can publish one) with no existing anchor in
+      the spec to derive it from.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a
