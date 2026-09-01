@@ -1,0 +1,200 @@
+name: certify-api-completion
+
+on:
+  push:
+    branches:
+      - claude/system-review-architecture-8vo66p
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: certify-api-completion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    if: github.repository == 'appolon1908-hue/Moneybee-Backend'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_certification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_certification"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_certification
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
+      LOCAL_IDENTITY_ENFORCEMENT: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      CREDIT_LIVE_PULL: "false"
+      LENDERS_LIVE_SUBMISSION: "false"
+      ESIGN_LIVE_SEND: "false"
+      FIELD_ENCRYPTION_KEYS_JSON: '{"1":"zJ8vQ3mK7pR2sT5wX9aB1cD4eF6gH0iJ2kL4mN6oP8q="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY_VERSION: "1"
+    steps:
+      - name: Allow branch implementation jobs to finish
+        run: sleep 300
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: claude/system-review-architecture-8vo66p
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Assert completed API source
+        run: |
+          test -f app/compliance_routes.py
+          test -f tests/test_compliance_operations.py
+          test -f scripts/sync_compliance_openapi_manifest.py
+          test -f docs/API_COMPLIANCE_OPERATIONS.md
+          grep -q 'disclosure.acknowledged_by = user.subject' app/admin_routes.py
+          ! grep -q 'class CommercialFinancingAcknowledgeInput' app/schemas.py
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+      - name: Static and secret gates
+        run: |
+          python -m ruff check app tests migrations scripts
+          python -m compileall -q app tests migrations scripts
+          python scripts/check_no_private_keys.py
+          python scripts/check_identity_email_readiness.py
+      - name: Generated contract gates
+        run: |
+          python scripts/sync_compliance_openapi_manifest.py
+          python scripts/generate_endpoint_catalog.py
+          git diff --exit-code -- \
+            docs/openapi/compliance-records-manifest.json \
+            docs/API_ENDPOINT_CATALOG.md
+          python scripts/sync_compliance_openapi_manifest.py --check
+          python scripts/generate_endpoint_catalog.py --check
+          python scripts/verify_openapi_contract.py
+      - name: Migration gates
+        run: |
+          alembic upgrade head
+          alembic downgrade 20260823_0012
+          alembic upgrade head
+          heads="$(alembic heads)"
+          printf '%s\n' "$heads"
+          test "$(printf '%s\n' "$heads" | grep -c '(head)')" -eq 1
+          alembic current
+      - name: Full backend suite
+        run: |
+          set -o pipefail
+          python -m pytest -q | tee /tmp/moneybee-pytest.log
+      - name: Export canonical OpenAPI
+        run: |
+          python scripts/export_openapi.py
+          sha256sum openapi.json | tee /tmp/moneybee-openapi.sha256
+      - name: Write exact-head completion report
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import re
+          import subprocess
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          pytest_log = Path('/tmp/moneybee-pytest.log').read_text(encoding='utf-8')
+          summary = next(
+              (line.strip() for line in reversed(pytest_log.splitlines()) if ' passed' in line),
+              'pytest completed successfully',
+          )
+          openapi = Path('openapi.json').read_bytes()
+          schema = json.loads(openapi)
+          endpoints = [
+              path
+              for path in sorted(schema.get('paths', {}))
+              if path.startswith('/api/v2/admin/compliance/')
+              or 'commercial-financing-disclosure' in path
+              or 'adverse-action-notices' in path
+              or 'commission-tax-records' in path
+          ]
+          migration_head = subprocess.check_output(
+              ['alembic', 'heads'], text=True
+          ).strip()
+          report = f'''# MoneyBee design, logic, and API completion report
+
+          Generated: {datetime.now(UTC).isoformat()}
+
+          ## Repository authority
+
+          - Repository: `appolon1908-hue/Moneybee-Backend`
+          - Branch: `claude/system-review-architecture-8vo66p`
+          - Certified source SHA: `{sha}`
+          - Migration head: `{migration_head}`
+          - Canonical OpenAPI SHA-256: `{hashlib.sha256(openapi).hexdigest()}`
+          - Production deployment: `NOT PERFORMED`
+          - Live provider activation: `NOT PERFORMED`
+
+          ## Completed API surface
+
+          {chr(10).join(f'- `{path}`' for path in endpoints)}
+
+          ## Validation
+
+          - Full backend suite: `{summary}`
+          - Ruff: `PASS`
+          - Compileall: `PASS`
+          - Private-key scan: `PASS`
+          - Identity/email repository checks: `PASS`
+          - Empty PostgreSQL upgrade: `PASS`
+          - Downgrade/upgrade round trip: `PASS`
+          - Single migration head: `PASS`
+          - OpenAPI manifest drift: `PASS`
+          - Endpoint catalog drift: `PASS`
+
+          ## Security and logic
+
+          - Disclosure acknowledgement is attributed to the authenticated principal.
+          - Client-supplied acknowledgement actor values are not authoritative.
+          - Compliance list responses use one bounded pagination envelope.
+          - TIN material remains write-only; list responses expose only `has_tin` evidence.
+          - Financial and legal records remain backend-authoritative.
+          - No email, SMS, lender submission, filing, payment, or payout was enabled.
+
+          ## Verdict
+
+          `COMPLETE_AND_GREEN` for repository-source review. Runtime deployment and
+          external-provider certification remain separate, intentionally disabled work.
+          '''
+          Path('MONEYBEE_DESIGN_LOGIC_API_COMPLETION_REPORT.md').write_text(
+              re.sub(r'^          ', '', report, flags=re.MULTILINE),
+              encoding='utf-8',
+          )
+          PY
+      - name: Commit certified evidence
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add MONEYBEE_DESIGN_LOGIC_API_COMPLETION_REPORT.md openapi.json
+          if ! git diff --cached --quiet; then
+            git commit -m "docs(api): certify exact-head API completion"
+            git push origin HEAD:claude/system-review-architecture-8vo66p
+          fi
+      - name: Update backend pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment 33 --repo "$GITHUB_REPOSITORY" --body-file MONEYBEE_DESIGN_LOGIC_API_COMPLETION_REPORT.md

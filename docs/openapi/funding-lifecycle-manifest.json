@@ -2,9 +2,9 @@
   "name": "funding-lifecycle",
   "paths": {
     "/api/v2/admin/fundings/{funding_id}/approve": "2212f10ef5bb431212d2773a70747d68aad0a3fbba65bdf8f23cec62ca635435",
-    "/api/v2/admin/fundings/{funding_id}/funds-sent": "99dac2153ce1ae12ce4bf270b62783256484d2fee4c2b0d5c1b686c697d1fb47",
     "/api/v2/admin/fundings/{funding_id}/confirm": "12e373415ffad0c6289a1728da4d5012966081ecbdc089bd3532e6f527afa91b",
-    "/api/v2/admin/fundings/{funding_id}/decline": "4171cad127029de4da8ae43dce810172726f22c5b06efb77804df79fcf4b5f06"
+    "/api/v2/admin/fundings/{funding_id}/decline": "4171cad127029de4da8ae43dce810172726f22c5b06efb77804df79fcf4b5f06",
+    "/api/v2/admin/fundings/{funding_id}/funds-sent": "99dac2153ce1ae12ce4bf270b62783256484d2fee4c2b0d5c1b686c697d1fb47"
   },
   "schemas": {
     "FundingConfirmInput": "e7e7621f3d8dbf269791886b5779d68fb7edae803e71b4e7d53328eae78b1ef3",

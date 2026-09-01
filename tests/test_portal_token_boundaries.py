@@ -10,13 +10,21 @@ from app.request_context import enforce_portal_client
     ("path", "client_id"),
     [
         ("/api/v2/borrower/overview", "moneybee-borrower"),
+        ("/api/v1/borrower/overview", "moneybee-borrower"),
         ("/api/v2/applications", "moneybee-borrower"),
+        ("/api/v1/applications", "moneybee-borrower"),
         ("/api/v2/offers/00000000-0000-0000-0000-000000000000/accept", "moneybee-borrower"),
+        ("/api/v1/offers/00000000-0000-0000-0000-000000000000/accept", "moneybee-borrower"),
         ("/api/v2/lender/dashboard", "moneybee-lender"),
+        ("/api/v1/lender/dashboard", "moneybee-lender"),
         ("/api/v2/lenders/00000000-0000-0000-0000-000000000000/programs", "moneybee-lender"),
+        ("/api/v1/lenders/00000000-0000-0000-0000-000000000000/programs", "moneybee-lender"),
         ("/api/v2/admin/overview", "moneybee-admin"),
+        ("/api/v1/admin/overview", "moneybee-admin"),
         ("/api/v2/finance/accounts", "moneybee-admin"),
+        ("/api/v1/finance/accounts", "moneybee-admin"),
         ("/api/v2/applications", "moneybee-admin"),
+        ("/api/v1/applications", "moneybee-admin"),
     ],
 )
 def test_correct_portal_token_is_accepted(path: str, client_id: str):
@@ -27,14 +35,19 @@ def test_correct_portal_token_is_accepted(path: str, client_id: str):
     ("path", "client_id"),
     [
         ("/api/v2/borrower/overview", "moneybee-lender"),
+        ("/api/v1/borrower/overview", "moneybee-lender"),
         ("/api/v2/borrower/overview", "moneybee-admin"),
         ("/api/v2/lender/dashboard", "moneybee-borrower"),
+        ("/api/v1/lender/dashboard", "moneybee-borrower"),
         ("/api/v2/lender/dashboard", "moneybee-admin"),
         ("/api/v2/admin/overview", "moneybee-borrower"),
+        ("/api/v1/admin/overview", "moneybee-borrower"),
         ("/api/v2/admin/overview", "moneybee-lender"),
         ("/api/v2/finance/accounts", "moneybee-borrower"),
+        ("/api/v1/finance/accounts", "moneybee-borrower"),
         ("/api/v2/finance/accounts", "moneybee-lender"),
         ("/api/v2/applications", "moneybee-lender"),
+        ("/api/v1/applications", "moneybee-lender"),
     ],
 )
 def test_cross_portal_token_is_rejected(path: str, client_id: str):
@@ -44,9 +57,16 @@ def test_cross_portal_token_is_rejected(path: str, client_id: str):
     assert caught.value.detail["code"] == "PORTAL_TOKEN_MISMATCH"
 
 
-def test_missing_authorized_party_is_rejected_for_portal_route():
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v2/finance/accounts",
+        "/api/v1/finance/accounts",
+    ],
+)
+def test_missing_authorized_party_is_rejected_for_portal_route(path: str):
     with pytest.raises(HTTPException) as caught:
-        enforce_portal_client("/api/v2/finance/accounts", {})
+        enforce_portal_client(path, {})
     assert caught.value.status_code == 403
     assert caught.value.detail["code"] == "PORTAL_TOKEN_MISMATCH"
 
