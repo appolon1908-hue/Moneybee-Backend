@@ -96,6 +96,28 @@ def read_text(path: Path) -> str:
 
 def repo_marketing_checks(marketing_root: Path) -> list[Check]:
     src = marketing_root / "src"
+    required_assets = (
+        src / "landingPages.ts",
+        src / "resourcePages.ts",
+        marketing_root / "public" / "sitemap.xml",
+        marketing_root / "public" / "robots.txt",
+        marketing_root / "public" / "ads.txt",
+        marketing_root / "index.html",
+    )
+    missing_assets = [
+        str(path.relative_to(marketing_root))
+        for path in required_assets
+        if not path.is_file()
+    ]
+    if missing_assets:
+        return [
+            check(
+                "marketing.repository.assets",
+                "BLOCKED",
+                "frontend marketing checkout is incomplete: " + ", ".join(missing_assets),
+            )
+        ]
+
     landing = read_text(src / "landingPages.ts")
     resources = read_text(src / "resourcePages.ts")
     sitemap = read_text(marketing_root / "public" / "sitemap.xml")
@@ -112,7 +134,10 @@ def repo_marketing_checks(marketing_root: Path) -> list[Check]:
         ),
         check(
             "marketing.seo.runtime_meta",
-            "PASS" if (src / "seo.ts").exists() and "application/ld+json" in read_text(src / "seo.ts") else "FAIL",
+            "PASS"
+            if (src / "seo.ts").exists()
+            and "application/ld+json" in read_text(src / "seo.ts")
+            else "FAIL",
             "route metadata and JSON-LD are configured",
         ),
         check(
@@ -127,7 +152,9 @@ def repo_marketing_checks(marketing_root: Path) -> list[Check]:
         ),
         check(
             "marketing.sitemap",
-            "PASS" if sitemap.count("<url>") >= REQUIRED_LANDING_COUNT + len(REQUIRED_POLICY_SLUGS) else "FAIL",
+            "PASS"
+            if sitemap.count("<url>") >= REQUIRED_LANDING_COUNT + len(REQUIRED_POLICY_SLUGS)
+            else "FAIL",
             f"{sitemap.count('<url>')} sitemap URLs found",
         ),
         check(
@@ -147,7 +174,11 @@ def repo_marketing_checks(marketing_root: Path) -> list[Check]:
         )
 
     publisher_id = os.getenv("GOOGLE_ADSENSE_PUBLISHER_ID", "").strip()
-    has_real_adsense = bool(publisher_id) and publisher_id in ads and "pub-0000000000000000" not in ads
+    has_real_adsense = (
+        bool(publisher_id)
+        and publisher_id in ads
+        and "pub-0000000000000000" not in ads
+    )
     results.append(
         check(
             "google.ads_txt.publisher",
