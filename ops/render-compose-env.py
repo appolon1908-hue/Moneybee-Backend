@@ -46,6 +46,17 @@ def main() -> int:
     }.items():
         emit(env_name, images[key])
 
+    # Optional: services behind a not-yet-certified capability
+    # (bank-credential-store's Vault) that most deployments never start.
+    # Unlike the images above, these are only rendered when the release
+    # lock actually names one - compose.data.yml's vault service still
+    # requires MONEYBEE_VAULT_IMAGE at its own `:?` marker, so a deployment
+    # that wants the bank-credential-store profile sets it directly rather
+    # than through this script.
+    for key, env_name in {"vault": "MONEYBEE_VAULT_IMAGE"}.items():
+        if images.get(key):
+            emit(env_name, images[key])
+
     for key, env_name in {
         "backend_env_file": "MONEYBEE_BACKEND_ENV_FILE",
         "postgres_data_path": "MONEYBEE_POSTGRES_DATA_PATH",
@@ -63,6 +74,9 @@ def main() -> int:
         }:
             continue
         emit(env_name, paths[key])
+
+    if paths.get("vault_data_path"):
+        emit("MONEYBEE_VAULT_DATA_PATH", paths["vault_data_path"])
 
     emit("MONEYBEE_INTERNAL_NETWORK", networks["internal"])
     emit("MONEYBEE_EDGE_NETWORK", networks["edge"])

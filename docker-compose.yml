@@ -55,6 +55,25 @@ services:
       start_period: 120s
     volumes: ["clamav-data:/var/lib/clamav"]
 
+  # Optional: exercises the real bank-credential-store path
+  # (app/integrations/vault.py) instead of leaving it untestable locally.
+  # Start with `docker compose --profile bank-credential-store up`, then set
+  # BANK_CREDENTIAL_STORE_PROVIDER=vault / VAULT_ADDR=http://vault:8200 /
+  # VAULT_TOKEN=moneybee-local-only-root-token in .env. Dev mode
+  # (auto-unsealed, in-memory, fixed root token) is safe for local testing
+  # ONLY - production uses the real, initialized/unsealed server config at
+  # deploy/vault-config.hcl instead, never this.
+  vault:
+    image: hashicorp/vault:latest
+    profiles: ["bank-credential-store"]
+    command: ["server", "-dev", "-dev-root-token-id=moneybee-local-only-root-token"]
+    cap_add: ["IPC_LOCK"]
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
 volumes:
   postgres-data:
   redis-data:

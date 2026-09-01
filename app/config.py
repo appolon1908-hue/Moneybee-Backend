@@ -78,6 +78,18 @@ class Settings(BaseSettings):
     plaid_webhook_url: str | None = None
     plaid_redirect_uri: str | None = None
 
+    # Bank access tokens are never persisted in MoneyBee's own database -
+    # only an opaque reference into this external credential store (see
+    # app/banking.py and app/integrations/vault.py). Self-hosted Vault
+    # rather than a managed-cloud secrets service to match this project's
+    # actual deployment target (a single Hetzner host running Docker
+    # Compose, not any particular cloud vendor).
+    bank_credential_store_provider: Literal["disabled", "vault"] = "disabled"
+    vault_addr: str | None = None
+    vault_token: str | None = None
+    vault_mount: str = "secret"
+    vault_path_prefix: str = "moneybee/bank-credentials"
+
     crm_provider: Literal["disabled", "generic_http", "odoo"] = "disabled"
     crm_base_url: str | None = None
     crm_api_key: str | None = None
@@ -268,11 +280,18 @@ class Settings(BaseSettings):
                     self.plaid_secret,
                     self.field_encryption_active_key_version,
                     self.field_encryption_keys,
+                    self.bank_credential_store_provider != "disabled",
                 ]
             ):
                 raise ValueError(
-                    "Plaid requires credentials and a configured field encryption key"
+                    "Plaid requires credentials, a configured field encryption key, "
+                    "and a live bank credential store - access tokens are never "
+                    "persisted directly"
                 )
+            if self.bank_credential_store_provider == "vault" and not all(
+                [self.vault_addr, self.vault_token]
+            ):
+                raise ValueError("Vault credential store configuration is incomplete")
             if self.field_encryption_active_key_version and (
                 self.field_encryption_active_key_version not in self.field_encryption_keys
             ):

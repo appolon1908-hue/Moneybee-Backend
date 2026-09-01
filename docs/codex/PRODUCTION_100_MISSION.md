@@ -285,37 +285,59 @@ that commit for detail.
       fully tested per-provider implementations (Plaid, Experian, Middesk,
       Odoo) — confirm each against provider sandbox contracts, not just
       the internal `Protocol` shape.
-- [ ] **CONFIRMED BLOCKER — bank-connection exchange/sync flow is
-      non-functional against the only real bank adapter this repo has.**
-      Found while cross-checking an independent parallel "Codex" pass's
-      certification report (`report.html`/`VALIDATION.md`, produced in a
-      separate working copy this repo can't see) against this repo's actual
-      state — it flagged "incompatible bank credential storage" as a
-      blocker; investigated and confirmed it's real, not stale. Root cause:
-      commit `283b789` ("fix(security): keep bank credentials outside
-      MoneyBee") deliberately redesigned `app/banking.py` to require
-      adapters return an opaque `credential_reference` pointing into an
-      external credential store, correctly 503-ing
-      (`BANK_CREDENTIAL_STORE_UNAVAILABLE`) otherwise — but
-      `PlaidAdapter.exchange_public_token` (`app/integrations/plaid.py`)
-      was never updated to match; it still returns Plaid's real API shape
-      (`access_token`/`item_id`/`request_id`), which has no
-      `credential_reference` field at all. `PlaidAdapter.resolve_access_token`
-      is an unconditional stub. Result: even with real Plaid credentials
-      configured and `bank.live_connection` certified, the exchange/sync
-      flow always fails — and nothing in the test suite exercised this path
-      before (`exchange_public_token`/`BankExchangeInput` had zero test
-      references). Pinned down and asserted in
-      `tests/test_banking_credential_reference_contract.py` so it's
-      tracked, not silently broken.
-      **Deliberately not fixed here**: the correct fix is integrating a
-      real external secrets store (AWS Secrets Manager, HashiCorp Vault,
-      etc.) behind `resolve_access_token`/`exchange_public_token` —
-      storing the token encrypted in MoneyBee's own database instead
-      (reusing the versioned field-encryption from Phase 1) would directly
-      reverse the security decision `283b789` deliberately made, so that's
-      not this repo's call to make unilaterally. Needs a vendor/vault
-      decision from a human before this can be implemented for real.
+- [x] **Bank-connection exchange/sync flow fixed against a real credential
+      store.** Found broken while cross-checking an independent parallel
+      "Codex" pass's certification report against this repo's actual state
+      (it flagged "incompatible bank credential storage"): commit `283b789`
+      ("fix(security): keep bank credentials outside MoneyBee") required
+      adapters return an opaque `credential_reference`, but
+      `PlaidAdapter.exchange_public_token` still returned Plaid's real
+      `access_token`, and `PlaidAdapter.resolve_access_token` was an
+      unconditional stub — the exchange/sync flow always 503'd, untested,
+      regardless of provider configuration.
+      Fixed by moving credential storage out of the per-provider adapter
+      (which now only ever talks to Plaid, matching what it actually is)
+      and into `app/banking.py`'s orchestration, behind a new
+      `CredentialStore` Protocol (`app/integrations/base.py`) implemented
+      by self-hosted HashiCorp Vault's KV v2 API
+      (`app/integrations/vault.py`, `BANK_CREDENTIAL_STORE_PROVIDER=vault`).
+      Chose Vault over a managed-cloud secrets service specifically because
+      this project deploys to one self-hosted Docker Compose host (see
+      `deploy/`), not any cloud vendor — matching the actual target rather
+      than introducing a new one. `app/banking.py`'s `exchange_public_token`
+      now calls `credential_store().store(access_token)` and persists only
+      the reference; `sync_bank` resolves it back per-request and never
+      caches the raw token. Production's fail-closed validator
+      (`app/config.py`) now requires a live credential store before Plaid
+      can be enabled at all — the whole point being closed, not just
+      documented. Compose infrastructure added end to end: `deploy/
+      compose.data.yml`'s optional, profile-gated (`bank-credential-store`)
+      `vault` service (hardened the same way postgres/redis are — cap_drop
+      ALL, read-only root, no published port, never on `moneybee_edge`)
+      plus `deploy/vault-config.hcl` (file storage, TLS disabled — trusts
+      the same docker-internal network isolation postgres/redis already
+      do); local dev's `docker-compose.yml` gets the equivalent in Vault's
+      dev-mode (auto-unsealed, fixed root token) for actually exercising
+      the real code path. `ops/render-compose-env.py`/`release.lock.json`/
+      `runtime-paths.lock.json` all extended, keeping `vault` optional
+      (unlike `api`/`worker`/`migrate`) since most deployments will never
+      turn this capability on. `ops/verify-runtime-env.py`'s fail-closed
+      staging gate now also checks `BANK_CREDENTIAL_STORE_PROVIDER`.
+      **Still explicitly not done**: actually initializing and unsealing a
+      real Vault instance is a one-time operator action this repo cannot
+      perform (see `deploy/README.md`) — `bank.credential_store_certified`
+      stays `false` in `docs/codex/CAPABILITY_FREEZE.md` until that
+      happens. Also found and fixed in passing: `docs/codex/
+      CAPABILITY_FREEZE.md` never listed `bank.live_connection` at all
+      despite it being a real, checked capability flag since before this
+      pass, and `deploy/release.lock.json`'s `capabilities` map was
+      missing `payments`/`payouts`/`malware_scan_certified` from earlier
+      in this mission — both synced now.
+      Tests: `tests/test_banking_credential_reference_contract.py` (6
+      tests) — proves the raw token is never persisted, `sync_bank`
+      resolves it correctly, the flow still fails closed with no
+      credential store configured (the default), and `VaultCredentialStore`
+      handles Vault's KV v2 request/response shape correctly.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a

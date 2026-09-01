@@ -35,6 +35,12 @@ networks (`moneybee_internal`, `moneybee_edge`), created once out-of-band:
   and pushed by the `release-backend-images` GitHub Actions workflow
   (`workflow_dispatch` on `release/staging`), never locally.
 - `compose.edge.yml` — Caddy, terminating TLS for the five public domains.
+- `compose.data.yml`'s `vault` service — self-hosted HashiCorp Vault, the
+  external store bank access tokens live in (`BANK_CREDENTIAL_STORE_PROVIDER`,
+  `app/integrations/vault.py`; see `docs/PROVIDER_ADAPTERS.md`). Optional —
+  not started by a plain `up`, only by `--profile bank-credential-store` —
+  and requires a one-time `vault operator init`/`unseal` this repo does not
+  and cannot perform. Never exposed on `moneybee_edge` or a published port.
 
 `ops/render-compose-env.py` renders the `MONEYBEE_*_IMAGE`/`MONEYBEE_*_PATH`
 environment Compose needs from two reviewed, committed lock files:

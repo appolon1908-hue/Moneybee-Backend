@@ -17,7 +17,8 @@
     "redis_acl_file": null,
     "caddy_data_path": null,
     "caddy_config_path": null,
-    "backup_root": null
+    "backup_root": null,
+    "vault_data_path": null
   },
   "networks": {
     "internal": "moneybee_internal",

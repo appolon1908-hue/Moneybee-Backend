@@ -21,7 +21,8 @@
     "admin": null,
     "postgres": null,
     "redis": null,
-    "caddy": null
+    "caddy": null,
+    "vault": null
   },
   "urls": {
     "marketing": "https://staging.moneybeeloan.com",
@@ -42,7 +43,11 @@
     "live_esign_send": false,
     "live_funding": false,
     "live_email": false,
-    "live_sms": false
+    "live_sms": false,
+    "payments": false,
+    "payouts": false,
+    "malware_scan_certified": false,
+    "bank_credential_store_certified": false
   },
   "backup_reference": null,
   "backup_restore_tested": false,

@@ -75,6 +75,49 @@ services:
         aliases:
           - moneybee-redis
 
+  # Optional: the external credential store bank access tokens are stored
+  # in (see app/integrations/vault.py) - not started by a plain `up`, and
+  # not required for the API/worker to run, matching how
+  # BANK_CREDENTIAL_STORE_PROVIDER stays "disabled" until this capability
+  # is certified. Start explicitly with `--profile bank-credential-store`.
+  # A freshly started Vault from this config is sealed and empty -
+  # `vault operator init`/`unseal` are one-time operator actions this repo
+  # does not and cannot perform. Never exposed on moneybee_edge or a
+  # published port; only reachable from other containers on
+  # moneybee_internal, the same way Postgres and Redis already are.
+  vault:
+    image: ${MONEYBEE_VAULT_IMAGE:?set an immutable Vault image digest}
+    command: ["server", "-config=/vault/config/vault.hcl"]
+    profiles: ["bank-credential-store"]
+    volumes:
+      - type: bind
+        source: ./vault-config.hcl
+        target: /vault/config/vault.hcl
+        read_only: true
+      - type: bind
+        source: ${MONEYBEE_VAULT_DATA_PATH:?runtime path is not verified}
+        target: /vault/data
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    cap_add: ["IPC_LOCK"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      moneybee_internal:
+        aliases:
+          - moneybee-vault
+
 secrets:
   postgres_password:
     file: ${MONEYBEE_POSTGRES_PASSWORD_FILE:?runtime path is not verified}

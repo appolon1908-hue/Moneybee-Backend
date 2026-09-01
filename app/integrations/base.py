@@ -50,15 +50,17 @@ class MiddlewareProvider(Protocol):
 
 
 class BankAdapter(Protocol):
+    """Talks to the bank-data provider only. Never persists or resolves a
+    credential reference itself - that's CredentialStore's job, orchestrated
+    by app/banking.py, so it applies uniformly across every bank provider
+    rather than being reimplemented per adapter."""
+
     name: str
 
     async def create_link_session(self, application_id: str) -> dict:
         ...
 
     async def exchange_public_token(self, public_token: str) -> dict:
-        ...
-
-    async def resolve_access_token(self, credential_reference: str) -> str:
         ...
 
     async def get_accounts(self, access_token: str) -> dict:
@@ -190,4 +192,19 @@ class MalwareScanner(Protocol):
     name: str
 
     async def scan(self, content: bytes) -> MalwareScanResult:
+        ...
+
+
+class CredentialStore(Protocol):
+    """Holds a secret (e.g. a bank access token) outside MoneyBee's own
+    database, returning only an opaque reference. store() and resolve()
+    are the only operations - no listing, no direct access to the raw
+    secret except through resolve()."""
+
+    name: str
+
+    async def store(self, secret: str) -> str:
+        ...
+
+    async def resolve(self, reference: str) -> str:
         ...

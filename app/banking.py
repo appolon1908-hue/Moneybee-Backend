@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
 from app.integrations.base import ProviderError
-from app.integrations.registry import bank_adapter
+from app.integrations.registry import bank_adapter, credential_store
 
 
 def _decimal(value) -> Decimal | None:
@@ -53,18 +53,29 @@ async def exchange_public_token(
         )
 
     result = await adapter.exchange_public_token(public_token)
-    credential_reference = str(result.get("credential_reference") or "").strip()
-    if not credential_reference:
+    access_token = str(result.get("access_token") or "").strip()
+    if not access_token:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "PROVIDER_REQUEST_FAILED",
+                "provider": adapter.name,
+                "message": "The bank provider did not return an access token.",
+            },
+        )
+    try:
+        credential_reference = await credential_store().store(access_token)
+    except ProviderError as exc:
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "BANK_CREDENTIAL_STORE_UNAVAILABLE",
                 "message": (
-                    "The bank provider did not return an external credential reference; "
-                    "MoneyBee does not store provider access tokens."
+                    "The external bank credential store is unavailable; "
+                    "MoneyBee does not store provider access tokens directly."
                 ),
             },
-        )
+        ) from exc
     connection = models.BankConnection(
         application_id=application.id,
         provider=adapter.name,
@@ -135,7 +146,7 @@ async def sync_bank(
         raise HTTPException(status_code=409, detail="Bank provider state is missing")
 
     try:
-        access_token = await adapter.resolve_access_token(state.credential_reference)
+        access_token = await credential_store().resolve(state.credential_reference)
     except ProviderError as exc:
         raise HTTPException(
             status_code=503,
