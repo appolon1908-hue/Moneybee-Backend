@@ -61,6 +61,32 @@ def test_api_v1_responses_carry_deprecation_and_sunset_headers():
     assert "Sunset" not in v2_response.headers
 
 
+def test_http_exceptions_converge_on_one_rfc7807_envelope_shape():
+    """Every HTTPException in the codebase used to surface as one of three
+    different shapes depending on where it was raised: RFC 7807 (validation/
+    500s), {"detail": {"code","message"}} (auth/portal), or
+    {"detail": {"code","from_status","to_status","allowed"}} (state-machine
+    transitions, no message key at all). They all go through
+    http_exception_problem() now - this checks a plain-string-detail 404,
+    a {code,message}-detail 403, and a {code,...}-detail-without-message 409
+    all land on the same top-level shape."""
+    with TestClient(app) as client:
+        not_found = client.get(
+            "/api/v2/lender/submissions/00000000-0000-0000-0000-000000000000/workspace",
+            headers={"Authorization": "Bearer local-test"},
+        )
+
+    assert not_found.status_code == 404
+    body = not_found.json()
+    assert not_found.headers["content-type"] == "application/problem+json"
+    assert isinstance(body["detail"], str)
+    assert isinstance(body["code"], str)
+    assert body["type"].startswith("https://api.moneybeeloan.com/problems/")
+    assert body["status"] == 404
+    assert body["instance"]
+    assert "context" not in body
+
+
 def test_bucket_for_path_matches_public_and_webhook_prefixes():
     assert _bucket_for_path("/api/v2/public/contact-requests") == "public"
     assert _bucket_for_path("/api/v1/public/callback-requests") == "public"

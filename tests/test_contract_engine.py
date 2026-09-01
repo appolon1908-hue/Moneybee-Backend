@@ -199,7 +199,7 @@ async def test_contract_void_is_idempotent():
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert invalid.status_code == 409
-        assert invalid.json()["detail"]["code"] == "INVALID_CONTRACT_TRANSITION"
+        assert invalid.json()["code"] == "INVALID_CONTRACT_TRANSITION"
 
 
 async def test_send_pending_contract_envelope_leaves_draft_when_provider_disabled():

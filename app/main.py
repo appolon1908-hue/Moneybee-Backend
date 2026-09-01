@@ -4,12 +4,13 @@ from datetime import UTC, datetime
 from email.utils import format_datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
@@ -117,6 +118,79 @@ async def request_context(request: Request, call_next):
         },
     )
     return response
+
+
+_STATUS_TITLES: dict[int, str] = {
+    400: "Bad request",
+    401: "Authentication required",
+    403: "Access denied",
+    404: "Not found",
+    405: "Method not allowed",
+    409: "Conflict",
+    422: "Unprocessable entity",
+    428: "Precondition required",
+    429: "Too many requests",
+}
+_STATUS_CODES: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "AUTHENTICATION_REQUIRED",
+    403: "ACCESS_DENIED",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+    422: "UNPROCESSABLE_ENTITY",
+    428: "PRECONDITION_REQUIRED",
+    429: "RATE_LIMITED",
+}
+
+
+def _slug(code: str) -> str:
+    return code.lower().replace("_", "-")
+
+
+async def http_exception_problem(request: Request, exc: StarletteHTTPException):
+    """Every HTTPException in this codebase - whichever of the ad hoc detail
+    shapes it was raised with ({"code","message"}, {"code","from_status",...},
+    or a bare string) - converges here into one RFC 7807 envelope. The
+    original detail's non-message keys (from_status/to_status/allowed, etc.)
+    move to a "context" extension member rather than being dropped, since
+    packages/api-client/src/core.ts on the frontend already reads
+    problem.code and problem.context (built defensively ahead of this
+    convergence landing)."""
+    detail = exc.detail
+    code: str
+    message: str | None
+    context: dict | None
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or _STATUS_CODES.get(exc.status_code, "REQUEST_FAILED"))
+        message = detail.get("message")
+        context = {
+            key: value for key, value in detail.items() if key not in {"code", "message"}
+        } or None
+    else:
+        code = _STATUS_CODES.get(exc.status_code, "REQUEST_FAILED")
+        message = str(detail) if detail else None
+        context = None
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        media_type="application/problem+json",
+        headers=exc.headers,
+        content={
+            "type": f"https://api.moneybeeloan.com/problems/{_slug(code)}",
+            "title": _STATUS_TITLES.get(exc.status_code, "Request failed"),
+            "status": exc.status_code,
+            "detail": message or "The request could not be completed.",
+            "instance": request.url.path,
+            "request_id": request.headers.get("X-Request-ID"),
+            "code": code,
+            **({"context": context} if context else {}),
+        },
+    )
+
+
+app.add_exception_handler(StarletteHTTPException, http_exception_problem)
+app.add_exception_handler(HTTPException, http_exception_problem)
 
 
 @app.exception_handler(RequestValidationError)

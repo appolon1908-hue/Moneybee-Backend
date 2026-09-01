@@ -59,7 +59,7 @@ def test_banking_adapter_api_fails_closed_without_ready_capability():
         adapters = client.get("/api/v2/admin/provider-adapters")
 
     assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "CAPABILITY_UNAVAILABLE"
+    assert response.json()["code"] == "CAPABILITY_UNAVAILABLE"
     assert adapters.status_code == 200
     assert all(row["configured"] is False for row in adapters.json())
 

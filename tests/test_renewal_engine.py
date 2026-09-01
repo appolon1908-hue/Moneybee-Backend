@@ -157,4 +157,4 @@ async def test_renewal_status_endpoint_is_idempotent_and_validates_transitions()
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert invalid.status_code == 409
-        assert invalid.json()["detail"]["code"] == "INVALID_RENEWAL_STATUS_TRANSITION"
+        assert invalid.json()["code"] == "INVALID_RENEWAL_STATUS_TRANSITION"

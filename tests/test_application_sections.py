@@ -274,7 +274,7 @@ def test_borrower_application_sections_and_submission_flow():
         )
         assert invalid_transition.status_code == 409
         assert (
-            invalid_transition.json()["detail"]["code"]
+            invalid_transition.json()["code"]
             == "INVALID_APPLICATION_TRANSITION"
         )
 
@@ -325,4 +325,4 @@ def test_public_prequalification_idempotency_replays_and_conflicts():
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert conflict.status_code == 409
-    assert conflict.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+    assert conflict.json()["code"] == "IDEMPOTENCY_KEY_CONFLICT"

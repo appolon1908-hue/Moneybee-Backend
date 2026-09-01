@@ -127,7 +127,7 @@ def test_public_intake_forms_are_idempotent_and_create_crm_events():
             collision_payload["first_name"] = "Changed"
             collision = _post(client, path, collision_payload, key)
             assert collision.status_code == 409
-            assert collision.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+            assert collision.json()["code"] == "IDEMPOTENCY_KEY_CONFLICT"
 
         deliveries = client.get(
             "/api/v2/admin/crm-deliveries",

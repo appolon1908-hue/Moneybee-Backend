@@ -172,8 +172,8 @@ async def test_funding_auto_advances_to_conditions_satisfied_with_no_conditions(
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert response.status_code == 409
-        assert response.json()["detail"]["code"] == "INVALID_FUNDING_TRANSITION"
-        assert response.json()["detail"]["allowed"] == [
+        assert response.json()["code"] == "INVALID_FUNDING_TRANSITION"
+        assert response.json()["context"]["allowed"] == [
             "CANCELLED",
             "CONTRACT_SIGNED",
             "DECLINED",
@@ -290,7 +290,7 @@ async def test_funds_sent_rejects_a_second_call_with_a_fresh_idempotency_key():
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert second.status_code == 409
-        assert second.json()["detail"]["code"] == "FUNDING_ALREADY_FUNDS_SENT"
+        assert second.json()["code"] == "FUNDING_ALREADY_FUNDS_SENT"
 
         fundings = client.get("/api/v2/admin/fundings").json()
         unchanged = next(item for item in fundings if item["id"] == funding_id)
@@ -325,7 +325,7 @@ async def test_confirm_rejects_a_second_call_with_a_fresh_idempotency_key():
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert second.status_code == 409
-        assert second.json()["detail"]["code"] == "FUNDING_ALREADY_FUNDED"
+        assert second.json()["code"] == "FUNDING_ALREADY_FUNDED"
 
         commissions = client.get("/api/v2/admin/commissions").json()
         matches = [item for item in commissions if item["funding_id"] == funding_id]
