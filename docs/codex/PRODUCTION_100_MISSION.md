@@ -426,6 +426,52 @@ that commit for detail.
       stay canonical, what a frontend already integrated against) worth a
       human's sign-off rather than mine to make unilaterally by deleting
       tested, working code.
+- [x] **5 endpoints the spec's "API contract target" names but the running
+      app never had** — found by diffing `app.openapi()`'s actual paths
+      against every bullet in `docs/MONEYBEE_V3_BACKEND_SPEC.md`'s target
+      list, path by path, not by re-reading the prose. All 5 landed with
+      tests (`tests/test_missing_api_endpoints.py`, 10 tests):
+      - `GET /public/products` — a public product catalog for the
+        marketing site and prequalification form. Aggregated from real
+        active `LenderProgram` rows (product type, real min/max amount
+        range across live programs, lender count) rather than a
+        hardcoded list, so it can't silently drift from what MoneyBee
+        actually offers. Known product types get a real display
+        name/description; an unrecognized one gets a humanized fallback
+        rather than failing.
+      - `PATCH /public/prequalifications/{lead_id}` — resuming/editing a
+        prequalification before it becomes a full application. Blocked
+        once the lead has converted (`409
+        PREQUALIFICATION_ALREADY_CONVERTED`) — editing intake data after
+        an application already exists belongs to the application's own
+        PUT endpoints, not this one.
+      - `GET /me/permissions` — the spec's own dedicated endpoint for
+        this (`GET /me` already returns permissions inline; this is the
+        thin single-purpose one named in the target list).
+      - `GET /applications/{id}/consents` — the `Consent` model already
+        existed (captured at intake) but nothing ever read it back.
+      - `POST /offers/{offer_id}/decline` — the spec's "offer list/
+        comparison/accept/decline" target; only accept existed. Added
+        `offer.decline.own` to the `BORROWER` role in
+        `LEGACY_ROLE_PERMISSIONS` (`app/auth.py`) — automatically picked
+        up by `test_rbac_permission_enforcement.py`'s parametrized
+        coverage, no test changes needed there. Mirrors `accept`'s
+        idempotency-key/optimistic-concurrency pattern; does not touch
+        `Funding` or transition the application, matching that a decline
+        is a no-op for anything downstream.
+      New OpenAPI additive manifest
+      (`docs/openapi/spec-gap-endpoints-manifest.json`) for the 5 paths
+      and 4 new schemas.
+      **Confirmed still missing, not built this pass** — bigger items
+      needing new models/services, not just a new route on existing data:
+      business/identity verification has no dedicated endpoint or model
+      at all (only fraud-assessments exists); `GET /me/sessions` needs a
+      `LoginEvent` table and a write-path wired into `current_principal`
+      that doesn't exist yet — the spec lists "login events" under
+      Security but nothing populates them; communications message
+      *templates* (admin-managed, as opposed to `/me/notification-
+      preferences`, which is per-user and already real) have no
+      model/service/endpoint anywhere.
 - [x] **RBAC permission-enforcement coverage** — pass: `tests/
       test_rbac_permission_enforcement.py`. Every other test in this suite
       runs under `LOCAL_AUTH_BYPASS`, which always resolves to a

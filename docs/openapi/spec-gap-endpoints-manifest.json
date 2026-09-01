@@ -1,0 +1,15 @@
+{
+  "paths": {
+    "/api/v2/applications/{application_id}/consents": "00622515476ee4104bfc544eaa3e48d87173f9946f1730f400b64a27b7164bbb",
+    "/api/v2/me/permissions": "153ad03d2016214276be7f8d628bcdeef497a583ecf0a64345907c1e978645e6",
+    "/api/v2/offers/{offer_id}/decline": "ccaf503eb343a250e3b01e4e9d090f74d3b142c98323512a3f78293ec7b0236f",
+    "/api/v2/public/prequalifications/{lead_id}": "b368b5d51df56653c073571405e82e0cb22f0f181c44388052b094c7f44e43d5",
+    "/api/v2/public/products": "c360e824a28931d12bdd720987afeff400d0ca849ae2ec2aee912a0546c0f597"
+  },
+  "schemas": {
+    "ConsentRead": "cca15b2bcf3c173e55e005ee0c6b333b2462de5aae32e7fe37a30828b45cd808",
+    "LeadRead": "7a0eb65d32f9d8d0aecfd7912a2292a32e7e891d377c753f38db5c5cadb3f011",
+    "PrequalificationUpdateInput": "1e6baee5f209a2f019aa169cbb60efc3dbbf1cfdccf9b9db087b1e25a1f6799e",
+    "ProductRead": "8d74a965506859c8f8f29c0bd164a8ed9b38734eb44027ef1f55d5c1283efca1"
+  }
+}

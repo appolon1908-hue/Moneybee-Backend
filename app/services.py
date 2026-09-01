@@ -278,6 +278,139 @@ async def create_lead(
     return response
 
 
+async def update_lead(
+    db: AsyncSession,
+    lead_id: uuid.UUID,
+    payload: schemas.PrequalificationUpdateInput,
+    *,
+    request_id: str,
+) -> models.Lead:
+    lead = await db.get(models.Lead, lead_id)
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Prequalification not found")
+    if lead.status != models.LeadStatus.NEW:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PREQUALIFICATION_ALREADY_CONVERTED",
+                "message": "This prequalification has already progressed to an application "
+                "and can no longer be edited directly.",
+            },
+        )
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        if field == "email":
+            value = str(value).lower()
+        elif field in {"business_name", "first_name", "last_name", "postal_code"}:
+            value = value.strip()
+        setattr(lead, field, value)
+    if changes:
+        db.add(
+            models.AuditEvent(
+                actor_id="public",
+                action="LEAD_UPDATED",
+                resource_type="lead",
+                resource_id=str(lead.id),
+                request_id=request_id,
+                details={"fields": sorted(changes)},
+            )
+        )
+        await db.commit()
+        await db.refresh(lead)
+    return lead
+
+
+_PRODUCT_CATALOG_DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    "WORKING_CAPITAL": (
+        "Working Capital",
+        "Short-term funding for day-to-day operating expenses, inventory, and cash flow gaps.",
+    ),
+    "EQUIPMENT_FINANCING": (
+        "Equipment Financing",
+        "Financing to purchase or lease business equipment, secured by the equipment itself.",
+    ),
+    "LINE_OF_CREDIT": (
+        "Line of Credit",
+        "A revolving credit line you draw against as needed and repay over time.",
+    ),
+    "TERM_LOAN": (
+        "Term Loan",
+        "A lump-sum loan repaid on a fixed schedule over a set term.",
+    ),
+    "SBA_LOAN": (
+        "SBA Loan",
+        "Government-backed financing with longer terms and lower rates for qualifying businesses.",
+    ),
+    "INVOICE_FACTORING": (
+        "Invoice Factoring",
+        "Advance funding against outstanding invoices, repaid as customers pay.",
+    ),
+    "MERCHANT_CASH_ADVANCE": (
+        "Merchant Cash Advance",
+        "An advance repaid as a percentage of future card or receivables sales.",
+    ),
+    "COMMERCIAL_REAL_ESTATE": (
+        "Commercial Real Estate",
+        "Financing to purchase, refinance, or improve owner-occupied commercial property.",
+    ),
+}
+
+
+def _humanize_product_type(product_type: str) -> str:
+    return product_type.replace("_", " ").title()
+
+
+async def products_catalog(db: AsyncSession) -> list[schemas.ProductRead]:
+    rows = (
+        await db.execute(
+            select(
+                models.LenderProgram.product_type,
+                func.min(models.LenderProgram.min_amount),
+                func.max(models.LenderProgram.max_amount),
+                func.count(func.distinct(models.LenderProgram.lender_id)),
+            )
+            .where(models.LenderProgram.active.is_(True))
+            .group_by(models.LenderProgram.product_type)
+        )
+    ).all()
+    products = []
+    for product_type, min_amount, max_amount, lender_count in rows:
+        display_name, description = _PRODUCT_CATALOG_DESCRIPTIONS.get(
+            product_type,
+            (_humanize_product_type(product_type), "Business financing tailored to your needs."),
+        )
+        products.append(
+            schemas.ProductRead(
+                product_type=product_type,
+                display_name=display_name,
+                description=description,
+                min_amount=min_amount,
+                max_amount=max_amount,
+                lender_count=lender_count,
+            )
+        )
+    return sorted(products, key=lambda item: item.display_name)
+
+
+async def list_application_consents(
+    db: AsyncSession, application: models.Application
+) -> list[models.Consent]:
+    return list(
+        (
+            await db.scalars(
+                select(models.Consent)
+                .where(
+                    or_(
+                        models.Consent.application_id == application.id,
+                        models.Consent.lead_id == application.lead_id,
+                    )
+                )
+                .order_by(models.Consent.created_at)
+            )
+        ).all()
+    )
+
+
 def score(application: models.Application, program: models.LenderProgram):
     reasons: list[str] = []
     if application.requested_amount < program.min_amount:

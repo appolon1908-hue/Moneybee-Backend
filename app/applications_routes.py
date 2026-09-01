@@ -39,6 +39,34 @@ async def prequalify(
     )
 
 
+@router.patch(
+    "/public/prequalifications/{lead_id}",
+    response_model=schemas.LeadRead,
+    tags=["public"],
+)
+async def update_prequalification(
+    lead_id: uuid.UUID,
+    payload: schemas.PrequalificationUpdateInput,
+    request: Request,
+    db: Db,
+):
+    return await services.update_lead(
+        db,
+        lead_id,
+        payload,
+        request_id=request.headers.get("X-Request-ID", str(uuid.uuid4())),
+    )
+
+
+@router.get(
+    "/public/products",
+    response_model=list[schemas.ProductRead],
+    tags=["public"],
+)
+async def public_products(db: Db):
+    return await services.products_catalog(db)
+
+
 @router.get(
     "/me",
     response_model=schemas.PrincipalRead,
@@ -70,6 +98,11 @@ async def me(user: User):
 @router.get("/me/capabilities", tags=["identity"])
 async def my_capabilities(db: Db, user: User):
     return await services.effective_capabilities(db)
+
+
+@router.get("/me/permissions", tags=["identity"])
+async def my_permissions(user: User):
+    return {"permissions": sorted(user.permissions)}
 
 
 @router.post("/applications", response_model=schemas.ApplicationRead, tags=["applications"])
@@ -200,6 +233,16 @@ async def offers(application_id: uuid.UUID, db: Db, user: User):
             )
         ).all()
     )
+
+
+@router.get(
+    "/applications/{application_id}/consents",
+    response_model=list[schemas.ConsentRead],
+    tags=["applications"],
+)
+async def application_consents(application_id: uuid.UUID, db: Db, user: User):
+    application = await services.get_authorized_application(db, application_id, user)
+    return await services.list_application_consents(db, application)
 
 
 @router.post(
@@ -348,6 +391,90 @@ async def accept_offer(
             request_hash=request_hash,
             response_status=200,
             response_body={"offer_id": str(offer.id), "status": "ACCEPTED"},
+        )
+    )
+    await db.commit()
+    await db.refresh(offer)
+    return offer
+
+
+@router.post(
+    "/offers/{offer_id}/decline",
+    response_model=schemas.OfferRead,
+    tags=["offers"],
+)
+async def decline_offer(
+    offer_id: uuid.UUID,
+    db: Db,
+    user: User,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=160)],
+):
+    route = f"/offers/{offer_id}/decline"
+    request_hash = hashlib.sha256(str(offer_id).encode()).hexdigest()
+    replay = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if replay:
+        if replay.request_hash != request_hash:
+            raise HTTPException(status_code=409, detail="Idempotency key payload conflict")
+        replay_offer = await db.get(models.Offer, uuid.UUID(replay.response_body["offer_id"]))
+        if replay_offer is None:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_offer
+
+    offer = await db.scalar(
+        select(models.Offer).where(models.Offer.id == offer_id).with_for_update()
+    )
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    application = await db.scalar(
+        select(models.Application)
+        .where(models.Application.id == offer.application_id)
+        .with_for_update()
+    )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    services.authorize_application(application, user, write=True)
+    if "*" not in user.permissions and "offer.decline.own" not in user.permissions:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if offer.status != "AVAILABLE":
+        raise HTTPException(status_code=409, detail="Offer is not available")
+    offer.status = "DECLINED"
+    offer.version += 1
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="OFFER_DECLINED",
+            resource_type="offer",
+            resource_id=str(offer.id),
+            details={"application_id": str(application.id)},
+        )
+    )
+    db.add(
+        models.OutboxEvent(
+            event_type="offer.declined.v1",
+            aggregate_type="application",
+            aggregate_id=application.id,
+            aggregate_version=application.version,
+            payload={
+                "offer_id": str(offer.id),
+                "lender_id": str(offer.lender_id),
+            },
+            idempotency_key=f"OfferDeclined:{offer.id}:{offer.version}",
+        )
+    )
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"offer_id": str(offer.id), "status": "DECLINED"},
         )
     )
     await db.commit()

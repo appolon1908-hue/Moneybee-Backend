@@ -71,6 +71,7 @@ LEGACY_ROLE_PERMISSIONS = {
         "complaint.create.own",
         "credit.authorize.own",
         "offer.accept.own",
+        "offer.decline.own",
     },
 }
 

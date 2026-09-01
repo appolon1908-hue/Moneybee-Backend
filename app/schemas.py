@@ -43,6 +43,53 @@ class PrequalificationInput(BaseModel):
     anti_bot_token: str | None = None
 
 
+class PrequalificationUpdateInput(BaseModel):
+    funding_amount: Decimal | None = Field(default=None, ge=1000, le=10_000_000)
+    use_of_funds: str | None = None
+    time_in_business_months: int | None = Field(default=None, ge=0)
+    monthly_revenue: Decimal | None = Field(default=None, ge=0)
+    business_name: str | None = Field(default=None, min_length=2, max_length=240)
+    first_name: str | None = None
+    last_name: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, pattern=r"^\+[1-9]\d{7,14}$")
+    postal_code: str | None = None
+
+
+class LeadRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    first_name: str
+    last_name: str
+    email: str
+    phone: str
+    business_name: str
+    funding_amount: Decimal
+    monthly_revenue: Decimal
+    use_of_funds: str
+    time_in_business_months: int
+    postal_code: str
+    status: str
+
+
+class ProductRead(BaseModel):
+    product_type: str
+    display_name: str
+    description: str
+    min_amount: Decimal
+    max_amount: Decimal
+    lender_count: int
+
+
+class ConsentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    consent_type: str
+    document_version: str
+    evidence: dict
+    created_at: datetime
+
+
 class LeadAccepted(BaseModel):
     lead_id: uuid.UUID
     reference: str
