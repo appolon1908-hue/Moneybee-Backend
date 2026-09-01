@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import financial_models, identity_models, models  # noqa: F401
+from app import compliance_models, financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
 from app import public_intake_models  # noqa: F401
 from app.admin_routes import router as admin_router

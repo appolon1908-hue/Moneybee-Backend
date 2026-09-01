@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas, services
 from app.auth import Principal, current_principal, require_permission
+from app.compliance_service import generate_commercial_financing_disclosure
 from app.db import get_db
 
 
@@ -276,6 +277,9 @@ async def create_submission_offer(
     )
     db.add(item)
     await db.flush()
+    await generate_commercial_financing_disclosure(
+        db, item, jurisdiction=application.state
+    )
     db.add(
         models.OutboxEvent(
             event_type="OfferReceived",

@@ -532,3 +532,61 @@ class ProviderAdapterStatus(BaseModel):
     provider: str
     selected: bool
     configured: bool
+
+
+class AdverseActionNoticeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    submission_id: uuid.UUID
+    underwriting_review_id: uuid.UUID
+    lender_id: uuid.UUID
+    creditor_name: str
+    principal_reasons: list
+    notice_text: str
+    status: str
+    delivered_at: datetime | None
+    created_at: datetime
+
+
+class CommercialFinancingDisclosureRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    offer_id: uuid.UUID
+    application_id: uuid.UUID
+    jurisdiction: str | None
+    amount_financed: Decimal
+    finance_charge: Decimal
+    total_repayment_amount: Decimal
+    estimated_apr: Decimal | None
+    payment_amount: Decimal
+    payment_frequency: str
+    term_months: int
+    prepayment_policy: str
+    disclosure_text: str
+    acknowledged_at: datetime | None
+    acknowledged_by: str | None
+    created_at: datetime
+
+
+class CommercialFinancingAcknowledgeInput(BaseModel):
+    acknowledged_by: str = Field(min_length=1, max_length=255)
+
+
+class CommissionTaxRecordRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    recipient_type: str
+    recipient_reference: str
+    recipient_name: str | None
+    tax_year: int
+    total_amount: Decimal
+    commission_count: int
+    requires_1099: bool
+    filed_at: datetime | None
+    filing_reference: str | None
+
+
+class CommissionTaxRecordTinInput(BaseModel):
+    recipient_name: str = Field(min_length=1, max_length=255)
+    tin: str = Field(min_length=9, max_length=20)

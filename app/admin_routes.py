@@ -7,8 +7,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import domain_logic, models, schemas, services
+from app import compliance_models, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
+from app.compliance_service import (
+    generate_commission_tax_records,
+    update_recipient_tin,
+)
 from app.db import get_db
 from app.integrations.registry import provider_statuses
 
@@ -1203,3 +1207,131 @@ async def provider_adapters(
         )
         for row in provider_statuses()
     ]
+
+
+@router.get(
+    "/admin/applications/{application_id}/adverse-action-notices",
+    response_model=list[schemas.AdverseActionNoticeRead],
+    tags=["admin", "compliance"],
+)
+async def list_adverse_action_notices(
+    application_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("application.read"))],
+):
+    return list(
+        (
+            await db.scalars(
+                select(compliance_models.AdverseActionNotice)
+                .where(compliance_models.AdverseActionNotice.application_id == application_id)
+                .order_by(compliance_models.AdverseActionNotice.created_at.desc())
+            )
+        ).all()
+    )
+
+
+@router.get(
+    "/admin/offers/{offer_id}/commercial-financing-disclosure",
+    response_model=schemas.CommercialFinancingDisclosureRead,
+    tags=["admin", "compliance"],
+)
+async def get_commercial_financing_disclosure(
+    offer_id: uuid.UUID,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("application.read"))],
+):
+    disclosure = await db.scalar(
+        select(compliance_models.CommercialFinancingDisclosure).where(
+            compliance_models.CommercialFinancingDisclosure.offer_id == offer_id
+        )
+    )
+    if disclosure is None:
+        raise HTTPException(status_code=404, detail="Disclosure not found")
+    return disclosure
+
+
+@router.post(
+    "/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
+    response_model=schemas.CommercialFinancingDisclosureRead,
+    tags=["admin", "compliance"],
+)
+async def acknowledge_commercial_financing_disclosure(
+    offer_id: uuid.UUID,
+    payload: schemas.CommercialFinancingAcknowledgeInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("application.edit"))],
+):
+    disclosure = await db.scalar(
+        select(compliance_models.CommercialFinancingDisclosure).where(
+            compliance_models.CommercialFinancingDisclosure.offer_id == offer_id
+        )
+    )
+    if disclosure is None:
+        raise HTTPException(status_code=404, detail="Disclosure not found")
+    if disclosure.acknowledged_at is None:
+        disclosure.acknowledged_at = models.utcnow()
+        disclosure.acknowledged_by = payload.acknowledged_by
+        await db.commit()
+        await db.refresh(disclosure)
+    return disclosure
+
+
+@router.post(
+    "/admin/commission-tax-records/generate",
+    response_model=list[schemas.CommissionTaxRecordRead],
+    tags=["admin", "compliance"],
+)
+async def generate_commission_tax_records_endpoint(
+    tax_year: int,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+):
+    records = await generate_commission_tax_records(db, tax_year)
+    await db.commit()
+    for record in records:
+        await db.refresh(record)
+    return records
+
+
+@router.get(
+    "/admin/commission-tax-records",
+    response_model=list[schemas.CommissionTaxRecordRead],
+    tags=["admin", "compliance"],
+)
+async def list_commission_tax_records(
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+    tax_year: int | None = None,
+):
+    statement = select(compliance_models.CommissionTaxRecord)
+    if tax_year is not None:
+        statement = statement.where(compliance_models.CommissionTaxRecord.tax_year == tax_year)
+    return list(
+        (
+            await db.scalars(
+                statement.order_by(compliance_models.CommissionTaxRecord.total_amount.desc())
+            )
+        ).all()
+    )
+
+
+@router.patch(
+    "/admin/commission-tax-records/{record_id}/tin",
+    response_model=schemas.CommissionTaxRecordRead,
+    tags=["admin", "compliance"],
+)
+async def set_commission_tax_record_tin(
+    record_id: uuid.UUID,
+    payload: schemas.CommissionTaxRecordTinInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+):
+    record = await db.get(compliance_models.CommissionTaxRecord, record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Commission tax record not found")
+    await update_recipient_tin(
+        db, record, recipient_name=payload.recipient_name, tin=payload.tin
+    )
+    await db.commit()
+    await db.refresh(record)
+    return record
