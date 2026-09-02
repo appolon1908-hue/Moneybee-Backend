@@ -1,14 +1,11 @@
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.db_base import Base
 
-
-class Base(DeclarativeBase):
-    pass
 
 
 _engine_options: dict[str, object] = {"pool_pre_ping": True}

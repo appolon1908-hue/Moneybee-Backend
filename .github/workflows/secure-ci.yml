@@ -204,8 +204,8 @@ jobs:
           export MONEYBEE_REDIS_IMAGE="redis@sha256:$ZERO"
           export MONEYBEE_CADDY_IMAGE="caddy@sha256:$ZERO"
           export MONEYBEE_CLAMAV_IMAGE="clamav@sha256:$ZERO"
-          export MONEYBEE_MIGRATOR_ENV_FILE=/tmp/moneybee/migrator.env
-          export MONEYBEE_RUNTIME_ENV_FILE=/tmp/moneybee/runtime.env
+          export MONEYBEE_MIGRATION_ENV_FILE=/tmp/moneybee/migrator.env
+          export MONEYBEE_BACKEND_ENV_FILE=/tmp/moneybee/runtime.env
           export MONEYBEE_POSTGRES_DATA_PATH=/tmp/moneybee/postgres
           export MONEYBEE_REDIS_DATA_PATH=/tmp/moneybee/redis
           export MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE=/tmp/moneybee/postgres_password

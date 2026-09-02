@@ -1,5 +1,6 @@
 from functools import lru_cache
 import json
+import os
 from typing import Literal
 
 from pydantic import model_validator
@@ -11,7 +12,9 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "dev", "staging", "production"] = "local"
     database_url: str = "sqlite+aiosqlite:///./moneybee.db"
+    database_runtime_role: str | None = None
     redis_url: str = "redis://localhost:6379/0"
+    redis_required_for_readiness: bool = False
     auto_create_schema: bool = True
     local_auth_bypass: bool = True
     local_identity_enforcement: bool = False
@@ -48,12 +51,15 @@ class Settings(BaseSettings):
 
     field_encryption_keys_json: str = "{}"
     field_encryption_active_key_version: str | None = None
+    field_encryption_current_version: str | None = None
+    pii_lookup_hmac_key: str | None = None
     provider_timeout_seconds: float = 30.0
     live_writes: bool = False
     odoo_write: bool = False
 
     log_level: str = "INFO"
     rate_limit_enabled: bool = True
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
     rate_limit_window_seconds: int = 60
     public_rate_limit_per_minute: int = 60
     webhook_rate_limit_per_minute: int = 120
@@ -70,8 +76,19 @@ class Settings(BaseSettings):
     provenance_digest: str | None = None
     backup_reference: str | None = None
     backup_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    pitr_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    offhost_backup_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
     restore_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    redis_recovery_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    application_restore_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
     staging_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    authorization_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    command_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    concurrency_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    document_security_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    pii_security_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    observability_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    idempotency_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
 
     bank_provider: Literal["disabled", "plaid"] = "disabled"
     plaid_base_url: str = "https://sandbox.plaid.com"
@@ -229,6 +246,10 @@ class Settings(BaseSettings):
         return {key: secret for key, secret in value.items() if secret}
 
     @property
+    def current_field_encryption_version(self) -> str | None:
+        return self.field_encryption_current_version or self.field_encryption_active_key_version
+
+    @property
     def oidc_algorithms(self) -> list[str]:
         return [
             item.strip()
@@ -269,6 +290,10 @@ class Settings(BaseSettings):
                 )
 
         if self.app_env in {"staging", "production"}:
+            # Alembic imports model metadata, but its isolated one-shot
+            # identity must not need runtime/provider configuration.
+            if os.getenv("MIGRATION_DATABASE_URL"):
+                return self
             if self.local_auth_bypass or self.auto_create_schema:
                 raise ValueError("Local bypass/schema creation must be disabled")
             if not self.local_identity_enforcement:
@@ -277,6 +302,10 @@ class Settings(BaseSettings):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
             if self.oidc_algorithms != ["RS256"]:
                 raise ValueError("Production OIDC tokens must use RS256")
+            if not self.database_runtime_role:
+                raise ValueError("DATABASE_RUNTIME_ROLE is required")
+            if self.rate_limit_enabled and self.rate_limit_backend != "redis":
+                raise ValueError("Staging/production rate limiting requires RATE_LIMIT_BACKEND=redis")
             if self.rate_limit_enabled and not self.redis_url.startswith(("redis://", "rediss://")):
                 raise ValueError("Distributed rate limiting requires REDIS_URL")
             if self.trust_forwarded_for and not self.trusted_proxy_cidrs:
@@ -287,18 +316,18 @@ class Settings(BaseSettings):
                 [
                     self.plaid_client_id,
                     self.plaid_secret,
-                    self.field_encryption_active_key_version,
+                    self.current_field_encryption_version,
                     self.field_encryption_keys,
                 ]
             ):
                 raise ValueError(
                     "Plaid requires credentials and a configured field encryption key"
                 )
-            if self.field_encryption_active_key_version and (
-                self.field_encryption_active_key_version not in self.field_encryption_keys
+            if self.current_field_encryption_version and (
+                self.current_field_encryption_version not in self.field_encryption_keys
             ):
                 raise ValueError(
-                    "FIELD_ENCRYPTION_ACTIVE_KEY_VERSION must name a key present in "
+                    "FIELD_ENCRYPTION_CURRENT_VERSION must name a key present in "
                     "FIELD_ENCRYPTION_KEYS_JSON"
                 )
             if self.middleware_provider == "codestra" and not all(

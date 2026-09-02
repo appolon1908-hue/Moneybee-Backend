@@ -94,7 +94,7 @@ async def test_application_status_and_offer_detail_are_authorized_readbacks():
     assert status_response.json() == {
         "application_id": application_id,
         "status": models.ApplicationStatus.APPLICATION_STARTED.value,
-        "completion_percentage": 0,
+        "completion_percentage": 20,
         "version": 1,
     }
     assert offer_response.status_code == 200

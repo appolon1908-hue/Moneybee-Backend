@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import time
 from collections import defaultdict, deque
 from typing import Protocol
@@ -113,13 +114,25 @@ def _peer_is_trusted(request: Request) -> bool:
 
 
 def resolved_client_ip(request: Request) -> str:
-    """Accept forwarding data only from an approved immediate proxy."""
+    """Resolve the rightmost untrusted hop, trusting only configured proxies."""
     peer = request.client.host if request.client else "unknown"
     if not _peer_is_trusted(request):
         return peer
-    chain = [part.strip() for part in request.headers.get("X-Forwarded-For", "").split(",")]
-    valid = [candidate for candidate in chain if _ip(candidate) is not None]
-    return valid[-1] if valid else peer
+    raw_chain = request.headers.get("X-Forwarded-For", "")
+    chain = [part.strip() for part in raw_chain.split(",") if part.strip()]
+    if not chain or any(_ip(candidate) is None for candidate in chain):
+        return peer
+    trusted_networks = []
+    for value in settings.trusted_proxy_cidrs:
+        try:
+            trusted_networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    for candidate in reversed([*chain, peer]):
+        address = _ip(candidate)
+        if address is not None and not any(address in network for network in trusted_networks):
+            return candidate
+    return chain[0]
 
 
 class DistributedRateLimitMiddleware(BaseHTTPMiddleware):
@@ -132,7 +145,9 @@ class DistributedRateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._limit_overrides = limits_per_minute
         self._backend = backend or (
-            _test_backend if settings.app_env == "test" else RedisRateLimitBackend()
+            _test_backend
+            if settings.rate_limit_backend == "memory" and settings.app_env in {"local", "test", "dev"}
+            else RedisRateLimitBackend()
         )
 
     async def dispatch(self, request: Request, call_next):
@@ -145,7 +160,8 @@ class DistributedRateLimitMiddleware(BaseHTTPMiddleware):
         if limit <= 0:
             return await call_next(request)
 
-        key = f"moneybee:rate-limit:{bucket}:{resolved_client_ip(request)}"
+        client_token = hashlib.sha256(resolved_client_ip(request).encode()).hexdigest()[:32]
+        key = f"moneybee:rate-limit:{bucket}:{client_token}"
         try:
             count, retry_after = await self._backend.hit(
                 key, settings.rate_limit_window_seconds

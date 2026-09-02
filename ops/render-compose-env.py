@@ -48,8 +48,8 @@ def main() -> int:
         emit(env_name, images[key])
 
     for key, env_name in {
-        "migrator_env_file": "MONEYBEE_MIGRATOR_ENV_FILE",
-        "runtime_env_file": "MONEYBEE_RUNTIME_ENV_FILE",
+        "migrator_env_file": "MONEYBEE_MIGRATION_ENV_FILE",
+        "runtime_env_file": "MONEYBEE_BACKEND_ENV_FILE",
         "postgres_data_path": "MONEYBEE_POSTGRES_DATA_PATH",
         "redis_data_path": "MONEYBEE_REDIS_DATA_PATH",
         "postgres_admin_password_file": "MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE",

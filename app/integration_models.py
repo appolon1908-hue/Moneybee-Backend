@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db_base import Base
 from app.models import Record
 
 

@@ -1,11 +1,28 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app import (  # noqa: F401
+config = context.config
+
+
+def migration_database_url() -> str:
+    explicit = os.getenv("MIGRATION_DATABASE_URL")
+    if explicit:
+        return explicit
+    if os.getenv("APP_ENV", "local") in {"staging", "production"}:
+        raise RuntimeError(
+            "MIGRATION_DATABASE_URL is required for staging/production Alembic operations"
+        )
+    return os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+
+
+config.set_main_option("sqlalchemy.url", migration_database_url().replace("%", "%%"))
+
+from app import (  # noqa: E402, F401
     compliance_models,
     financial_models,
     identity_models,
@@ -13,12 +30,8 @@ from app import (  # noqa: F401
     models,
     public_intake_models,
 )
-from app.portal import models as portal_models  # noqa: F401
-from app.config import settings
-from app.db import Base
-
-config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+from app.portal import models as portal_models  # noqa: E402, F401
+from app.db_base import Base  # noqa: E402
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db_base import Base
 
 
 def utcnow() -> datetime:

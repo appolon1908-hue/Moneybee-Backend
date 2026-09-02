@@ -4,6 +4,16 @@ This document is the implementation ledger for the production-hardening blueprin
 MoneyBee must not report production readiness until every mandatory gate is
 implemented and backed by current evidence.
 
+## Production-hardening-20260902 reconciliation
+
+Preserved baseline: the historical sections below describe the state before this branch and are retained as audit history.
+
+DONE in repository code and tests: separate migration/runtime Compose identities; explicit migration URL fail-closed behavior; fresh-cluster admin identity; least-privilege role assets; runtime-role readiness inspection; Redis-backed distributed rate limiting; trusted-proxy traversal; versioned encryption envelope with legacy reads; document quarantine/scanner foundation; financial locking/idempotency foundations; durable inbox/outbox retry foundations; and recovery evidence fields.
+
+PARTIAL pending complete repository evidence: command inventory/coverage, PII expand/backfill/reveal across all inventoried plaintext fields, complete OpenTelemetry metrics/alert implementation, and exhaustive PostgreSQL concurrent-transition coverage.
+
+OPEN operational evidence: immutable published digests, off-host backup, PITR, isolated restore, Redis recovery, staging E2E, rollback rehearsal and production canary. Runbooks or configuration do not make these PASS.
+
 ## Implemented in this phase
 
 - Command context and typed AcceptOfferCommand foundation.
@@ -68,4 +78,3 @@ identity binding -> command coverage -> authorization policies -> concurrency ->
 event contracts -> outbox/inbox workers -> operational recovery -> notification
 subsystem -> secure documents -> PII controls -> observability -> staging and
 restore proof -> immutable release and canary.
-

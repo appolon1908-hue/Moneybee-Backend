@@ -5,7 +5,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, Numeric, String, Tex
 from sqlalchemy.orm import Mapped, mapped_column
 from decimal import Decimal
 
-from app.db import Base
+from app.db_base import Base
 from app.models import Record
 
 
