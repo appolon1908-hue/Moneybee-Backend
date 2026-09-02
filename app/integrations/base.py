@@ -110,6 +110,9 @@ class ESignAdapter(Protocol):
     ) -> dict:
         ...
 
+    async def void_envelope(self, *, envelope_id: str, reason: str) -> dict:
+        ...
+
 
 class EmailAdapter(Protocol):
     async def send(

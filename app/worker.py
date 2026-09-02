@@ -402,6 +402,7 @@ async def process_pending_docusign_event() -> str | None:
             .where(
                 IntegrationInboxMessage.provider == "docusign",
                 IntegrationInboxMessage.status == "RECEIVED",
+                or_(IntegrationInboxMessage.next_attempt_at.is_(None), IntegrationInboxMessage.next_attempt_at <= datetime.now(UTC)),
             )
             .order_by(IntegrationInboxMessage.created_at)
             .with_for_update(skip_locked=True)
@@ -422,10 +423,18 @@ async def process_pending_docusign_event() -> str | None:
             return str(message.id)
 
         contract = await db.scalar(
-            select(Contract).where(Contract.external_envelope_id == envelope_id)
+            select(Contract).where(Contract.external_envelope_id == envelope_id).with_for_update()
         )
         if contract is None:
-            message.status = "FAILED"
+            if message.attempts >= 8:
+                message.status = "FAILED"
+                message.next_attempt_at = None
+            else:
+                message.status = "RECEIVED"
+                message.next_attempt_at = datetime.now(UTC) + timedelta(
+                    seconds=provider_retry_delay_seconds(message.id, message.attempts)
+                )
+                message.processed_at = None
             message.last_error = f"No contract found for envelope {envelope_id}"
             return str(message.id)
 
@@ -442,7 +451,7 @@ async def process_pending_docusign_event() -> str | None:
                 select(Funding).where(
                     Funding.application_id == contract.application_id,
                     Funding.offer_id == contract.offer_id,
-                )
+                ).with_for_update()
             )
             if funding is not None and funding.status == "CONDITIONS_SATISFIED":
                 transition_funding(db, funding, "CONTRACT_SIGNED", SYSTEM_PRINCIPAL)

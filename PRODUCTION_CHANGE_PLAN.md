@@ -9,7 +9,7 @@
 - Source baseline: PR 38 exact head; record the final SHA after required checks and reviews pass.
 - Current deployed source: not re-verified by this repository-only change.
 - Current production Alembic revision: must be captured in the approved pre-change baseline.
-- Candidate Alembic head: `20260901_0024`.
+- Candidate Alembic head: `20260901_0025`.
 - Production images must not be updated until CI produces immutable digest references, an SBOM, and security results.
 
 ## Planned sequence after blockers close and owner approves
@@ -31,6 +31,7 @@
 | `20260901_0022a` credential-reference stage | ONLINE SAFE | Adds one nullable compatibility column and creates the supported boundary for a separately approved reference-only backfill. |
 | `20260901_0023` bank credential reference | MAINTENANCE WINDOW REQUIRED | Fails closed on unresolved legacy credential rows and requires an approved credential-reference transition. Downgrade refuses to strand external references. |
 | `20260901_0024` provider retry and notice uniqueness | SHORT LOCK | Adds nullable retry columns and a uniqueness constraint after rejecting duplicate legacy notice evidence. Re-measure on current restored data. |
+| `20260901_0025` contract/inbox concurrency | SHORT LOCK | Rejects duplicate existing contracts, enforces one contract per offer, and adds nullable inbox retry scheduling. |
 
 ## Rollback
 
@@ -42,7 +43,7 @@
 ## Required approval evidence
 
 - Exact-head GitHub checks and fresh code/human review pass.
-- Current production-derived rehearsal through `20260901_0024` passes.
+- Repository migration rehearsal through `20260901_0025` passes; production-derived rehearsal remains an operator prerequisite.
 - Verified off-host backup retrieval and PITR recovery point.
 - Immutable image provenance/SBOM/security gate.
 - Approved external object storage and malware scanner.

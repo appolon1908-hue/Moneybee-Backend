@@ -14,7 +14,8 @@ from app.compliance_service import (
     update_recipient_tin,
 )
 from app.db import get_db
-from app.integrations.registry import provider_statuses
+from app.integrations.base import ProviderError
+from app.integrations.registry import esign_adapter, provider_statuses
 
 
 router = APIRouter()
@@ -147,8 +148,13 @@ async def _load_funding_or_404(
     return funding
 
 
-async def _load_contract_or_404(db: AsyncSession, contract_id: uuid.UUID) -> models.Contract:
-    contract = await db.get(models.Contract, contract_id)
+async def _load_contract_or_404(
+    db: AsyncSession, contract_id: uuid.UUID, *, for_update: bool = False
+) -> models.Contract:
+    query = select(models.Contract).where(models.Contract.id == contract_id)
+    if for_update:
+        query = query.with_for_update()
+    contract = await db.scalar(query)
     if contract is None:
         raise HTTPException(status_code=404, detail="Contract not found")
     return contract
@@ -405,7 +411,7 @@ async def void_contract(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    contract = await _load_contract_or_404(db, contract_id)
+    contract = await _load_contract_or_404(db, contract_id, for_update=True)
     route = f"/admin/contracts/{contract_id}/void"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -418,6 +424,14 @@ async def void_contract(
     if replay:
         return await _load_contract_or_404(db, contract_id)
 
+    if contract.status == "SENT" and contract.external_envelope_id:
+        try:
+            await esign_adapter().void_envelope(
+                envelope_id=contract.external_envelope_id,
+                reason=payload.reason,
+            )
+        except ProviderError as exc:
+            raise HTTPException(status_code=503, detail="E-sign void could not be confirmed") from exc
     services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
     await db.flush()
     db.add(
@@ -474,9 +488,12 @@ async def admin_renewals(
 
 
 async def _load_renewal_or_404(
-    db: AsyncSession, renewal_id: uuid.UUID
+    db: AsyncSession, renewal_id: uuid.UUID, *, for_update: bool = False
 ) -> models.RenewalOpportunity:
-    renewal = await db.get(models.RenewalOpportunity, renewal_id)
+    query = select(models.RenewalOpportunity).where(models.RenewalOpportunity.id == renewal_id)
+    if for_update:
+        query = query.with_for_update()
+    renewal = await db.scalar(query)
     if renewal is None:
         raise HTTPException(status_code=404, detail="Renewal opportunity not found")
     return renewal
@@ -496,7 +513,7 @@ async def update_renewal_status(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    renewal = await _load_renewal_or_404(db, renewal_id)
+    renewal = await _load_renewal_or_404(db, renewal_id, for_update=True)
     route = f"/admin/renewal-opportunities/{renewal_id}/status"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(

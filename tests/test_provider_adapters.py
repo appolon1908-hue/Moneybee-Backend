@@ -70,6 +70,22 @@ async def test_docusign_envelope_creation_uses_stable_provider_idempotency(monke
     assert captured["json"]["transactionId"] == contract_id
 
 
+async def test_docusign_void_updates_the_provider_envelope(monkeypatch):
+    captured = {}
+
+    async def fake_request(**kwargs):
+        captured.update(kwargs)
+        return {"status": "voided"}
+
+    monkeypatch.setattr("app.integrations.providers.provider_request", fake_request)
+    monkeypatch.setattr(settings, "docusign_account_id", "account")
+    monkeypatch.setattr(settings, "docusign_access_token", "token")
+    await DocuSignAdapter().void_envelope(envelope_id="envelope-1", reason="Superseded")
+    assert captured["method"] == "PUT"
+    assert captured["url"].endswith("/envelopes/envelope-1")
+    assert captured["json"] == {"status": "voided", "voidedReason": "Superseded"}
+
+
 def test_banking_adapter_api_fails_closed_without_ready_capability():
     application_id = uuid.uuid4()
 

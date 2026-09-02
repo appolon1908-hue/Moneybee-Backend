@@ -206,6 +206,34 @@ async def test_contract_void_is_idempotent():
         assert invalid.json()["code"] == "INVALID_CONTRACT_TRANSITION"
 
 
+async def test_sent_contract_is_voided_at_provider_before_local_transition(monkeypatch):
+    calls = []
+
+    class FakeESign:
+        async def void_envelope(self, **kwargs):
+            calls.append(kwargs)
+            return {"status": "voided"}
+
+    monkeypatch.setattr("app.admin_routes.esign_adapter", lambda: FakeESign())
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        _create_and_accept_offer(client, application_id, submission_id, lender_id, program_id)
+        contract_id = client.get(f"/api/v2/applications/{application_id}/contract").json()["id"]
+        async with SessionLocal() as db:
+            contract = await db.get(models.Contract, uuid.UUID(contract_id))
+            contract.status = "SENT"
+            contract.external_envelope_id = "provider-envelope-void"
+            await db.commit()
+        response = client.post(
+            f"/api/v2/admin/contracts/{contract_id}/void",
+            json={"reason": "Offer superseded."},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "VOIDED"
+        assert calls == [{"envelope_id": "provider-envelope-void", "reason": "Offer superseded."}]
+
+
 async def test_send_pending_contract_envelope_leaves_draft_when_provider_disabled():
     with TestClient(app) as client:
         application_id, submission_id, lender_id, program_id = (
@@ -296,3 +324,26 @@ async def test_process_pending_docusign_event_signs_contract_and_advances_fundin
             )
         )
         assert funding.status == "CONTRACT_SIGNED"
+
+
+async def test_unmatched_docusign_callback_remains_retryable():
+    message_id = uuid.uuid4()
+    async with SessionLocal() as db:
+        db.add(IntegrationInboxMessage(
+            id=message_id,
+            provider="docusign",
+            event_id=uuid.uuid4().hex,
+            event_type="envelope-completed",
+            payload={"event": "envelope-completed", "data": {"envelopeId": uuid.uuid4().hex, "envelopeSummary": {"status": "completed"}}},
+            payload_hash=uuid.uuid4().hex,
+            signature_valid=True,
+            status="RECEIVED",
+        ))
+        await db.commit()
+    await worker.process_pending_docusign_event()
+    async with SessionLocal() as db:
+        message = await db.get(IntegrationInboxMessage, message_id)
+        assert message.status == "RECEIVED"
+        assert message.attempts == 1
+        assert message.next_attempt_at is not None
+        assert message.processed_at is None

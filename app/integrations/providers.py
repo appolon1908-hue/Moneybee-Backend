@@ -79,6 +79,13 @@ class GenericLenderAdapter:
 
 
 class DocuSignAdapter:
+    def _envelope_url(self, envelope_id: str = "") -> str:
+        if not settings.docusign_account_id or not settings.docusign_access_token:
+            raise ProviderError("docusign", "DocuSign configuration is incomplete")
+        account_id = quote(str(settings.docusign_account_id), safe="")
+        suffix = f"/{quote(envelope_id, safe='')}" if envelope_id else ""
+        return settings.docusign_rest_base_url.rstrip("/") + f"/v2.1/accounts/{account_id}/envelopes{suffix}"
+
     async def send_envelope(
         self,
         *,
@@ -93,11 +100,7 @@ class DocuSignAdapter:
         )
         if not all(required):
             raise ProviderError("docusign", "DocuSign configuration is incomplete")
-        account_id = quote(str(settings.docusign_account_id), safe="")
-        url = (
-            settings.docusign_rest_base_url.rstrip("/")
-            + f"/v2.1/accounts/{account_id}/envelopes"
-        )
+        url = self._envelope_url()
         return await provider_request(
             provider="docusign",
             method="POST",
@@ -123,6 +126,16 @@ class DocuSignAdapter:
                 ],
                 "status": "sent",
             },
+            retries=1,
+        )
+
+    async def void_envelope(self, *, envelope_id: str, reason: str) -> dict:
+        return await provider_request(
+            provider="docusign",
+            method="PUT",
+            url=self._envelope_url(envelope_id),
+            headers={**_bearer(settings.docusign_access_token, "docusign"), "Content-Type": "application/json"},
+            json={"status": "voided", "voidedReason": reason},
             retries=1,
         )
 

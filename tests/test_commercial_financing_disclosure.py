@@ -162,13 +162,13 @@ async def test_creating_an_offer_generates_a_commercial_financing_disclosure():
 
 async def test_application_offer_route_uses_the_same_disclosure_service():
     with TestClient(app) as client:
-        application_id, _submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        application_id, _submission_id, lender_id, _program_id = _prepare_matched_submission(client)
         offer = client.post(
             f"/api/v2/lender/applications/{application_id}/offers",
             json={
                 "application_id": application_id,
                 "lender_id": lender_id,
-                "program_id": program_id,
+                "program_id": None,
                 "product_type": "WORKING_CAPITAL",
                 "amount": 12000,
                 "term_months": 12,
@@ -183,6 +183,41 @@ async def test_application_offer_route_uses_the_same_disclosure_service():
         )
         assert disclosure.status_code == 200
         assert disclosure.json()["total_repayment_amount"] == "13200.00"
+        client.post(
+            f"/api/v2/offers/{offer.json()['id']}/commercial-financing-disclosure/acknowledge"
+        )
+        accepted = client.post(
+            f"/api/v2/offers/{offer.json()['id']}/accept",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert accepted.status_code == 200
+        funding = client.get(f"/api/v2/applications/{application_id}/funding")
+        contract = client.get(f"/api/v2/applications/{application_id}/contract")
+        assert funding.json()["status"] == "CONDITIONS_SATISFIED"
+        assert contract.json()["status"] == "DRAFT"
+
+
+async def test_offer_route_rejects_unsupported_or_partial_schedule_as_422():
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        base = {
+            "application_id": application_id,
+            "lender_id": lender_id,
+            "program_id": program_id,
+            "product_type": "WORKING_CAPITAL",
+            "amount": 12000,
+            "term_months": 1,
+            "payment_amount": 100,
+        }
+        unsupported = client.post(
+            f"/api/v2/lender/submissions/{submission_id}/offers",
+            json={**base, "payment_frequency": "IRREGULAR"},
+        )
+        partial = client.post(
+            f"/api/v2/lender/submissions/{submission_id}/offers",
+            json={**base, "payment_frequency": "DAILY"},
+        )
+        assert unsupported.status_code == partial.status_code == 422
 
 
 def test_offer_persistence_is_centralized_behind_disclosure_generation():

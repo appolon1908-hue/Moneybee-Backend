@@ -353,14 +353,13 @@ async def accept_offer(
         user,
         reason="Borrower accepted offer",
     )
-    db.add(
-        models.Funding(
+    funding = models.Funding(
             application_id=application.id,
             offer_id=offer.id,
             status="CONDITIONS_PENDING",
             approved_amount=offer.amount,
         )
-    )
+    db.add(funding)
     await db.flush()
     submission_id_for_offer = await db.scalar(
         select(models.LenderSubmission.id).where(
@@ -373,6 +372,8 @@ async def accept_offer(
         await services.advance_funding_if_conditions_satisfied(
             db, submission_id_for_offer, user
         )
+    else:
+        await services.advance_submissionless_funding(db, funding.id, user)
     db.add(
         models.OutboxEvent(
             event_type="offer.accepted.v1",

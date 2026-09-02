@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class Attribution(BaseModel):
@@ -197,6 +197,23 @@ class OfferInput(BaseModel):
     personal_guarantee_required: bool = False
     collateral_description: str | None = Field(default=None, max_length=10_000)
     expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_schedule(self):
+        if self.total_repayment is not None:
+            return self
+        payments_per_year = {
+            "MONTHLY": 12,
+            "WEEKLY": 52,
+            "BIWEEKLY": 26,
+            "SEMIMONTHLY": 24,
+            "DAILY": 365,
+        }.get(self.payment_frequency.upper())
+        if payments_per_year is None:
+            raise ValueError("Unsupported payment frequency")
+        if (self.term_months * payments_per_year) % 12:
+            raise ValueError("A partial payment period requires total_repayment")
+        return self
 
 
 class OfferRead(OfferInput):

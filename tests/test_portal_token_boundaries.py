@@ -14,6 +14,7 @@ from app.request_context import enforce_portal_client
         ("/api/v2/offers/00000000-0000-0000-0000-000000000000/accept", "moneybee-borrower"),
         ("/api/v2/offers/00000000-0000-0000-0000-000000000000/commercial-financing-disclosure", "moneybee-borrower"),
         ("/api/v2/offers/00000000-0000-0000-0000-000000000000/commercial-financing-disclosure/acknowledge", "moneybee-borrower"),
+        ("/api/v1/offers/00000000-0000-0000-0000-000000000000/commercial-financing-disclosure", "moneybee-borrower"),
         ("/api/v2/lender/dashboard", "moneybee-lender"),
         ("/api/v2/lenders/00000000-0000-0000-0000-000000000000/programs", "moneybee-lender"),
         ("/api/v2/admin/overview", "moneybee-admin"),
@@ -39,6 +40,7 @@ def test_correct_portal_token_is_accepted(path: str, client_id: str):
         ("/api/v2/applications", "moneybee-lender"),
         ("/api/v2/offers/00000000-0000-0000-0000-000000000000/commercial-financing-disclosure", "moneybee-admin"),
         ("/api/v2/offers/00000000-0000-0000-0000-000000000000/commercial-financing-disclosure/acknowledge", "moneybee-lender"),
+        ("/api/v1/offers/00000000-0000-0000-0000-000000000000/commercial-financing-disclosure", "moneybee-admin"),
     ],
 )
 def test_cross_portal_token_is_rejected(path: str, client_id: str):

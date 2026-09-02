@@ -49,7 +49,7 @@ external delivery/provider writes remain disabled by default.
 ## Migration contract
 
 - Before: `20260901_0023`
-- After: `20260901_0024`
+- After: `20260901_0025`
 - SQLite: empty upgrade, downgrade to base, and re-upgrade pass.
 - PostgreSQL: empty-to-head, historical-to-head, forward-fix, fail-closed legacy
   credential, and protected downgrade paths pass.

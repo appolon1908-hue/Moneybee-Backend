@@ -641,6 +641,7 @@ async def advance_funding_if_conditions_satisfied(
             models.Offer.lender_id == submission.lender_id,
             models.Offer.program_id == submission.program_id,
         )
+        .with_for_update()
     )
     if funding is None or funding.status != "CONDITIONS_PENDING":
         return
@@ -653,8 +654,11 @@ async def advance_funding_if_conditions_satisfied(
     ).all()
     if all(item.status in {"SATISFIED", "WAIVED"} for item in conditions):
         transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
-        db.add(
-            models.Contract(
+        existing_contract = await db.scalar(
+            select(models.Contract).where(models.Contract.offer_id == funding.offer_id)
+        )
+        if existing_contract is None:
+            db.add(models.Contract(
                 application_id=funding.application_id,
                 offer_id=funding.offer_id,
                 # No real contract-template catalog/versioning exists yet -
@@ -662,8 +666,25 @@ async def advance_funding_if_conditions_satisfied(
                 # decision, not a stand-in for actual legal content.
                 template_version="v1",
                 status="DRAFT",
-            )
-        )
+            ))
+
+
+async def advance_submissionless_funding(
+    db: AsyncSession, funding_id: uuid.UUID, principal: Principal
+) -> None:
+    funding = await db.scalar(
+        select(models.Funding).where(models.Funding.id == funding_id).with_for_update()
+    )
+    if funding is None or funding.status != "CONDITIONS_PENDING":
+        return
+    transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+    if await db.scalar(select(models.Contract.id).where(models.Contract.offer_id == funding.offer_id)) is None:
+        db.add(models.Contract(
+            application_id=funding.application_id,
+            offer_id=funding.offer_id,
+            template_version="v1",
+            status="DRAFT",
+        ))
 
 
 # Named, isolated default per docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md's

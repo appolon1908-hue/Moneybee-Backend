@@ -506,6 +506,7 @@ class Document(Base, Record):
 
 class Contract(Base, Record):
     __tablename__ = "contracts"
+    __table_args__ = (UniqueConstraint("offer_id", name="uq_contract_offer"),)
 
     application_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("applications.id"), index=True
