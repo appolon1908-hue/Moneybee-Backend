@@ -151,13 +151,22 @@ async def test_creating_an_offer_generates_a_commercial_financing_disclosure():
         # taken from the request body - a client-supplied value here must
         # be silently ignored rather than let any caller attribute the
         # acknowledgment to whoever they claim.
+        acknowledgment_key = uuid.uuid4().hex
         acknowledge = client.post(
             f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
+            headers={"Idempotency-Key": acknowledgment_key},
             json={"acknowledged_by": "spoofed-client-value"},
         )
         assert acknowledge.status_code == 200
         assert acknowledge.json()["acknowledged_at"] is not None
         assert acknowledge.json()["acknowledged_by"] == "local-admin"
+
+        replay = client.post(
+            f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
+            headers={"Idempotency-Key": acknowledgment_key},
+        )
+        assert replay.status_code == 200
+        assert replay.json() == acknowledge.json()
 
 
 async def test_application_offer_route_uses_the_same_disclosure_service():

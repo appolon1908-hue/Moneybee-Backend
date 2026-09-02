@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import os
+import secrets
 import socket
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -328,6 +329,29 @@ async def scan_pending_document() -> str | None:
         _lease_provider_item(document, now)
         try:
             content = await storage_adapter().get_private(object_key=document.storage_key)
+            actual_sha256 = hashlib.sha256(content).hexdigest()
+            if not secrets.compare_digest(actual_sha256, document.sha256.lower()):
+                document.status = "REJECTED"
+                document.scan_provider = "integrity-check"
+                document.scan_result = "STORED_DOCUMENT_CHECKSUM_MISMATCH"
+                document.scanned_at = datetime.now(UTC)
+                document.provider_last_error = "stored document checksum mismatch"
+                document.provider_terminal_at = datetime.now(UTC)
+                document.provider_next_attempt_at = None
+                document.provider_lease_owner = None
+                document.provider_lease_expires_at = None
+                db.add(
+                    OperationalException(
+                        fingerprint=f"DOCUMENT_CHECKSUM_MISMATCH:{document.id}",
+                        code="DOCUMENT_CHECKSUM_MISMATCH",
+                        severity="HIGH",
+                        resource_type="document",
+                        resource_id=str(document.id),
+                        retry_action="REUPLOAD_AND_REVIEW_DOCUMENT_INTEGRITY",
+                        comments=[],
+                    )
+                )
+                return str(document.id)
             result = await malware_scanner().scan(content)
         except ProviderError as exc:
             # Remains quarantined, but is not immediately eligible again.

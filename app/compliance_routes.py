@@ -432,7 +432,10 @@ async def generate_tax_records(
             )
         return existing.response_body
 
-    records = await generate_commission_tax_records(db, tax_year)
+    try:
+        records = await generate_commission_tax_records(db, tax_year)
+    except ValueError as exc:
+        _problem("FILED_TAX_RECORD_IMMUTABLE", str(exc), status_code=409)
     existing = await db.scalar(
         select(models.IdempotencyRecord).where(
             models.IdempotencyRecord.actor_id == user.subject,

@@ -1104,6 +1104,83 @@ async def create_commission_split(
     return split
 
 
+@router.post(
+    "/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+    response_model=schemas.CommissionSplitRead,
+    tags=["admin", "funding"],
+)
+async def mark_commission_split_paid(
+    commission_id: uuid.UUID,
+    split_id: uuid.UUID,
+    payload: schemas.CommissionSplitPaymentInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.split.manage"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    """Record externally verified payout evidence; this never initiates a payout."""
+    await _load_commission_or_404(db, commission_id)
+    route = f"/admin/commissions/{commission_id}/splits/{split_id}/mark-paid"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        replay_split = await db.get(models.CommissionSplit, split_id)
+        if replay_split is None or replay_split.commission_id != commission_id:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_split
+
+    split = await db.scalar(
+        select(models.CommissionSplit)
+        .where(
+            models.CommissionSplit.id == split_id,
+            models.CommissionSplit.commission_id == commission_id,
+        )
+        .with_for_update()
+    )
+    if split is None:
+        raise HTTPException(status_code=404, detail="Commission split not found")
+    if split.status != "PENDING":
+        raise HTTPException(status_code=409, detail="Commission split is not pending")
+
+    split.status = "PAID"
+    split.paid_at = payload.paid_at
+    split.payment_reference = payload.payment_reference
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="COMMISSION_SPLIT_PAYMENT_RECORDED",
+            resource_type="commission_split",
+            resource_id=str(split.id),
+            details={
+                "commission_id": str(commission_id),
+                "paid_at": payload.paid_at.isoformat(),
+                "payment_reference": payload.payment_reference,
+            },
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"split_id": str(split.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(split)
+    return split
+
+
 @router.get(
     "/admin/sla-alerts",
     response_model=list[schemas.SLAAlertRead],
@@ -1334,15 +1411,20 @@ async def acknowledge_commercial_financing_disclosure(
     offer_id: uuid.UUID,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.edit"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
-    disclosure = await compliance_service.acknowledge_offer_disclosure(
-        db, offer_id, actor=user.subject
+    from app.compliance_routes import _acknowledge_disclosure, _disclosure_for_offer
+
+    disclosure = await _disclosure_for_offer(db, offer_id, lock=True)
+    return await _acknowledge_disclosure(
+        db=db,
+        disclosure=disclosure,
+        user=user,
+        idempotency_key=idempotency_key,
+        route=f"/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
     )
-    if disclosure is None:
-        raise HTTPException(status_code=404, detail="Disclosure not found")
-    await db.commit()
-    await db.refresh(disclosure)
-    return disclosure
 
 
 @router.post(
@@ -1355,7 +1437,10 @@ async def generate_commission_tax_records_endpoint(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
 ):
-    records = await generate_commission_tax_records(db, tax_year)
+    try:
+        records = await generate_commission_tax_records(db, tax_year)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
     for record in records:
         await db.refresh(record)

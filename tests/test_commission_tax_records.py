@@ -219,6 +219,40 @@ async def test_regenerating_commission_tax_records_replaces_rather_than_accumula
         assert len(matching) == 1
 
 
+async def test_regeneration_cannot_rewrite_a_filed_tax_record():
+    tax_year = 2032
+    recipient_reference = f"filed-{uuid.uuid4().hex}"
+    with TestClient(app) as client:
+        await _seed_commission_split(recipient_reference, "700.00", tax_year)
+        generated = client.post(
+            "/api/v2/admin/commission-tax-records/generate", params={"tax_year": tax_year}
+        )
+        record_id = next(
+            row["id"] for row in generated.json()
+            if row["recipient_reference"] == recipient_reference
+        )
+        async with SessionLocal() as db:
+            record = await db.get(
+                compliance_models.CommissionTaxRecord, uuid.UUID(record_id)
+            )
+            record.filed_at = datetime.now(UTC)
+            record.filing_reference = "IRS-FILED-IMMUTABLE"
+            await db.commit()
+
+        await _seed_commission_split(recipient_reference, "100.00", tax_year)
+        regenerate = client.post(
+            "/api/v2/admin/commission-tax-records/generate", params={"tax_year": tax_year}
+        )
+        assert regenerate.status_code == 409
+        assert "Filed commission tax records are immutable" in regenerate.json()["detail"]
+
+    async with SessionLocal() as db:
+        record = await db.get(compliance_models.CommissionTaxRecord, uuid.UUID(record_id))
+        assert str(record.total_amount) == "700.00"
+        assert record.commission_count == 1
+        assert record.filing_reference == "IRS-FILED-IMMUTABLE"
+
+
 async def test_setting_a_recipient_tin_stores_it_encrypted():
     tax_year = 2028
     recipient_reference = f"broker-{uuid.uuid4().hex}"

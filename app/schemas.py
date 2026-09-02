@@ -452,6 +452,11 @@ class CommissionSplitInput(BaseModel):
     amount: Decimal = Field(gt=0)
 
 
+class CommissionSplitPaymentInput(BaseModel):
+    paid_at: datetime
+    payment_reference: str = Field(min_length=1, max_length=255)
+
+
 class CommissionReceiptInput(BaseModel):
     amount: Decimal = Field(gt=0)
     reference: str | None = Field(default=None, max_length=255)

@@ -371,6 +371,17 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
         total_amount = bucket["total"]
         requires_1099 = total_amount >= _FORM_1099_NEC_THRESHOLD
         if existing is not None:
+            regenerated = (total_amount, bucket["count"], requires_1099)
+            persisted = (
+                Decimal(str(existing.total_amount)),
+                existing.commission_count,
+                existing.requires_1099,
+            )
+            if existing.filed_at is not None and regenerated != persisted:
+                raise ValueError(
+                    "Filed commission tax records are immutable; create a controlled "
+                    "amendment before regenerating this recipient and tax year"
+                )
             existing.recipient_type = recipient_type
             existing.total_amount = total_amount
             existing.commission_count = bucket["count"]
