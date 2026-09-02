@@ -101,8 +101,17 @@ async def test_void_response_loss_is_reconciled_before_local_transition(monkeypa
         contract = await db.get(models.Contract, uuid.UUID(contract_id))
         assert contract is not None
         assert contract.status == "VOIDED"
-        assert contract.provider_attempt_count == 1
+        assert contract.provider_attempt_count == 0
         assert contract.provider_last_error is None
+        evidence = await db.scalar(
+            select(models.AuditEvent).where(
+                models.AuditEvent.action == "CONTRACT_VOID_RECONCILED",
+                models.AuditEvent.resource_id == contract_id,
+            )
+        )
+        assert evidence is not None
+        assert evidence.details["attempted_mutations"] == 1
+        assert evidence.details["confirmation_method"] == "provider_status_readback"
         exception = await db.scalar(
             select(OperationalException).where(
                 OperationalException.fingerprint
@@ -184,6 +193,9 @@ async def test_unknown_void_blocks_repeat_until_readback_confirms(monkeypatch):
     assert second_fake.status_calls == 1
 
     async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        assert contract is not None
+        assert contract.provider_attempt_count == 0
         exception = await db.scalar(
             select(OperationalException).where(
                 OperationalException.fingerprint
@@ -193,3 +205,11 @@ async def test_unknown_void_blocks_repeat_until_readback_confirms(monkeypatch):
         assert exception is not None
         assert exception.status == "RESOLVED"
         assert exception.resolved_at is not None
+        evidence = await db.scalar(
+            select(models.AuditEvent).where(
+                models.AuditEvent.action == "CONTRACT_VOID_RECONCILED",
+                models.AuditEvent.resource_id == contract_id,
+            )
+        )
+        assert evidence is not None
+        assert evidence.details["attempted_mutations"] == 1

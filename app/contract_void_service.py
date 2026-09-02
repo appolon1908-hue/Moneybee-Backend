@@ -91,6 +91,29 @@ async def _resolve_exception(
         exception.resolved_at = models.utcnow()
 
 
+def _record_reconciliation_evidence(
+    db: AsyncSession,
+    contract: models.Contract,
+    *,
+    attempted_mutations: int,
+) -> None:
+    db.add(
+        models.AuditEvent(
+            actor_id="system:contract-void-reconciliation",
+            action="CONTRACT_VOID_RECONCILED",
+            resource_type="contract",
+            resource_id=str(contract.id),
+            details={
+                "provider": "docusign",
+                "provider_reference": contract.external_envelope_id,
+                "provider_status": "voided",
+                "attempted_mutations": attempted_mutations,
+                "confirmation_method": "provider_status_readback",
+            },
+        )
+    )
+
+
 async def ensure_provider_void_confirmed(
     db: AsyncSession,
     contract: models.Contract,
@@ -129,7 +152,13 @@ async def ensure_provider_void_confirmed(
                 "The previous e-sign void is not confirmed; automatic retry is blocked.",
                 409,
             )
+        _record_reconciliation_evidence(
+            db,
+            contract,
+            attempted_mutations=contract.provider_attempt_count,
+        )
         _clear_provider_failure(contract)
+        contract.provider_attempt_count = 0
         await _resolve_exception(db, contract)
         return
 
@@ -165,7 +194,13 @@ async def ensure_provider_void_confirmed(
         observed = None
 
     if observed == "voided":
+        _record_reconciliation_evidence(
+            db,
+            contract,
+            attempted_mutations=contract.provider_attempt_count,
+        )
         _clear_provider_failure(contract)
+        contract.provider_attempt_count = 0
         await _resolve_exception(db, contract)
         return
 
