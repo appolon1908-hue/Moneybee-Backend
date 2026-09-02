@@ -12,7 +12,7 @@ def test_sdk_is_pinned_to_exact_commit() -> None:
         item for item in __import__("tomllib").loads(open("pyproject.toml", "rb").read().decode())["project"]["dependencies"]
         if item.startswith("codestra-moneybee-connectors")
     )
-    assert "@fdde064c8eb151eff7a154c79943273e5c45c970" in dependency
+    assert "@fd9a5c3fd49534a7f7492a452f53815c386687b9" in dependency
     assert "@development" not in dependency and "@main" not in dependency
 
 
