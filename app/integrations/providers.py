@@ -142,6 +142,16 @@ class DocuSignAdapter:
             retries=0,
         )
 
+    async def envelope_status(self, *, envelope_id: str) -> dict:
+        """Read provider state after an ambiguous consequential operation."""
+        return await provider_request(
+            provider="docusign",
+            method="GET",
+            url=self._envelope_url(envelope_id),
+            headers=_bearer(settings.docusign_access_token, "docusign"),
+            retries=0,
+        )
+
 
 class SendGridAdapter:
     async def send(

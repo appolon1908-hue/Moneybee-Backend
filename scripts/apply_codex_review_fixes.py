@@ -7,6 +7,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def reviewed_fixes_present() -> bool:
+    """Recognize the reviewed implementation after the one-shot patch was applied.
+
+    The remediation workflow can be retriggered by later evidence-only commits.  It
+    must validate the hardened source instead of requiring the original vulnerable
+    source markers to remain present.
+    """
+    required_markers = {
+        "app/integrations/providers.py": (
+            "async def envelope_status(",
+            "# reconciliation path performs a provider status read-back.",
+        ),
+        "app/admin_routes.py": ("ensure_provider_void_confirmed",),
+        "app/applications_routes.py": ("_acknowledge_disclosure",),
+        "app/compliance_routes.py": (
+            "# identity after acquiring it because another transaction may have",
+        ),
+        "app/compliance_service.py": ("pg_advisory_xact_lock",),
+    }
+    return all(
+        all(marker in (ROOT / path).read_text(encoding="utf-8") for marker in markers)
+        for path, markers in required_markers.items()
+    )
+
+
 def replace_once(path: str, old: str, new: str) -> None:
     target = ROOT / path
     text = target.read_text(encoding="utf-8")
@@ -293,6 +318,9 @@ def patch_compliance_idempotency() -> None:
 
 
 def main() -> None:
+    if reviewed_fixes_present():
+        print("All reviewed Codex fixes are already applied")
+        return
     patch_esign_contract()
     patch_compliance_idempotency()
     print("Applied all five Codex review fixes")
