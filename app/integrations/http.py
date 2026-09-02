@@ -4,10 +4,11 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.integrations.base import ProviderError
+from app.integrations.base import ProviderError, UnknownOutcomeError
 
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+IDEMPOTENT_METHODS = {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}
 
 
 async def provider_request(
@@ -21,31 +22,46 @@ async def provider_request(
     content: bytes | str | None = None,
     auth: tuple[str, str] | None = None,
     retries: int = 2,
+    idempotency_key: str | None = None,
 ) -> Any:
     if sum(value is not None for value in (json, data, content)) > 1:
         raise ValueError("Only one of json, data, or content may be supplied")
 
-    for attempt in range(retries + 1):
+    normalized_method = method.upper()
+    mutation_is_retryable = normalized_method in IDEMPOTENT_METHODS or bool(
+        idempotency_key
+    )
+    effective_retries = retries if mutation_is_retryable else 0
+    request_headers = dict(headers or {})
+    if idempotency_key:
+        request_headers.setdefault("Idempotency-Key", idempotency_key)
+
+    for attempt in range(effective_retries + 1):
         try:
             async with httpx.AsyncClient(
                 timeout=settings.provider_timeout_seconds
             ) as client:
                 response = await client.request(
-                    method,
+                    normalized_method,
                     url,
-                    headers=headers,
+                    headers=request_headers,
                     json=json,
                     data=data,
                     content=content,
                     auth=auth,
                 )
         except httpx.HTTPError as exc:
-            if attempt < retries:
+            if attempt < effective_retries:
                 await asyncio.sleep(min(2 ** (attempt + 1), 5))
                 continue
+            if normalized_method not in {"GET", "HEAD", "OPTIONS"}:
+                raise UnknownOutcomeError(
+                    provider,
+                    "Provider outcome is unknown; reconcile before retry",
+                ) from exc
             raise ProviderError(provider, "Provider connection failed") from exc
 
-        if response.status_code in RETRYABLE_STATUS and attempt < retries:
+        if response.status_code in RETRYABLE_STATUS and attempt < effective_retries:
             await asyncio.sleep(min(2 ** (attempt + 1), 5))
             continue
         if not response.is_success:
