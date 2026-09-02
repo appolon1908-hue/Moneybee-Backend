@@ -15,6 +15,15 @@ class ProviderError(RuntimeError):
         super().__init__(f"{provider}: {message}")
 
 
+class UnknownOutcomeError(ProviderError):
+    """A consequential provider request may have succeeded remotely.
+
+    Callers must reconcile using provider read-back before attempting the
+    mutation again.  Keeping this distinct from an ordinary outage prevents
+    workers from blindly duplicating money movement or legal/provider actions.
+    """
+
+
 @dataclass(frozen=True)
 class ProviderHealth:
     provider_type: str
@@ -111,6 +120,9 @@ class ESignAdapter(Protocol):
         ...
 
     async def void_envelope(self, *, envelope_id: str, reason: str) -> dict:
+        ...
+
+    async def envelope_status(self, *, envelope_id: str) -> dict:
         ...
 
 

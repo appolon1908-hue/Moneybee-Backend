@@ -119,7 +119,7 @@ jobs:
               "images": {
                   "api": "ghcr.io/appolon1908-hue/moneybee-api@sha256:" + "2" * 64
               },
-              "migration_head": "20260901_0026",
+              "migration_head": "20260902_0027",
               "configuration_checksum": "3" * 64,
               "backup_reference": "staging-backup-test",
           }
@@ -150,10 +150,10 @@ jobs:
           MALWARE_SCAN_PROVIDER=disabled
           ENABLE_EXTERNAL_DELIVERY=false
           FIELD_ENCRYPTION_KEYS_JSON={"1":"1-PUl067uf69NnCfy4HhS6H7xrHI9tBzsYFL-zv4mmU="}
-          FIELD_ENCRYPTION_CURRENT_VERSION=1
+          FIELD_ENCRYPTION_ACTIVE_KEY_VERSION=1
           SOURCE_SHA=1111111111111111111111111111111111111111
           API_IMAGE_DIGEST=ghcr.io/appolon1908-hue/moneybee-api@sha256:2222222222222222222222222222222222222222222222222222222222222222
-          MIGRATION_HEAD=20260901_0026
+          MIGRATION_HEAD=20260902_0027
           CONFIGURATION_CHECKSUM=3333333333333333333333333333333333333333333333333333333333333333
           BACKUP_REFERENCE=staging-backup-test
           BACKUP_STATUS=PASS
@@ -204,8 +204,8 @@ jobs:
           export MONEYBEE_REDIS_IMAGE="redis@sha256:$ZERO"
           export MONEYBEE_CADDY_IMAGE="caddy@sha256:$ZERO"
           export MONEYBEE_CLAMAV_IMAGE="clamav@sha256:$ZERO"
-          export MONEYBEE_MIGRATION_ENV_FILE=/tmp/moneybee/migrator.env
-          export MONEYBEE_BACKEND_ENV_FILE=/tmp/moneybee/runtime.env
+          export MONEYBEE_MIGRATOR_ENV_FILE=/tmp/moneybee/migrator.env
+          export MONEYBEE_RUNTIME_ENV_FILE=/tmp/moneybee/runtime.env
           export MONEYBEE_POSTGRES_DATA_PATH=/tmp/moneybee/postgres
           export MONEYBEE_REDIS_DATA_PATH=/tmp/moneybee/redis
           export MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE=/tmp/moneybee/postgres_password

@@ -36,6 +36,7 @@ REQUIRED_EXACT = {
 }
 OPTIONAL_FALSE = {
     "ENABLE_EXTERNAL_DELIVERY",
+    "CODESTRA_SDK_ENABLED",
     "LIVE_WRITES",
     "ODOO_WRITE",
     "N8N_DELIVERY_ENABLED",
@@ -164,8 +165,8 @@ def main() -> int:
             raise ValidationError("FIELD_ENCRYPTION_KEYS_JSON must be configured outside Git")
         if values.get("FIELD_ENCRYPTION_KEYS_JSON", "").startswith(("CHANGE_", "example", "test")):
             raise ValidationError("FIELD_ENCRYPTION_KEYS_JSON appears to be a placeholder")
-        if not values.get("FIELD_ENCRYPTION_CURRENT_VERSION"):
-            raise ValidationError("FIELD_ENCRYPTION_CURRENT_VERSION must be configured outside Git")
+        if not values.get("FIELD_ENCRYPTION_ACTIVE_KEY_VERSION"):
+            raise ValidationError("FIELD_ENCRYPTION_ACTIVE_KEY_VERSION must be configured outside Git")
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
         print(f"ERROR={exc}", file=sys.stderr)
         return 1

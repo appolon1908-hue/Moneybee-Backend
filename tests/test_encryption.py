@@ -23,16 +23,16 @@ def test_decrypt_rejects_a_value_with_no_version_prefix():
 
 def test_decrypt_rejects_an_unknown_key_version():
     with pytest.raises(ProviderError):
-        decrypt_secret("mbenc:99:some-token")
-
-
-def test_legacy_versioned_ciphertext_remains_decryptable():
-    token = encrypt_secret("legacy-compatible")
-    legacy = token.removeprefix("mbenc:")
-    assert decrypt_secret(legacy) == "legacy-compatible"
+        decrypt_secret("99:some-token")
 
 
 def test_rewrap_produces_a_value_that_still_decrypts_to_the_same_plaintext():
     original = encrypt_secret("broker-tin-123-45-6789")
     rewrapped = rewrap_secret(original)
     assert decrypt_secret(rewrapped) == "broker-tin-123-45-6789"
+
+
+def test_decrypt_accepts_legacy_short_version_envelope():
+    current = encrypt_secret("legacy-compatible")
+    legacy = current.removeprefix("mbenc:")
+    assert decrypt_secret(legacy) == "legacy-compatible"

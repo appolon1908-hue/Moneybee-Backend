@@ -40,6 +40,7 @@ def main() -> int:
     zero = "0" * 64
     runtime = {
         "data_mode": "compose",
+        "postgres_admin_user": "moneybee_admin",
         "paths": {
             "migrator_env_file": "/fixture/migrator.env",
             "runtime_env_file": "/fixture/runtime.env",

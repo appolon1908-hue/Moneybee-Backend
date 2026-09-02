@@ -19,8 +19,8 @@ dependencies = [
   "alembic>=1.16,<2",
   "boto3>=1.40,<2",
   "cryptography>=46,<51",
-  "codestra-moneybee-connectors @ git+https://github.com/appolon1908-hue/SDK-repository.git@fd9a5c3fd49534a7f7492a452f53815c386687b9#subdirectory=python/moneybee-connectors",
-  "redis>=6.4,<7"
+  "redis>=6.4,<7",
+  "codestra-moneybee-connectors @ git+https://github.com/appolon1908-hue/SDK-repository.git@fd9a5c3fd49534a7f7492a452f53815c386687b9#subdirectory=python/moneybee-connectors"
 ]
 
 [project.optional-dependencies]

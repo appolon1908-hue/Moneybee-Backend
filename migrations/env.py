@@ -6,6 +6,17 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app import (  # noqa: F401
+    compliance_models,
+    financial_models,
+    identity_models,
+    integration_models,
+    models,
+    public_intake_models,
+)
+from app.portal import models as portal_models  # noqa: F401
+from app.db_base import Base
+
 config = context.config
 
 
@@ -21,17 +32,6 @@ def migration_database_url() -> str:
 
 
 config.set_main_option("sqlalchemy.url", migration_database_url().replace("%", "%%"))
-
-from app import (  # noqa: E402, F401
-    compliance_models,
-    financial_models,
-    identity_models,
-    integration_models,
-    models,
-    public_intake_models,
-)
-from app.portal import models as portal_models  # noqa: E402, F401
-from app.db_base import Base  # noqa: E402
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

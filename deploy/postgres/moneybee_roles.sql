@@ -5,8 +5,8 @@
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'moneybee_admin') THEN
-    CREATE ROLE moneybee_admin LOGIN SUPERUSER;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'moneybee_db_admin') THEN
+    CREATE ROLE moneybee_db_admin LOGIN SUPERUSER;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'moneybee_migrator') THEN
     CREATE ROLE moneybee_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
@@ -18,7 +18,7 @@ END $$;
 
 -- The bootstrap identity remains the separately protected administrative
 -- login created by the PostgreSQL image. It is never passed to an app image.
-ALTER ROLE moneybee_admin LOGIN SUPERUSER;
+ALTER ROLE moneybee_db_admin LOGIN SUPERUSER;
 ALTER ROLE moneybee_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 ALTER ROLE moneybee_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
