@@ -2,9 +2,21 @@
   "schema_version": 1,
   "mission_id": "MONEYBEE_REPOSITORY_TO_PRODUCTION_2026_09_02",
   "generated_at": "2026-09-02T00:00:00-04:00",
-  "status": "BLOCKED_REPOSITORY_REMEDIATION_REQUIRED",
+  "updated_at": "2026-09-02T14:49:00-04:00",
+  "status": "BLOCKED_CODEX_EXECUTION_ENVIRONMENTS_AND_REPOSITORY_REMEDIATION_REQUIRED",
   "deployment_authorized": false,
   "server_contact_authorized": false,
+  "codex_execution": {
+    "mission_published": true,
+    "issue_trigger_posted": true,
+    "backend_pr_trigger_posted": true,
+    "frontend_pr_trigger_posted": true,
+    "backend_environment": "MISSING",
+    "frontend_environment": "MISSING",
+    "code_review_available": true,
+    "code_modification_execution_available": false,
+    "blocker_document": "docs/codex/CODEX_EXECUTION_ENVIRONMENT_BLOCKER_2026-09-02.md"
+  },
   "target": {
     "host": "49.12.145.107",
     "public_surfaces": [
@@ -46,6 +58,8 @@
     "migration_must_be_one_shot": true
   },
   "required_before_deployment": {
+    "backend_codex_environment_created": false,
+    "frontend_codex_environment_created": false,
     "backend_main_contains_certified_release": false,
     "frontend_main_contains_certified_release": false,
     "backend_exact_head_ci_pass": false,
