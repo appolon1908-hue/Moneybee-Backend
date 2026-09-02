@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "mission_id": "MONEYBEE_REPOSITORY_TO_PRODUCTION_2026_09_02",
+  "generated_at": "2026-09-02T00:00:00-04:00",
+  "status": "BLOCKED_REPOSITORY_REMEDIATION_REQUIRED",
+  "deployment_authorized": false,
+  "server_contact_authorized": false,
+  "target": {
+    "host": "49.12.145.107",
+    "public_surfaces": [
+      "https://moneybeeloan.com",
+      "https://www.moneybeeloan.com",
+      "https://app.moneybeeloan.com",
+      "https://lenders.moneybeeloan.com",
+      "https://admin.moneybeeloan.com",
+      "https://api.moneybeeloan.com/api/v2"
+    ],
+    "identity_issuer": "https://auth.codestra.co/realms/codestra"
+  },
+  "backend": {
+    "repository": "appolon1908-hue/Moneybee-Backend",
+    "main_sha_at_publication": "aa6a8413b79885c499482b53e0c3ffaf8637c9d4",
+    "release_pr": 42,
+    "release_branch": "release/moneybee-repository-complete-20260902",
+    "candidate_sha": "b8682c4542738caae9f58c00f628a7f74dccfb10",
+    "candidate_ci": "FAIL",
+    "required_final_merge_sha": null
+  },
+  "frontend": {
+    "repository": "appolon1908-hue/Moneybee-frontend-",
+    "main_sha_at_publication": "b40d519ccc4318f0525171b1d71f64176daabbd2",
+    "release_pr": 27,
+    "release_branch": "release/moneybee-frontend-repository-complete-20260902",
+    "candidate_sha": "7058cd7c49b59931bc8c462e721511fd0b77f012",
+    "last_certified_backend_contract_sha": "bb5e00016be80c036500fb8cb382b3c47fd88c9b",
+    "required_final_backend_contract_sha": null,
+    "required_final_merge_sha": null
+  },
+  "connector_sdk": {
+    "repository": "appolon1908-hue/SDK-repository",
+    "sha": "fd9a5c3fd49534a7f7492a452f53815c386687b9"
+  },
+  "database": {
+    "alembic_head": "20260901_0026",
+    "runtime_role_must_be_ddl_denied": true,
+    "migration_must_be_one_shot": true
+  },
+  "required_before_deployment": {
+    "backend_main_contains_certified_release": false,
+    "frontend_main_contains_certified_release": false,
+    "backend_exact_head_ci_pass": false,
+    "frontend_exact_head_ci_pass_against_backend_merge_sha": false,
+    "open_review_findings_zero": false,
+    "immutable_image_digests_recorded": false,
+    "sbom_digests_recorded": false,
+    "provenance_digests_recorded": false,
+    "compose_checksums_recorded": false,
+    "configuration_checksum_recorded": false,
+    "backup_reference_recorded": false,
+    "restore_evidence_recorded": false,
+    "rollback_set_recorded": false
+  },
+  "initial_capabilities": {
+    "codestra_sdk_enabled": false,
+    "middleware_provider": "disabled",
+    "external_delivery": false,
+    "live_writes": false,
+    "odoo_write": false,
+    "n8n_delivery": false,
+    "bank_provider": "disabled",
+    "kyb_provider": "disabled",
+    "credit_provider": "disabled",
+    "lender_provider": "disabled",
+    "esign_provider": "disabled",
+    "email_provider": "disabled",
+    "sms_provider": "disabled",
+    "object_storage": "disabled",
+    "malware_scanning": "disabled",
+    "payment_provider": "disabled",
+    "funding": false,
+    "payouts": false,
+    "tax_filing": false
+  },
+  "mission_document": "docs/codex/CODEX_MONEYBEE_REPOSITORY_TO_PRODUCTION_MISSION_2026-09-02.md",
+  "server_handoff_issue": "https://github.com/appolon1908-hue/Moneybee-Backend/issues/44"
+}
