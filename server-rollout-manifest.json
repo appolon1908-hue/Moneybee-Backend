@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "status": "REPOSITORY_CANDIDATE",
+  "base_commit": "df1ef59550e7e9b25222a66bf34acd5f26398dc3",
+  "target_ref": "production-hardening-20260902",
+  "expected_alembic_head": "20260901_0026",
+  "runtime_env_variable": "MONEYBEE_BACKEND_ENV_FILE",
+  "migration_env_variable": "MONEYBEE_MIGRATION_ENV_FILE",
+  "postgres_roles": ["moneybee_admin", "moneybee_migrator", "moneybee_runtime"],
+  "redis": {"appendonly": true, "appendfsync": "everysec"},
+  "external_capabilities_enabled": [],
+  "deployment_authorized": false
+}

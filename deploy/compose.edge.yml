@@ -1,6 +1,50 @@
 name: moneybee-edge
 
 services:
+  marketing:
+    image: ${MONEYBEE_MARKETING_IMAGE:?set an immutable marketing image digest}
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks:
+      moneybee_edge:
+        aliases: ["moneybee-marketing"]
+
+  borrower:
+    image: ${MONEYBEE_BORROWER_IMAGE:?set an immutable borrower image digest}
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks:
+      moneybee_edge:
+        aliases: ["moneybee-borrower"]
+
+  lender:
+    image: ${MONEYBEE_LENDER_IMAGE:?set an immutable lender image digest}
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks:
+      moneybee_edge:
+        aliases: ["moneybee-lender"]
+
+  admin:
+    image: ${MONEYBEE_ADMIN_IMAGE:?set an immutable admin image digest}
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks:
+      moneybee_edge:
+        aliases: ["moneybee-admin"]
+
   caddy:
     image: ${MONEYBEE_CADDY_IMAGE:?set an immutable Caddy image digest}
     environment:

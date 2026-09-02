@@ -1,82 +1,205 @@
 from __future__ import annotations
 
+import ipaddress
+import hashlib
 import time
-from dataclasses import dataclass
+from collections import defaultdict, deque
+from typing import Protocol
 
-from fastapi import Request
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app.config import settings
 
 
-@dataclass(frozen=True)
-class RateLimitDecision:
-    limited: bool
-    limit: int
-    remaining: int
-    reset_seconds: int
-    bucket: str
+RATE_LIMITED_PREFIXES: dict[str, str] = {
+    "/api/v2/public/": "public",
+    "/api/v1/public/": "public",
+    "/api/v2/webhooks/": "webhook",
+    "/api/v1/webhooks/": "webhook",
+}
 
 
-_buckets: dict[str, tuple[int, float]] = {}
+class RateLimitBackend(Protocol):
+    async def hit(self, key: str, window_seconds: int) -> tuple[int, int]: ...
+
+
+class RedisRateLimitBackend:
+    """Atomic fixed-window counters shared by every API process and replica."""
+
+    _SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+local ttl = redis.call('TTL', KEYS[1])
+return {count, ttl}
+"""
+
+    def __init__(self, redis: Redis | None = None) -> None:
+        self.redis = redis or Redis.from_url(
+            settings.redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+        )
+
+    async def hit(self, key: str, window_seconds: int) -> tuple[int, int]:
+        count, ttl = await self.redis.eval(self._SCRIPT, 1, key, window_seconds)
+        return int(count), max(1, int(ttl))
+
+
+class InMemoryRateLimitBackend:
+    """Deterministic test backend. Production never selects this backend."""
+
+    def __init__(self) -> None:
+        self.hits: dict[str, deque[float]] = defaultdict(deque)
+
+    async def hit(self, key: str, window_seconds: int) -> tuple[int, int]:
+        now = time.monotonic()
+        hits = self.hits[key]
+        while hits and now - hits[0] > window_seconds:
+            hits.popleft()
+        hits.append(now)
+        ttl = max(1, int(window_seconds - (now - hits[0])))
+        return len(hits), ttl
+
+    def reset(self) -> None:
+        self.hits.clear()
+
+
+_test_backend = InMemoryRateLimitBackend()
 
 
 def reset_rate_limit_state() -> None:
-    _buckets.clear()
+    _test_backend.reset()
 
 
-def _client_key(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip() or "unknown"
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
-
-
-def _route_scope(path: str) -> tuple[str, int] | None:
-    if path.startswith(("/api/v1/public/", "/api/v2/public/")):
-        return "public", settings.public_rate_limit_per_minute
-    if path.startswith(("/api/v1/webhooks/", "/api/v2/webhooks/")):
-        return "webhook", settings.webhook_rate_limit_per_minute
+def _bucket_for_path(path: str) -> str | None:
+    for prefix, bucket in RATE_LIMITED_PREFIXES.items():
+        if path.startswith(prefix):
+            return bucket
     return None
 
 
-def check_request_rate_limit(request: Request) -> RateLimitDecision | None:
-    if not settings.rate_limit_enabled:
+def _limit_for_bucket(bucket: str, overrides: dict[str, int] | None) -> int:
+    if overrides is not None:
+        return overrides.get(bucket, 0)
+    return {
+        "public": settings.public_rate_limit_per_minute,
+        "webhook": settings.webhook_rate_limit_per_minute,
+    }[bucket]
+
+
+def _ip(value: str | None) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(value or "")
+    except ValueError:
         return None
 
-    route_scope = _route_scope(request.url.path)
-    if route_scope is None:
-        return None
 
-    scope, limit = route_scope
-    window_seconds = max(1, settings.rate_limit_window_seconds)
-    if limit <= 0:
-        return None
+def _peer_is_trusted(request: Request) -> bool:
+    peer = _ip(request.client.host if request.client else None)
+    if peer is None or not settings.trust_forwarded_for:
+        return False
+    for value in settings.trusted_proxy_cidrs:
+        try:
+            if peer in ipaddress.ip_network(value, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
 
-    now = time.monotonic()
-    bucket = f"{scope}:{_client_key(request)}"
-    count, reset_at = _buckets.get(bucket, (0, now + window_seconds))
-    if now >= reset_at:
-        count = 0
-        reset_at = now + window_seconds
 
-    reset_seconds = max(1, int(reset_at - now + 0.999))
-    if count >= limit:
-        return RateLimitDecision(
-            limited=True,
-            limit=limit,
-            remaining=0,
-            reset_seconds=reset_seconds,
-            bucket=scope,
+def resolved_client_ip(request: Request) -> str:
+    """Resolve the rightmost untrusted hop, trusting only configured proxies."""
+    peer = request.client.host if request.client else "unknown"
+    if not _peer_is_trusted(request):
+        return peer
+    raw_chain = request.headers.get("X-Forwarded-For", "")
+    chain = [part.strip() for part in raw_chain.split(",") if part.strip()]
+    if not chain or any(_ip(candidate) is None for candidate in chain):
+        return peer
+    trusted_networks = []
+    for value in settings.trusted_proxy_cidrs:
+        try:
+            trusted_networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    for candidate in reversed([*chain, peer]):
+        address = _ip(candidate)
+        if address is not None and not any(address in network for network in trusted_networks):
+            return candidate
+    return chain[0]
+
+
+class DistributedRateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(
+        self,
+        app,
+        limits_per_minute: dict[str, int] | None = None,
+        backend: RateLimitBackend | None = None,
+    ) -> None:
+        super().__init__(app)
+        self._limit_overrides = limits_per_minute
+        self._backend = backend or (
+            _test_backend
+            if settings.rate_limit_backend == "memory" and settings.app_env in {"local", "test", "dev"}
+            else RedisRateLimitBackend()
         )
 
-    count += 1
-    _buckets[bucket] = (count, reset_at)
-    return RateLimitDecision(
-        limited=False,
-        limit=limit,
-        remaining=max(0, limit - count),
-        reset_seconds=reset_seconds,
-        bucket=scope,
-    )
+    async def dispatch(self, request: Request, call_next):
+        if self._limit_overrides is None and not settings.rate_limit_enabled:
+            return await call_next(request)
+        bucket = _bucket_for_path(request.url.path)
+        if bucket is None:
+            return await call_next(request)
+        limit = _limit_for_bucket(bucket, self._limit_overrides)
+        if limit <= 0:
+            return await call_next(request)
+
+        client_token = hashlib.sha256(resolved_client_ip(request).encode()).hexdigest()[:32]
+        key = f"moneybee:rate-limit:{bucket}:{client_token}"
+        try:
+            count, retry_after = await self._backend.hit(
+                key, settings.rate_limit_window_seconds
+            )
+        except RedisError:
+            return JSONResponse(
+                status_code=503,
+                media_type="application/problem+json",
+                content={
+                    "type": "https://api.moneybeeloan.com/problems/rate-limit-unavailable",
+                    "title": "Service temporarily unavailable",
+                    "status": 503,
+                    "detail": "Request protection is temporarily unavailable.",
+                    "instance": request.url.path,
+                },
+                headers={"Retry-After": "1"},
+            )
+
+        if count > limit:
+            return JSONResponse(
+                status_code=429,
+                media_type="application/problem+json",
+                content={
+                    "type": "https://api.moneybeeloan.com/problems/rate-limit",
+                    "title": "Too many requests",
+                    "status": 429,
+                    "detail": "Rate limit exceeded for this endpoint.",
+                    "instance": request.url.path,
+                },
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Limit": str(limit),
+                },
+            )
+        response = await call_next(request)
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, limit - count))
+        return response
+
+
+InMemoryRateLimitMiddleware = DistributedRateLimitMiddleware

@@ -1,28 +1,39 @@
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from email.utils import format_datetime
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import financial_models, identity_models, models  # noqa: F401
+from app import compliance_models, financial_models, identity_models, models  # noqa: F401
 from app.portal import models as portal_models  # noqa: F401
 from app import public_intake_models  # noqa: F401
+from app.admin_routes import router as admin_router
+from app.applications_routes import router as applications_router
+from app.banking_routes import router as banking_router
+from app.borrower_legacy_routes import router as borrower_legacy_router
 from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
 from app.integration_routes import router as integration_router
+from app.logging_config import Timer, bind_request_id, configure_logging, request_logger
+from app.marketplace_routes import router as marketplace_router
+from app.payment_routes import router as payment_router
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
-from app.rate_limit import check_request_rate_limit
-from app.routers import router
+from app.rate_limit import DistributedRateLimitMiddleware, RedisRateLimitBackend
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     await initialize_local_schema()
     try:
         yield
@@ -53,53 +64,160 @@ app.add_middleware(
         "X-Organization-ID",
     ],
 )
-app.include_router(router, prefix="/api/v2")
-app.include_router(integration_router, prefix="/api/v2")
-app.include_router(portal_router, prefix="/api/v2")
-app.include_router(public_intake_router, prefix="/api/v2")
-app.include_router(financial_router, prefix="/api/v2")
-app.include_router(router, prefix="/api/v1", include_in_schema=False)
-app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
+API_ROUTERS = (
+    applications_router,
+    marketplace_router,
+    admin_router,
+    borrower_legacy_router,
+    banking_router,
+    integration_router,
+    portal_router,
+    public_intake_router,
+    financial_router,
+    payment_router,
+)
+
+# V1 is a complete compatibility alias of the canonical V2 contract. Keeping a
+# single registry prevents version drift and avoids duplicating business logic.
+for version, include_in_schema in (("v2", True), ("v1", False)):
+    for api_router in API_ROUTERS:
+        app.include_router(
+            api_router,
+            prefix=f"/api/{version}",
+            include_in_schema=include_in_schema,
+        )
+app.add_middleware(DistributedRateLimitMiddleware)
+
+
+@app.middleware("http")
+async def live_write_gate(request: Request, call_next):
+    if (
+        settings.app_env in {"staging", "production"}
+        and not settings.live_writes
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    ):
+        return JSONResponse(
+            status_code=503,
+            media_type="application/problem+json",
+            content={
+                "type": "https://api.moneybeeloan.com/problems/live-writes-disabled",
+                "title": "Writes temporarily disabled",
+                "status": 503,
+                "detail": "MoneyBee write operations are disabled by the deployment safety gate.",
+                "instance": request.url.path,
+            },
+            headers={"Retry-After": "30"},
+        )
+    return await call_next(request)
+
+
+def _api_v1_sunset_http_date() -> str:
+    sunset_date = datetime.strptime(settings.api_v1_sunset_date, "%Y-%m-%d").replace(
+        tzinfo=UTC
+    )
+    return format_datetime(sunset_date, usegmt=True)
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-    rate_limit = check_request_rate_limit(request)
-    if rate_limit and rate_limit.limited:
-        return JSONResponse(
-            status_code=429,
-            media_type="application/problem+json",
-            headers={
-                "Retry-After": str(rate_limit.reset_seconds),
-                "X-RateLimit-Limit": str(rate_limit.limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(rate_limit.reset_seconds),
-                "X-Request-ID": request_id,
-                "X-Content-Type-Options": "nosniff",
-                "Referrer-Policy": "strict-origin-when-cross-origin",
-            },
-            content={
-                "type": "https://api.moneybeeloan.com/problems/rate-limit",
-                "title": "Rate limit exceeded",
-                "status": 429,
-                "detail": "Too many requests. Try again after the retry window.",
-                "instance": request.url.path,
-                "request_id": request_id,
-            },
-        )
+    correlation_id = request.headers.get("X-Correlation-ID", request_id)
+    bind_request_id(request_id)
+    timer = Timer()
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if rate_limit:
-        response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
-        response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
-        response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_seconds)
+    if request.url.path.startswith("/api/v1/"):
+        response.headers["Deprecation"] = "true"
+        response.headers["Sunset"] = _api_v1_sunset_http_date()
+        response.headers["Link"] = (
+            f'<{request.url.path.replace("/api/v1/", "/api/v2/", 1)}>; rel="successor-version"'
+        )
+    request_logger().info(
+        "request.completed",
+        extra={
+            "http_method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": timer.elapsed_ms(),
+        },
+    )
     return response
+
+
+_STATUS_TITLES: dict[int, str] = {
+    400: "Bad request",
+    401: "Authentication required",
+    403: "Access denied",
+    404: "Not found",
+    405: "Method not allowed",
+    409: "Conflict",
+    422: "Unprocessable entity",
+    428: "Precondition required",
+    429: "Too many requests",
+}
+_STATUS_CODES: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "AUTHENTICATION_REQUIRED",
+    403: "ACCESS_DENIED",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+    422: "UNPROCESSABLE_ENTITY",
+    428: "PRECONDITION_REQUIRED",
+    429: "RATE_LIMITED",
+}
+
+
+def _slug(code: str) -> str:
+    return code.lower().replace("_", "-")
+
+
+async def http_exception_problem(request: Request, exc: StarletteHTTPException):
+    """Every HTTPException in this codebase - whichever of the ad hoc detail
+    shapes it was raised with ({"code","message"}, {"code","from_status",...},
+    or a bare string) - converges here into one RFC 7807 envelope. The
+    original detail's non-message keys (from_status/to_status/allowed, etc.)
+    move to a "context" extension member rather than being dropped, since
+    packages/api-client/src/core.ts on the frontend already reads
+    problem.code and problem.context (built defensively ahead of this
+    convergence landing)."""
+    detail = exc.detail
+    code: str
+    message: str | None
+    context: dict | None
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or _STATUS_CODES.get(exc.status_code, "REQUEST_FAILED"))
+        message = detail.get("message")
+        context = {
+            key: value for key, value in detail.items() if key not in {"code", "message"}
+        } or None
+    else:
+        code = _STATUS_CODES.get(exc.status_code, "REQUEST_FAILED")
+        message = str(detail) if detail else None
+        context = None
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        media_type="application/problem+json",
+        headers=exc.headers,
+        content={
+            "type": f"https://api.moneybeeloan.com/problems/{_slug(code)}",
+            "title": _STATUS_TITLES.get(exc.status_code, "Request failed"),
+            "status": exc.status_code,
+            "detail": message or "The request could not be completed.",
+            "instance": request.url.path,
+            "request_id": request.headers.get("X-Request-ID"),
+            "code": code,
+            **({"context": context} if context else {}),
+        },
+    )
+
+
+app.add_exception_handler(StarletteHTTPException, http_exception_problem)
+app.add_exception_handler(HTTPException, http_exception_problem)
 
 
 @app.exception_handler(RequestValidationError)
@@ -122,19 +240,145 @@ async def validation_problem(request: Request, exc: RequestValidationError):
     )
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_problem(request: Request, exc: Exception):
+    request_id = request.headers.get("X-Request-ID")
+    request_logger().exception(
+        "request.unhandled_exception",
+        extra={
+            "http_method": request.method,
+            "path": request.url.path,
+            "request_id": request_id,
+        },
+    )
+    return JSONResponse(
+        status_code=500,
+        media_type="application/problem+json",
+        content={
+            "type": "https://api.moneybeeloan.com/problems/internal-error",
+            "title": "Internal server error",
+            "status": 500,
+            "detail": "An unexpected error occurred.",
+            "instance": request.url.path,
+            "request_id": request_id,
+        },
+    )
+
+
 @app.get("/health/live", tags=["health"])
 async def live():
     return {"status": "ok", "environment": settings.app_env}
 
 
+def _repository_root() -> Path:
+    """Locate repository assets when ``app`` is imported from source or a wheel."""
+    candidates = (Path.cwd(), Path(__file__).resolve().parent.parent)
+    for candidate in candidates:
+        if (candidate / "alembic.ini").is_file() and (candidate / "migrations").is_dir():
+            return candidate
+    raise RuntimeError("Unable to locate alembic.ini and migrations directory")
+
+
+def _expected_migration_heads() -> tuple[str, ...]:
+    """Return every code migration head using a repository-absolute location.
+
+    ``alembic.ini`` intentionally keeps a relative ``script_location`` for CLI
+    ergonomics. Health checks can execute from an installed package or a
+    different working directory, so resolving the location here prevents the
+    readiness endpoint from misclassifying a healthy migration graph as
+    unreadable. Supporting all heads also keeps readiness diagnostic when a
+    branch temporarily introduces more than one head.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    repository_root = _repository_root()
+    config = Config(str(repository_root / "alembic.ini"))
+    config.set_main_option("script_location", str(repository_root / "migrations"))
+    return tuple(sorted(ScriptDirectory.from_config(config).get_heads()))
+
+
+def _format_migration_heads(heads: set[str]) -> str:
+    return ",".join(sorted(heads)) if heads else "none"
+
+
 @app.get("/health/ready", tags=["health"])
 async def ready():
+    checks: dict[str, str] = {}
+    healthy = True
+
     try:
         async with SessionLocal() as db:
             await db.execute(text("SELECT 1"))
-        return {"status": "ready", "environment": settings.app_env}
-    except Exception:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "not_ready", "environment": settings.app_env},
+            if settings.app_env in {"staging", "production"}:
+                role = (
+                    await db.execute(
+                        text(
+                            "SELECT current_user, rolsuper, rolcreatedb, rolcreaterole, "
+                            "rolreplication, rolbypassrls FROM pg_roles "
+                            "WHERE rolname = current_user"
+                        )
+                    )
+                ).one_or_none()
+                if role is None:
+                    raise RuntimeError("runtime database role is not visible")
+                current_user, *privileged = role
+                if current_user != settings.database_runtime_role or any(privileged):
+                    raise RuntimeError("runtime database role violates least privilege")
+        checks["database"] = "ok"
+        checks["database_role"] = (
+            "ok" if settings.app_env in {"staging", "production"} else "not_required"
         )
+    except Exception:
+        checks["database"] = "unreachable"
+        checks["database_role"] = "invalid_or_unverified"
+        healthy = False
+
+    if healthy and not settings.auto_create_schema:
+        try:
+            expected_heads = set(_expected_migration_heads())
+            if settings.app_env in {"staging", "production"}:
+                if not settings.migration_head:
+                    raise RuntimeError("MIGRATION_HEAD is required")
+                configured_heads = set(settings.migration_head.split(","))
+                if configured_heads != expected_heads:
+                    raise RuntimeError("configured migration head does not match release code")
+            async with SessionLocal() as db:
+                result = await db.execute(text("SELECT version_num FROM alembic_version"))
+                current_heads = {str(row[0]) for row in result.all() if row[0]}
+            if current_heads != expected_heads:
+                checks["migrations"] = (
+                    "drifted: "
+                    f"db={_format_migration_heads(current_heads)!r} "
+                    f"code={_format_migration_heads(expected_heads)!r}"
+                )
+                healthy = False
+            else:
+                checks["migrations"] = "ok"
+        except Exception:
+            checks["migrations"] = "unreadable_or_drifted"
+            healthy = False
+    else:
+        checks["migrations"] = "skipped (auto_create_schema)"
+
+    if settings.redis_required_for_readiness or (
+        settings.rate_limit_enabled and settings.rate_limit_backend == "redis"
+    ):
+        try:
+            await RedisRateLimitBackend().redis.ping()
+            checks["redis_rate_limit"] = "ok"
+        except Exception:
+            checks["redis_rate_limit"] = "unreachable"
+            healthy = False
+    else:
+        checks["redis_rate_limit"] = "not_required"
+
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ready" if healthy else "not_ready",
+            "environment": settings.app_env,
+            "checks": checks,
+        },
+    )

@@ -84,7 +84,7 @@ def test_provider_webhook_is_authenticated_deduplicated_and_conflict_safe(monkey
     assert duplicate.status_code == 202
     assert duplicate.json()["duplicate"] is True
     assert conflict.status_code == 409
-    assert conflict.json()["detail"]["code"] == "WEBHOOK_EVENT_ID_CONFLICT"
+    assert conflict.json()["code"] == "WEBHOOK_EVENT_ID_CONFLICT"
     assert receipts.status_code == 200
     assert len(receipts.json()) == 1
 

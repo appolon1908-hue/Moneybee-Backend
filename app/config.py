@@ -1,5 +1,6 @@
 from functools import lru_cache
 import json
+import os
 from typing import Literal
 
 from pydantic import model_validator
@@ -11,7 +12,9 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "dev", "staging", "production"] = "local"
     database_url: str = "sqlite+aiosqlite:///./moneybee.db"
+    database_runtime_role: str | None = None
     redis_url: str = "redis://localhost:6379/0"
+    redis_required_for_readiness: bool = False
     auto_create_schema: bool = True
     local_auth_bypass: bool = True
     local_identity_enforcement: bool = False
@@ -45,13 +48,24 @@ class Settings(BaseSettings):
     )
     provider_webhook_secrets_json: str = "{}"
     provider_webhook_tolerance_seconds: int = 300
-    rate_limit_enabled: bool = True
-    rate_limit_window_seconds: int = 60
-    public_rate_limit_per_minute: int = 120
-    webhook_rate_limit_per_minute: int = 240
 
-    field_encryption_key: str | None = None
+    field_encryption_keys_json: str = "{}"
+    field_encryption_active_key_version: str | None = None
+    field_encryption_current_version: str | None = None
+    pii_lookup_hmac_key: str | None = None
     provider_timeout_seconds: float = 30.0
+    live_writes: bool = False
+    odoo_write: bool = False
+
+    log_level: str = "INFO"
+    rate_limit_enabled: bool = True
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
+    rate_limit_window_seconds: int = 60
+    public_rate_limit_per_minute: int = 60
+    webhook_rate_limit_per_minute: int = 120
+    trust_forwarded_for: bool = False
+    trusted_proxy_cidrs_csv: str = ""
+    api_v1_sunset_date: str = "2026-12-31"
 
     source_sha: str | None = None
     api_image_digest: str | None = None
@@ -62,8 +76,19 @@ class Settings(BaseSettings):
     provenance_digest: str | None = None
     backup_reference: str | None = None
     backup_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    pitr_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    offhost_backup_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
     restore_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    redis_recovery_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    application_restore_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
     staging_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    authorization_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    command_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    concurrency_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    document_security_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    pii_security_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    observability_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
+    idempotency_status: Literal["NOT_CONFIGURED", "PASS", "FAIL"] = "NOT_CONFIGURED"
 
     bank_provider: Literal["disabled", "plaid"] = "disabled"
     plaid_base_url: str = "https://sandbox.plaid.com"
@@ -146,6 +171,20 @@ class Settings(BaseSettings):
     object_storage_access_key: str | None = None
     object_storage_secret_key: str | None = None
 
+    malware_scan_provider: Literal["disabled", "clamav"] = "disabled"
+    clamav_host: str | None = None
+    clamav_port: int = 3310
+    clamav_timeout_seconds: float = 30.0
+
+    payment_provider: Literal["disabled", "stripe", "paypal"] = "disabled"
+    stripe_api_base_url: str = "https://api.stripe.com"
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    paypal_api_base_url: str = "https://api-m.sandbox.paypal.com"
+    paypal_client_id: str | None = None
+    paypal_client_secret: str | None = None
+    paypal_webhook_id: str | None = None
+
     @staticmethod
     def _csv_set(value: str) -> frozenset[str]:
         return frozenset(item.strip() for item in value.split(",") if item.strip())
@@ -161,6 +200,12 @@ class Settings(BaseSettings):
             "lender": self._csv_set(self.lender_oidc_client_ids_csv),
             "admin": self._csv_set(self.admin_oidc_client_ids_csv),
         }
+
+    @property
+    def trusted_proxy_cidrs(self) -> tuple[str, ...]:
+        return tuple(
+            item.strip() for item in self.trusted_proxy_cidrs_csv.split(",") if item.strip()
+        )
 
     @property
     def provider_webhook_allowlist(self) -> set[str]:
@@ -186,6 +231,23 @@ class Settings(BaseSettings):
         ):
             raise ValueError("PROVIDER_WEBHOOK_SECRETS_JSON must be a string map")
         return {key.lower(): secret for key, secret in value.items() if secret}
+
+    @property
+    def field_encryption_keys(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.field_encryption_keys_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be valid JSON") from exc
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(secret, str)
+            for key, secret in value.items()
+        ):
+            raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be a string map")
+        return {key: secret for key, secret in value.items() if secret}
+
+    @property
+    def current_field_encryption_version(self) -> str | None:
+        return self.field_encryption_current_version or self.field_encryption_active_key_version
 
     @property
     def oidc_algorithms(self) -> list[str]:
@@ -228,6 +290,10 @@ class Settings(BaseSettings):
                 )
 
         if self.app_env in {"staging", "production"}:
+            # Alembic imports model metadata, but its isolated one-shot
+            # identity must not need runtime/provider configuration.
+            if os.getenv("MIGRATION_DATABASE_URL"):
+                return self
             if self.local_auth_bypass or self.auto_create_schema:
                 raise ValueError("Local bypass/schema creation must be disabled")
             if not self.local_identity_enforcement:
@@ -236,15 +302,33 @@ class Settings(BaseSettings):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
             if self.oidc_algorithms != ["RS256"]:
                 raise ValueError("Production OIDC tokens must use RS256")
+            if not self.database_runtime_role:
+                raise ValueError("DATABASE_RUNTIME_ROLE is required")
+            if self.rate_limit_enabled and self.rate_limit_backend != "redis":
+                raise ValueError("Staging/production rate limiting requires RATE_LIMIT_BACKEND=redis")
+            if self.rate_limit_enabled and not self.redis_url.startswith(("redis://", "rediss://")):
+                raise ValueError("Distributed rate limiting requires REDIS_URL")
+            if self.trust_forwarded_for and not self.trusted_proxy_cidrs:
+                raise ValueError(
+                    "TRUST_FORWARDED_FOR requires at least one TRUSTED_PROXY_CIDRS_CSV entry"
+                )
             if self.bank_provider == "plaid" and not all(
                 [
                     self.plaid_client_id,
                     self.plaid_secret,
-                    self.field_encryption_key,
+                    self.current_field_encryption_version,
+                    self.field_encryption_keys,
                 ]
             ):
                 raise ValueError(
-                    "Plaid requires credentials and FIELD_ENCRYPTION_KEY"
+                    "Plaid requires credentials and a configured field encryption key"
+                )
+            if self.current_field_encryption_version and (
+                self.current_field_encryption_version not in self.field_encryption_keys
+            ):
+                raise ValueError(
+                    "FIELD_ENCRYPTION_CURRENT_VERSION must name a key present in "
+                    "FIELD_ENCRYPTION_KEYS_JSON"
                 )
             if self.middleware_provider == "codestra" and not all(
                 [
@@ -259,6 +343,8 @@ class Settings(BaseSettings):
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):
                 raise ValueError("Odoo configuration is incomplete")
+            if self.crm_provider == "odoo" and not self.odoo_write:
+                raise ValueError("CRM_PROVIDER=odoo requires ODOO_WRITE=true")
             if self.kyb_provider == "middesk" and not self.middesk_api_key:
                 raise ValueError("Middesk configuration is incomplete")
             if self.credit_provider == "experian" and not all(
@@ -295,6 +381,24 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("S3 object storage configuration is incomplete")
+            if self.malware_scan_provider == "clamav" and not self.clamav_host:
+                raise ValueError("ClamAV configuration is incomplete")
+            if self.app_env == "production" and self.object_storage_mode != "s3":
+                raise ValueError("Production requires private S3-compatible object storage")
+            if self.app_env == "production" and self.malware_scan_provider != "clamav":
+                raise ValueError("Production requires ClamAV document scanning")
+            if self.payment_provider == "stripe" and not all(
+                [self.stripe_secret_key, self.stripe_webhook_secret]
+            ):
+                raise ValueError("Stripe configuration is incomplete")
+            if self.payment_provider == "paypal" and not all(
+                [
+                    self.paypal_client_id,
+                    self.paypal_client_secret,
+                    self.paypal_webhook_id,
+                ]
+            ):
+                raise ValueError("PayPal configuration is incomplete")
         return self
 
 

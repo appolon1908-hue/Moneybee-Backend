@@ -2335,6 +2335,18 @@
             ],
             "title": "Funding Confirmed At"
           },
+          "funds_sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Funds Sent At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2369,6 +2381,7 @@
           "approved_amount",
           "funded_amount",
           "provider_reference",
+          "funds_sent_at",
           "funding_confirmed_at",
           "created_at"
         ],
@@ -3396,6 +3409,18 @@
             ],
             "title": "Apr"
           },
+          "collateral_description": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collateral Description"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3457,6 +3482,23 @@
           "payment_frequency": {
             "title": "Payment Frequency",
             "type": "string"
+          },
+          "personal_guarantee_required": {
+            "default": false,
+            "title": "Personal Guarantee Required",
+            "type": "boolean"
+          },
+          "prepayment_terms": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepayment Terms"
           },
           "product_type": {
             "title": "Product Type",
@@ -3531,6 +3573,18 @@
             ],
             "title": "Apr"
           },
+          "collateral_description": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collateral Description"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3579,6 +3633,23 @@
           "payment_frequency": {
             "title": "Payment Frequency",
             "type": "string"
+          },
+          "personal_guarantee_required": {
+            "default": false,
+            "title": "Personal Guarantee Required",
+            "type": "boolean"
+          },
+          "prepayment_terms": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepayment Terms"
           },
           "product_type": {
             "title": "Product Type",
@@ -6362,6 +6433,17 @@
               "title": "Commission Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -6455,6 +6537,74 @@
           }
         ],
         "summary": "Commission Splits",
+        "tags": [
+          "admin",
+          "funding"
+        ]
+      },
+      "post": {
+        "operationId": "create_commission_split_api_v2_admin_commissions__commission_id__splits_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commission_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Commission Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommissionSplitInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommissionSplitRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Commission Split",
         "tags": [
           "admin",
           "funding"

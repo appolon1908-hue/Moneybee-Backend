@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.contract_routes import router as contract_router
 from app.portal.account import router as account_router
 from app.portal.admin import router as admin_router
 from app.portal.borrower import router as borrower_router
@@ -10,6 +11,7 @@ from app.portal.webhooks import router as webhooks_router
 
 
 router = APIRouter()
+router.include_router(contract_router)
 router.include_router(account_router)
 router.include_router(foundation_router)
 router.include_router(admin_router)

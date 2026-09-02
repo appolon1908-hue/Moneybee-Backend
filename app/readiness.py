@@ -105,20 +105,28 @@ async def system_readiness(db: AsyncSession) -> dict:
 
     for key, value in (
         ("BACKUP_STATUS", settings.backup_status),
+        ("PITR_STATUS", settings.pitr_status),
+        ("OFFHOST_BACKUP_STATUS", settings.offhost_backup_status),
         ("RESTORE_STATUS", settings.restore_status),
+        ("REDIS_RECOVERY_STATUS", settings.redis_recovery_status),
+        ("APPLICATION_RESTORE_STATUS", settings.application_restore_status),
         ("STAGING_STATUS", settings.staging_status),
     ):
         if value != "PASS":
             blockers.append(f"{key} is {value}")
 
-    architectural_gaps = [
-        "Command-first mutation coverage is incomplete",
-        "Optimistic concurrency is not enforced on every financial aggregate",
-        "Secure document quarantine and malware scanning are not certified",
-        "PII reveal auditing and key rotation are not complete",
-        "OpenTelemetry dashboards and actionable alerts are not certified",
-    ]
-    blockers.extend(architectural_gaps)
+    architecture_evidence = {
+        "AUTHORIZATION_STATUS": settings.authorization_status,
+        "COMMAND_STATUS": settings.command_status,
+        "CONCURRENCY_STATUS": settings.concurrency_status,
+        "DOCUMENT_SECURITY_STATUS": settings.document_security_status,
+        "PII_SECURITY_STATUS": settings.pii_security_status,
+        "OBSERVABILITY_STATUS": settings.observability_status,
+        "IDEMPOTENCY_STATUS": settings.idempotency_status,
+    }
+    for key, value in architecture_evidence.items():
+        if value != "PASS":
+            blockers.append(f"{key} is {value}")
 
     auth_status = (
         "PASS"
@@ -129,26 +137,32 @@ async def system_readiness(db: AsyncSession) -> dict:
     if auth_status != "PASS":
         blockers.append("Canonical production authentication is not enforced")
 
-    final_status = "BLOCKED" if auth_status == "FAIL" else "PARTIAL"
+    final_status = (
+        "READY"
+        if settings.app_env == "production" and auth_status == "PASS" and not blockers
+        else ("BLOCKED" if auth_status == "FAIL" else "PARTIAL")
+    )
     enabled_features = sorted(key for key, enabled in capabilities.items() if enabled)
 
     return {
         "FINAL_STATUS": final_status,
-        "OVERALL_SYSTEM_STATUS": "PARTIAL",
+        "OVERALL_SYSTEM_STATUS": final_status,
         "ENVIRONMENT": settings.app_env,
         **release_evidence,
         "AUTH_STATUS": auth_status,
-        "AUTHORIZATION_STATUS": "PARTIAL",
-        "IDEMPOTENCY_STATUS": "PARTIAL",
-        "CONCURRENCY_STATUS": "PARTIAL",
-        "OUTBOX_STATUS": "FAIL" if dead_outbox else "PARTIAL",
-        "INBOX_STATUS": "FAIL" if failed_inbox else "PARTIAL",
+        **architecture_evidence,
+        "OUTBOX_STATUS": "FAIL" if dead_outbox else "PASS",
+        "INBOX_STATUS": "FAIL" if failed_inbox else "PASS",
         "OUTBOX_PENDING": pending_outbox,
         "INBOX_PENDING": pending_inbox,
         "OPEN_OPERATIONAL_EXCEPTIONS": open_exceptions,
         "ADAPTER_STATUS": adapter_status,
         "BACKUP_STATUS": settings.backup_status,
+        "PITR_STATUS": settings.pitr_status,
+        "OFFHOST_BACKUP_STATUS": settings.offhost_backup_status,
         "RESTORE_STATUS": settings.restore_status,
+        "REDIS_RECOVERY_STATUS": settings.redis_recovery_status,
+        "APPLICATION_RESTORE_STATUS": settings.application_restore_status,
         "STAGING_STATUS": settings.staging_status,
         "PRODUCTION_FEATURES_ENABLED": enabled_features,
         "BLOCKERS": blockers,
