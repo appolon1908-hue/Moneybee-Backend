@@ -1,0 +1,12 @@
+{
+  "name": "contract-esign-engine",
+  "paths": {
+    "/api/v2/applications/{application_id}/contract": "19f287c882cce5b2b660f21300985cb54f3dfa8855139942a11196896ecb5bc5",
+    "/api/v2/admin/contracts/{contract_id}/void": "60977263426f0ea33a0045ea9b59444b734f3d743904ab46627a331be37755b4"
+  },
+  "schemas": {
+    "ContractRead": "bf23a8412c6f131f725912880a165cd0f2b36c84b5322cbd238987e54b6a8f61",
+    "ContractVoidInput": "2828599930e402b6f8be2d7bafbf3c6555f8839a6defd117f266a41f070a8412"
+  },
+  "version": 1
+}

@@ -31,6 +31,7 @@ class IntegrationInboxMessage(Base, Record):
         DateTime(timezone=True),
         nullable=True,
     )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class OperationalException(Base, Record):

@@ -173,7 +173,14 @@ def test_borrower_application_sections_and_submission_flow():
             "/prepare-matched-submissions"
         )
         assert submission_response.status_code == 200
-        submission = submission_response.json()[0]
+        # The application can match against lender programs created by other
+        # tests sharing this database, so select this test's own submission
+        # by program_id rather than assuming it is the only (or first) match.
+        submission = next(
+            item
+            for item in submission_response.json()
+            if item["program_id"] == program_id
+        )
         assert submission["status"] == "DRAFT"
 
         condition_response = client.post(
@@ -227,10 +234,30 @@ def test_borrower_application_sections_and_submission_flow():
                 "apr": 15,
                 "origination_fee": 500,
                 "total_repayment": 60000,
+                "prepayment_terms": "No penalty after month 6.",
+                "personal_guarantee_required": True,
+                "collateral_description": "UCC-1 blanket lien on business assets.",
             },
         )
         assert offer_response.status_code == 201
         offer_id = offer_response.json()["id"]
+        assert offer_response.json()["prepayment_terms"] == "No penalty after month 6."
+        assert offer_response.json()["personal_guarantee_required"] is True
+        assert (
+            offer_response.json()["collateral_description"]
+            == "UCC-1 blanket lien on business assets."
+        )
+
+        unacknowledged = client.post(
+            f"/api/v2/offers/{offer_id}/accept",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert unacknowledged.status_code == 409
+        assert "must be acknowledged" in unacknowledged.json()["detail"]
+        acknowledged = client.post(
+            f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+        )
+        assert acknowledged.status_code == 200
 
         accept_key = uuid.uuid4().hex
         accepted_response = client.post(
@@ -258,7 +285,7 @@ def test_borrower_application_sections_and_submission_flow():
         )
         assert invalid_transition.status_code == 409
         assert (
-            invalid_transition.json()["detail"]["code"]
+            invalid_transition.json()["code"]
             == "INVALID_APPLICATION_TRANSITION"
         )
 
@@ -309,4 +336,4 @@ def test_public_prequalification_idempotency_replays_and_conflicts():
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert conflict.status_code == 409
-    assert conflict.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+    assert conflict.json()["code"] == "IDEMPOTENCY_KEY_CONFLICT"

@@ -1,0 +1,11 @@
+{
+  "name": "commission-receipts-splits",
+  "paths": {
+    "/api/v2/admin/commissions/{commission_id}/receipts": "48ed951fa3b2904051d89aa30c038e58135f5b0a2991e17a53332b6f21f2caa0"
+  },
+  "schemas": {
+    "CommissionReceiptInput": "1a8f4808bc119ad114b7ebb14209a0ea51ee5b1bf139074f1426e9fa5c0138f4",
+    "CommissionSplitInput": "bc33b47dfcd8ade0f187101deee3075948404970c23b5c24dfb7ba006f150c75"
+  },
+  "version": 1
+}

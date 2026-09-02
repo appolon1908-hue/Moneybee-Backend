@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, or_, select
@@ -519,3 +520,267 @@ def transition_application(
             changed_by=principal.subject,
         )
     )
+
+
+FUNDING_TRANSITIONS: dict[str, frozenset[str]] = {
+    "CONDITIONS_PENDING": frozenset(
+        {"CONDITIONS_SATISFIED", "DECLINED", "CANCELLED"}
+    ),
+    "CONDITIONS_SATISFIED": frozenset(
+        {"CONTRACT_SIGNED", "DECLINED", "CANCELLED"}
+    ),
+    "CONTRACT_SIGNED": frozenset(
+        {"APPROVED_FOR_FUNDING", "DECLINED", "CANCELLED"}
+    ),
+    "APPROVED_FOR_FUNDING": frozenset(
+        {"FUNDS_SENT", "DECLINED", "CANCELLED"}
+    ),
+    "FUNDS_SENT": frozenset({"FUNDED", "DECLINED", "CANCELLED"}),
+    "FUNDED": frozenset(),
+    "DECLINED": frozenset(),
+    "CANCELLED": frozenset(),
+}
+
+
+def transition_funding(
+    db: AsyncSession,
+    funding: models.Funding,
+    to_status: str,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = funding.status
+    if previous == to_status:
+        return
+    allowed = FUNDING_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_FUNDING_TRANSITION",
+                "from_status": previous,
+                "to_status": to_status,
+                "allowed": sorted(allowed),
+            },
+        )
+    funding.status = to_status
+    db.add(
+        models.AuditEvent(
+            actor_id=principal.subject,
+            action=f"FUNDING_{to_status}",
+            resource_type="funding",
+            resource_id=str(funding.id),
+            details={"from_status": previous, "to_status": to_status, "reason": reason},
+        )
+    )
+
+
+CONTRACT_TRANSITIONS: dict[str, frozenset[str]] = {
+    "DRAFT": frozenset({"SENT", "VOIDED"}),
+    "SENT": frozenset({"SIGNED", "DECLINED", "EXPIRED", "VOIDED"}),
+    "SIGNED": frozenset(),
+    "DECLINED": frozenset(),
+    "EXPIRED": frozenset(),
+    "VOIDED": frozenset(),
+}
+
+
+def transition_contract(
+    db: AsyncSession,
+    contract: models.Contract,
+    to_status: str,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = contract.status
+    if previous == to_status:
+        return
+    allowed = CONTRACT_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_CONTRACT_TRANSITION",
+                "from_status": previous,
+                "to_status": to_status,
+                "allowed": sorted(allowed),
+            },
+        )
+    contract.status = to_status
+    db.add(
+        models.AuditEvent(
+            actor_id=principal.subject,
+            action=f"CONTRACT_{to_status}",
+            resource_type="contract",
+            resource_id=str(contract.id),
+            details={"from_status": previous, "to_status": to_status, "reason": reason},
+        )
+    )
+
+
+async def advance_funding_if_conditions_satisfied(
+    db: AsyncSession,
+    submission_id: uuid.UUID,
+    principal: Principal,
+) -> None:
+    """Move a funding CONDITIONS_PENDING -> CONDITIONS_SATISFIED once every
+    condition on the submission whose offer it came from is SATISFIED or
+    WAIVED (or the submission never had any conditions attached). Called
+    both right after a condition decision (the natural "did we just finish
+    the last one" trigger) and right after offer acceptance (to cover a
+    submission with zero conditions, which never triggers a decision).
+    """
+    submission = await db.get(models.LenderSubmission, submission_id)
+    if submission is None:
+        return
+    funding = await db.scalar(
+        select(models.Funding)
+        .join(models.Offer, models.Offer.id == models.Funding.offer_id)
+        .where(
+            models.Funding.application_id == submission.application_id,
+            models.Offer.lender_id == submission.lender_id,
+            models.Offer.program_id == submission.program_id,
+        )
+        .with_for_update()
+    )
+    if funding is None or funding.status != "CONDITIONS_PENDING":
+        return
+    conditions = (
+        await db.scalars(
+            select(models.UnderwritingCondition).where(
+                models.UnderwritingCondition.submission_id == submission_id
+            )
+        )
+    ).all()
+    if all(item.status in {"SATISFIED", "WAIVED"} for item in conditions):
+        transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+        existing_contract = await db.scalar(
+            select(models.Contract).where(models.Contract.offer_id == funding.offer_id)
+        )
+        if existing_contract is None:
+            db.add(models.Contract(
+                application_id=funding.application_id,
+                offer_id=funding.offer_id,
+                # No real contract-template catalog/versioning exists yet -
+                # this is a placeholder until that's a real business
+                # decision, not a stand-in for actual legal content.
+                template_version="v1",
+                status="DRAFT",
+            ))
+
+
+async def advance_submissionless_funding(
+    db: AsyncSession, funding_id: uuid.UUID, principal: Principal
+) -> None:
+    funding = await db.scalar(
+        select(models.Funding).where(models.Funding.id == funding_id).with_for_update()
+    )
+    if funding is None or funding.status != "CONDITIONS_PENDING":
+        return
+    transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+    if await db.scalar(select(models.Contract.id).where(models.Contract.offer_id == funding.offer_id)) is None:
+        db.add(models.Contract(
+            application_id=funding.application_id,
+            offer_id=funding.offer_id,
+            template_version="v1",
+            status="DRAFT",
+        ))
+
+
+# Named, isolated default per docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md's
+# resolved open question 2 - no real eligibility rule confirmed yet, so
+# this is a one-line change away from being replaced with the real one.
+RENEWAL_ELIGIBILITY_DAYS = 90
+
+# Simpler than the spec draft's original PENDING -> OPPORTUNITY_CREATED ->
+# CONTACTED -> ... : a RenewalOpportunity row is only ever created once
+# already eligible, so "opportunity created" is redundant with the row's
+# own existence. Starts at PENDING (created, not yet contacted).
+RENEWAL_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "PENDING": frozenset({"CONTACTED", "DECLINED", "EXPIRED"}),
+    "CONTACTED": frozenset({"CONVERTED", "DECLINED", "EXPIRED"}),
+    "CONVERTED": frozenset(),
+    "DECLINED": frozenset(),
+    "EXPIRED": frozenset(),
+}
+
+
+def transition_renewal_status(
+    db: AsyncSession,
+    renewal: models.RenewalOpportunity,
+    to_status: str,
+    principal: Principal,
+    reason: str | None = None,
+) -> None:
+    previous = renewal.status
+    if previous == to_status:
+        return
+    allowed = RENEWAL_STATUS_TRANSITIONS.get(previous, frozenset())
+    if to_status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "INVALID_RENEWAL_STATUS_TRANSITION",
+                "from_status": previous,
+                "to_status": to_status,
+                "allowed": sorted(allowed),
+            },
+        )
+    renewal.status = to_status
+    db.add(
+        models.AuditEvent(
+            actor_id=principal.subject,
+            action=f"RENEWAL_{to_status}",
+            resource_type="renewal_opportunity",
+            resource_id=str(renewal.id),
+            details={"from_status": previous, "to_status": to_status, "reason": reason},
+        )
+    )
+
+
+async def evaluate_renewal_eligibility(db: AsyncSession) -> list[uuid.UUID]:
+    """Scans FUNDED fundings old enough to be renewal-eligible and creates
+    a RenewalOpportunity for each that doesn't already have one. Meant to
+    be called periodically (see app/worker.py) rather than per-request -
+    there's no per-funding trigger event the way conditions/contracts have
+    one, since eligibility is purely time-based. Returns the ids of newly
+    created opportunities."""
+    cutoff = datetime.now(UTC) - timedelta(days=RENEWAL_ELIGIBILITY_DAYS)
+    fundings = (
+        await db.scalars(
+            select(models.Funding).where(
+                models.Funding.status == "FUNDED",
+                models.Funding.funding_confirmed_at.is_not(None),
+                models.Funding.funding_confirmed_at <= cutoff,
+            )
+        )
+    ).all()
+    if not fundings:
+        return []
+    existing_funding_ids = set(
+        (
+            await db.scalars(
+                select(models.RenewalOpportunity.original_funding_id).where(
+                    models.RenewalOpportunity.original_funding_id.in_(
+                        funding.id for funding in fundings
+                    )
+                )
+            )
+        ).all()
+    )
+    created: list[uuid.UUID] = []
+    for funding in fundings:
+        if funding.id in existing_funding_ids:
+            continue
+        opportunity = models.RenewalOpportunity(
+            original_funding_id=funding.id,
+            application_id=funding.application_id,
+            eligible_from=funding.funding_confirmed_at,
+            eligibility_status="ELIGIBLE",
+            estimated_amount=funding.funded_amount,
+            status="PENDING",
+        )
+        db.add(opportunity)
+        await db.flush()
+        created.append(opportunity.id)
+    return created

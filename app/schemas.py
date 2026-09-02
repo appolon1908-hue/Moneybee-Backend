@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class Attribution(BaseModel):
@@ -193,7 +193,27 @@ class OfferInput(BaseModel):
     factor_rate: Decimal | None = None
     origination_fee: Decimal = 0
     total_repayment: Decimal | None = None
+    prepayment_terms: str | None = Field(default=None, max_length=10_000)
+    personal_guarantee_required: bool = False
+    collateral_description: str | None = Field(default=None, max_length=10_000)
     expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_schedule(self):
+        if self.total_repayment is not None:
+            return self
+        payments_per_year = {
+            "MONTHLY": 12,
+            "WEEKLY": 52,
+            "BIWEEKLY": 26,
+            "SEMIMONTHLY": 24,
+            "DAILY": 365,
+        }.get(self.payment_frequency.upper())
+        if payments_per_year is None:
+            raise ValueError("Unsupported payment frequency")
+        if (self.term_months * payments_per_year) % 12:
+            raise ValueError("A partial payment period requires total_repayment")
+        return self
 
 
 class OfferRead(OfferInput):
@@ -265,6 +285,24 @@ class LenderSubmissionRead(BaseModel):
     created_at: datetime
 
 
+class ContractRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    offer_id: uuid.UUID
+    template_version: str
+    provider: str | None
+    external_envelope_id: str | None
+    status: str
+    sent_at: datetime | None
+    signed_at: datetime | None
+    created_at: datetime
+
+
+class ContractVoidInput(BaseModel):
+    reason: str = Field(min_length=5, max_length=10_000)
+
+
 class FundingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -274,8 +312,23 @@ class FundingRead(BaseModel):
     approved_amount: Decimal | None
     funded_amount: Decimal | None
     provider_reference: str | None
+    funds_sent_at: datetime | None
     funding_confirmed_at: datetime | None
     created_at: datetime
+
+
+class FundingDeclineInput(BaseModel):
+    reason: str = Field(min_length=5, max_length=10_000)
+
+
+class FundingFundsSentInput(BaseModel):
+    provider_reference: str = Field(min_length=1, max_length=255)
+
+
+class FundingConfirmInput(BaseModel):
+    funded_amount: Decimal = Field(gt=0)
+    commission_rate_bps: int = Field(ge=0, le=10_000)
+    commission_expected_amount: Decimal | None = Field(default=None, gt=0)
 
 
 class CommissionRead(BaseModel):
@@ -298,6 +351,11 @@ class RenewalRead(BaseModel):
     estimated_amount: Decimal | None
     status: str
     created_at: datetime
+
+
+class RenewalStatusInput(BaseModel):
+    status: str = Field(min_length=2, max_length=40)
+    reason: str | None = Field(default=None, max_length=10_000)
 
 
 class AffiliateInput(BaseModel):
@@ -385,6 +443,18 @@ class CommissionSplitRead(BaseModel):
     amount: Decimal
     status: str
     created_at: datetime
+
+
+class CommissionSplitInput(BaseModel):
+    recipient_type: str = Field(min_length=1, max_length=50)
+    recipient_reference: str = Field(min_length=1, max_length=255)
+    percentage: Decimal | None = Field(default=None, ge=0, le=100)
+    amount: Decimal = Field(gt=0)
+
+
+class CommissionReceiptInput(BaseModel):
+    amount: Decimal = Field(gt=0)
+    reference: str | None = Field(default=None, max_length=255)
 
 
 class CommissionAdjustmentInput(BaseModel):
@@ -479,3 +549,57 @@ class ProviderAdapterStatus(BaseModel):
     provider: str
     selected: bool
     configured: bool
+
+
+class AdverseActionNoticeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    application_id: uuid.UUID
+    submission_id: uuid.UUID
+    underwriting_review_id: uuid.UUID
+    lender_id: uuid.UUID
+    creditor_name: str
+    principal_reasons: list
+    notice_text: str
+    status: str
+    delivered_at: datetime | None
+    created_at: datetime
+
+
+class CommercialFinancingDisclosureRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    offer_id: uuid.UUID
+    application_id: uuid.UUID
+    jurisdiction: str | None
+    amount_financed: Decimal
+    finance_charge: Decimal
+    total_repayment_amount: Decimal
+    estimated_apr: Decimal | None
+    payment_amount: Decimal
+    payment_frequency: str
+    term_months: int
+    prepayment_policy: str
+    disclosure_text: str
+    acknowledged_at: datetime | None
+    acknowledged_by: str | None
+    created_at: datetime
+
+
+class CommissionTaxRecordRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    recipient_type: str
+    recipient_reference: str
+    recipient_name: str | None
+    tax_year: int
+    total_amount: Decimal
+    commission_count: int
+    requires_1099: bool
+    filed_at: datetime | None
+    filing_reference: str | None
+
+
+class CommissionTaxRecordTinInput(BaseModel):
+    recipient_name: str = Field(min_length=1, max_length=255)
+    tin: str = Field(min_length=9, max_length=20)
