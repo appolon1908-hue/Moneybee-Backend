@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import models
 from app.public_intake_models import PublicIntake, PublicIntakeConsent
 from app.public_intake_schemas import PublicIntakeAccepted, PublicIntakeCommon
+from app.rate_limit import resolved_client_ip
 
 
 INTAKE_EVENT_TYPES = {
@@ -71,8 +72,7 @@ def normalize_phone(value: str | None, *, required: bool = False) -> str | None:
 def request_evidence(request: Request) -> dict[str, Any]:
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     correlation_id = request.headers.get("X-Correlation-ID") or request_id
-    forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
-    client_ip = forwarded or (request.client.host if request.client else "")
+    client_ip = resolved_client_ip(request)
     return {
         "request_id": request_id,
         "correlation_id": correlation_id,

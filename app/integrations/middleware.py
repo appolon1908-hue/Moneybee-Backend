@@ -3,6 +3,7 @@ import hmac
 import json
 import re
 import time
+from urllib.parse import urlsplit
 
 from app.config import settings
 from app.integrations.base import MiddlewareResult, ProviderError
@@ -10,6 +11,9 @@ from app.integrations.http import provider_request
 
 
 MIDDLEWARE_CONTRACT = "moneybee.event-envelope.v1"
+FORBIDDEN_PUBLIC_GATEWAY_HOSTS = frozenset(
+    {"api.codestra.co", "api.codestra.agency"}
+)
 
 
 def canonical_event_type(event_type: str) -> str:
@@ -26,9 +30,19 @@ def canonical_event_type(event_type: str) -> str:
 
 
 def middleware_event_url(base_url: str, event_path: str) -> str:
+    """Build a dedicated Middleware URL without bypassing through public Kong."""
     base = base_url.strip().rstrip("/")
     path = "/" + event_path.strip().lstrip("/")
-    if not base.startswith("https://") and settings.app_env in {"staging", "production"}:
+    parsed = urlsplit(base)
+    host = (parsed.hostname or "").lower()
+    if not parsed.scheme or not host:
+        raise ProviderError("codestra", "Middleware base URL is invalid")
+    if host in FORBIDDEN_PUBLIC_GATEWAY_HOSTS:
+        raise ProviderError(
+            "codestra",
+            "MoneyBee must use the dedicated Middleware ingress, not public Kong",
+        )
+    if parsed.scheme != "https" and settings.app_env in {"staging", "production"}:
         raise ProviderError("codestra", "Middleware URL must use HTTPS")
     return base + path
 
@@ -87,6 +101,10 @@ class CodestraProvider:
         self._access_token = str(token)
         self._expires_at = time.time() + int(result.get("expires_in", 300))
         return self._access_token
+
+    async def access_token(self) -> str:
+        """Return the cached service token for approved server-side SDK clients."""
+        return await self._token()
 
     async def publish(
         self,

@@ -38,6 +38,24 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
 
+  # Optional: exercises the real malware-scan path (app/integrations/malware_scan.py,
+  # app.worker.scan_pending_document) instead of leaving it untestable locally.
+  # Start with `docker compose --profile malware-scan up`, then set
+  # MALWARE_SCAN_PROVIDER=clamav / CLAMAV_HOST=clamav in .env. Stays out of the
+  # default `up` since MALWARE_SCAN_PROVIDER is disabled by default and the
+  # virus-definition download on first start is slow.
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["malware-scan"]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    volumes: ["clamav-data:/var/lib/clamav"]
+
 volumes:
   postgres-data:
   redis-data:
+  clamav-data:

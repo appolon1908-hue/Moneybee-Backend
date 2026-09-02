@@ -3,10 +3,22 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db_base import Base
 
 
 def utcnow() -> datetime:
@@ -235,6 +247,9 @@ class Offer(Base, Record):
     factor_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     origination_fee: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     total_repayment: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    prepayment_terms: Mapped[str | None] = mapped_column(Text, nullable=True)
+    personal_guarantee_required: Mapped[bool] = mapped_column(default=False)
+    collateral_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -484,10 +499,26 @@ class Document(Base, Record):
     sha256: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(40), default="QUARANTINED")
     uploaded_by: Mapped[str] = mapped_column(String(200))
+    scan_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    scan_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    provider_lease_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_terminal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Contract(Base, Record):
     __tablename__ = "contracts"
+    __table_args__ = (UniqueConstraint("offer_id", name="uq_contract_offer"),)
 
     application_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("applications.id"), index=True
@@ -504,6 +535,18 @@ class Contract(Base, Record):
         DateTime(timezone=True), nullable=True
     )
     signed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    provider_lease_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_terminal_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
@@ -726,6 +769,13 @@ class UnderwritingReview(Base, Record):
 
 class CommissionSplit(Base, Record):
     __tablename__ = "commission_splits"
+    __table_args__ = (
+        CheckConstraint(
+            "status != 'PAID' OR "
+            "(paid_at IS NOT NULL AND payment_reference IS NOT NULL)",
+            name="ck_commission_split_paid_evidence",
+        ),
+    )
 
     commission_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("commissions.id", ondelete="CASCADE"), index=True
@@ -737,6 +787,8 @@ class CommissionSplit(Base, Record):
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     status: Mapped[str] = mapped_column(String(40), default="PENDING")
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class CommissionAdjustment(Base, Record):

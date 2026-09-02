@@ -21,7 +21,8 @@
     "admin": null,
     "postgres": null,
     "redis": null,
-    "caddy": null
+    "caddy": null,
+    "clamav": null
   },
   "urls": {
     "marketing": "https://staging.moneybeeloan.com",
@@ -31,6 +32,7 @@
     "api": "https://api-staging.moneybeeloan.com"
   },
   "caddy_acme_email": null,
+  "trusted_proxy_cidrs_csv": null,
   "runtime_paths_evidence_sha256": null,
   "configuration_checksum": null,
   "capabilities": {

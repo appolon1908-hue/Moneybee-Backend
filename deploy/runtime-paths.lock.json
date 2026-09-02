@@ -10,11 +10,16 @@
   "paths": {
     "release_root": null,
     "current_symlink": null,
-    "backend_env_file": null,
+    "migrator_env_file": null,
+    "runtime_env_file": null,
     "postgres_data_path": null,
     "redis_data_path": null,
-    "postgres_password_file": null,
+    "postgres_admin_password_file": null,
+    "postgres_migrator_password_file": null,
+    "postgres_runtime_password_file": null,
+    "roles_sql_path": null,
     "redis_acl_file": null,
+    "clamav_database_path": null,
     "caddy_data_path": null,
     "caddy_config_path": null,
     "backup_root": null
