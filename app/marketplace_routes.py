@@ -208,6 +208,18 @@ async def create_condition(
     user: Annotated[Principal, Depends(require_permission("lender.condition.create"))],
 ):
     submission = await authorized_submission(submission_id, db, user)
+    funding = await db.scalar(
+        select(models.Funding)
+        .join(models.Offer, models.Offer.id == models.Funding.offer_id)
+        .where(
+            models.Funding.application_id == submission.application_id,
+            models.Offer.lender_id == submission.lender_id,
+            models.Offer.program_id == submission.program_id,
+        )
+        .with_for_update()
+    )
+    if funding is not None and funding.status != "CONDITIONS_PENDING":
+        raise HTTPException(status_code=409, detail="Conditions cannot be added after funding advancement")
     item = models.UnderwritingCondition(
         submission_id=submission.id,
         application_id=submission.application_id,
@@ -264,6 +276,8 @@ async def create_submission_offer(
         raise HTTPException(status_code=422, detail="Application ID mismatch")
     if payload.lender_id != submission.lender_id:
         raise HTTPException(status_code=422, detail="Lender ID mismatch")
+    if payload.program_id != submission.program_id:
+        raise HTTPException(status_code=422, detail="Program ID mismatch")
     submission.status = "OFFERED"
     application = await db.get(models.Application, submission.application_id)
     if application is None:
@@ -301,7 +315,11 @@ async def submit_condition(
     db: Db,
     user: User,
 ):
-    item = await db.get(models.UnderwritingCondition, condition_id)
+    item = await db.scalar(
+        select(models.UnderwritingCondition)
+        .where(models.UnderwritingCondition.id == condition_id)
+        .with_for_update()
+    )
     if item is None:
         raise HTTPException(status_code=404, detail="Condition not found")
     await services.get_authorized_application(db, item.application_id, user, write=True)

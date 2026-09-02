@@ -76,6 +76,7 @@ def main() -> int:
     emit("MONEYBEE_INTERNAL_NETWORK", networks["internal"])
     emit("MONEYBEE_EDGE_NETWORK", networks["edge"])
     emit("CADDY_ACME_EMAIL", release["caddy_acme_email"])
+    emit("MONEYBEE_TRUSTED_PROXY_CIDRS_CSV", release["trusted_proxy_cidrs_csv"])
     for key, env_name in {
         "marketing": "MONEYBEE_MARKETING_HOST",
         "borrower": "MONEYBEE_BORROWER_HOST",

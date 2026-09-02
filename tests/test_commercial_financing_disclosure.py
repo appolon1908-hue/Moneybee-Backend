@@ -220,6 +220,21 @@ async def test_offer_route_rejects_unsupported_or_partial_schedule_as_422():
         assert unsupported.status_code == partial.status_code == 422
 
 
+async def test_submission_offer_rejects_program_mismatch():
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, _program_id = _prepare_matched_submission(client)
+        response = client.post(
+            f"/api/v2/lender/submissions/{submission_id}/offers",
+            json={
+                "application_id": application_id, "lender_id": lender_id,
+                "program_id": str(uuid.uuid4()), "product_type": "WORKING_CAPITAL",
+                "amount": 12000, "term_months": 12, "payment_frequency": "MONTHLY",
+                "payment_amount": 1100, "total_repayment": 13200,
+            },
+        )
+        assert response.status_code == 422
+
+
 def test_offer_persistence_is_centralized_behind_disclosure_generation():
     root = Path(__file__).parents[1]
     offenders = []

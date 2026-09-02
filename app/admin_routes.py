@@ -1267,27 +1267,20 @@ async def provider_adapters(
     user: Annotated[Principal, Depends(require_permission("capability.read"))],
 ):
     capabilities = await services.effective_capabilities(db)
+    capability_by_provider = {
+        "middleware": "crm.write", "crm": "crm.write", "bank": "bank.live_connection",
+        "kyb": "kyb.live_verification", "credit": "credit.live_pull",
+        "lender": "lenders.live_submission", "esign": "esign.live_send",
+        "email": "communications.live_email", "sms": "communications.live_sms",
+    }
     return [
         schemas.ProviderAdapterStatus(
             provider_type=row.provider_type,
             provider=row.provider,
             selected=row.selected,
-            configured=(
-                row.configured
-                and capabilities.get(
-                    {
-                        "middleware": "crm.write",
-                        "crm": "crm.write",
-                        "bank": "bank.live_connection",
-                        "kyb": "kyb.live_verification",
-                        "credit": "credit.live_pull",
-                        "lender": "lenders.live_submission",
-                        "esign": "esign.live_send",
-                        "email": "communications.live_email",
-                        "sms": "communications.live_sms",
-                    }.get(row.provider_type, ""),
-                    False,
-                )
+            configured=row.configured and (
+                capability_by_provider.get(row.provider_type) is None
+                or capabilities.get(capability_by_provider[row.provider_type], False)
             ),
         )
         for row in provider_statuses()

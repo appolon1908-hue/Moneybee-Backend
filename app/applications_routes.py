@@ -304,6 +304,20 @@ async def accept_offer(
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
     services.authorize_application(application, user, write=True)
+    replay = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if replay:
+        if replay.request_hash != request_hash:
+            raise HTTPException(status_code=409, detail="Idempotency key payload conflict")
+        replay_offer = await db.get(models.Offer, uuid.UUID(replay.response_body["offer_id"]))
+        if replay_offer is None:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_offer
     if (
         command.expected_application_version is not None
         and command.expected_application_version != application.version

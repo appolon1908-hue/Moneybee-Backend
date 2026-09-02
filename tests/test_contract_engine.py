@@ -149,6 +149,12 @@ async def test_contract_is_created_in_draft_when_conditions_satisfied():
         assert contract.json()["status"] == "DRAFT"
         assert contract.json()["application_id"] == application_id
 
+        late_condition = client.post(
+            f"/api/v2/lender/submissions/{submission_id}/conditions",
+            json={"description": "This condition is too late."},
+        )
+        assert late_condition.status_code == 409
+
 
 async def test_contract_void_is_idempotent():
     with TestClient(app) as client:

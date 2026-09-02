@@ -67,6 +67,7 @@ def main() -> int:
             for key in ("marketing", "borrower", "lender", "admin", "api")
         },
         "caddy_acme_email": "ci@example.invalid",
+        "trusted_proxy_cidrs_csv": "172.16.0.0/12",
     }
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

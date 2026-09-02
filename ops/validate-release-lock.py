@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 import sys
@@ -167,6 +168,14 @@ def validate_release(lock: dict[str, Any], *, allow_unverified: bool) -> None:
             or len(acme_email) > 320
         ):
             raise ValidationError("caddy_acme_email is required for a verified release")
+        proxy_cidrs = lock.get("trusted_proxy_cidrs_csv")
+        if not isinstance(proxy_cidrs, str) or not proxy_cidrs.strip():
+            raise ValidationError("trusted_proxy_cidrs_csv is required for a verified release")
+        try:
+            for value in proxy_cidrs.split(","):
+                ipaddress.ip_network(value.strip(), strict=False)
+        except ValueError as exc:
+            raise ValidationError("trusted_proxy_cidrs_csv contains an invalid CIDR") from exc
 
         for key in ("runtime_paths_evidence_sha256", "configuration_checksum"):
             value = lock.get(key)
