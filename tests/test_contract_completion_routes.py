@@ -13,7 +13,7 @@ from app.db import SessionLocal
 from app.main import app
 
 
-async def _seed_application_and_offer() -> tuple[str, str]:
+async def _seed_application_and_offer() -> tuple[str, str, int]:
     async with SessionLocal() as db:
         lead = models.Lead(
             first_name="Contract",
@@ -50,7 +50,11 @@ async def _seed_application_and_offer() -> tuple[str, str]:
         )
         db.add(offer)
         await db.commit()
-        return str(application.id), str(offer.id)
+        return (
+            str(application.id),
+            str(offer.id),
+            application.completion_percentage,
+        )
 
 
 def test_me_permissions_returns_effective_local_authorization():
@@ -83,7 +87,7 @@ def test_public_products_exposes_only_distinct_product_categories():
 
 
 async def test_application_status_and_offer_detail_are_authorized_readbacks():
-    application_id, offer_id = await _seed_application_and_offer()
+    application_id, offer_id, expected_completion = await _seed_application_and_offer()
 
     with TestClient(app) as client:
         status_response = client.get(f"/api/v2/applications/{application_id}/status")
@@ -94,7 +98,7 @@ async def test_application_status_and_offer_detail_are_authorized_readbacks():
     assert status_response.json() == {
         "application_id": application_id,
         "status": models.ApplicationStatus.APPLICATION_STARTED.value,
-        "completion_percentage": 0,
+        "completion_percentage": expected_completion,
         "version": 1,
     }
     assert offer_response.status_code == 200
