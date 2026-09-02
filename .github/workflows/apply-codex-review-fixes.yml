@@ -1,0 +1,109 @@
+name: apply-codex-review-fixes
+
+on:
+  push:
+    branches:
+      - "release/moneybee-repository-complete-20260902"
+    paths-ignore:
+      - "app/integrations/base.py"
+      - "app/integrations/providers.py"
+      - "app/admin_routes.py"
+      - "app/applications_routes.py"
+      - "app/compliance_service.py"
+      - "app/compliance_routes.py"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-codex-review-fixes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_review
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_review"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_review
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Apply deterministic review fixes
+        run: python scripts/apply_codex_review_fixes.py
+      - name: Install and migrate
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+          alembic upgrade head
+      - name: Validate review findings and compatibility
+        run: |
+          python -m compileall -q app tests scripts
+          python -m ruff check app tests scripts
+          python -m pytest -q \
+            tests/test_contract_void_reconciliation.py \
+            tests/test_contract_engine.py \
+            tests/test_payment_webhook_safety.py \
+            tests/test_payment_webhooks.py \
+            tests/test_compliance_idempotency_races.py \
+            tests/test_compliance_routes.py \
+            tests/test_compliance_schema_strictness.py
+          python scripts/verify_openapi_contract.py
+          python scripts/generate_endpoint_catalog.py --check
+      - name: Commit only reviewed source outputs
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          allowed='^( M|M |A |AM|MM) (app/integrations/base\.py|app/integrations/providers\.py|app/admin_routes\.py|app/applications_routes\.py|app/compliance_service\.py|app/compliance_routes\.py)$'
+          unexpected="$(git status --porcelain --untracked-files=no | grep -Ev "$allowed" || true)"
+          if test -n "$unexpected"; then
+            echo "Refusing to commit changes outside reviewed remediation outputs:" >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          if git diff --quiet -- \
+            app/integrations/base.py \
+            app/integrations/providers.py \
+            app/admin_routes.py \
+            app/applications_routes.py \
+            app/compliance_service.py \
+            app/compliance_routes.py; then
+            echo "Codex review fixes are already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            app/integrations/base.py \
+            app/integrations/providers.py \
+            app/admin_routes.py \
+            app/applications_routes.py \
+            app/compliance_service.py \
+            app/compliance_routes.py
+          git commit -m "fix(review): close provider, idempotency, and webhook findings"
+          git push origin "HEAD:${BRANCH_NAME}"
