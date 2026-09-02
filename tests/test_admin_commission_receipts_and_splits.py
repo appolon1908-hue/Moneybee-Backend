@@ -123,7 +123,7 @@ async def _reach_funded_commission(client: TestClient) -> str:
         },
     ).json()["id"]
     acknowledged = client.post(
-        f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
     )
     assert acknowledged.status_code == 200
     accepted = client.post(

@@ -524,7 +524,7 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
     application = client.get(f"/api/v2/applications/{application_id}")
     expected_version = application.json().get("version") if application.status_code == 200 else None
     disclosure_ack = client.post(
-        f"/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
     )
     results.extend(
         [

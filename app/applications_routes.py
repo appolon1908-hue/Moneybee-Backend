@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import compliance_models, domain_logic, models, schemas, services
+from app import compliance_models, compliance_service, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
 from app.commands import AcceptOfferCommand, command_context, parse_expected_version
 from app.config import settings
@@ -17,6 +17,46 @@ from app.db import get_db
 router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_db)]
 User = Annotated[Principal, Depends(current_principal)]
+
+
+async def _authorized_offer(db: AsyncSession, offer_id: uuid.UUID, user: Principal, *, write=False):
+    offer = await db.get(models.Offer, offer_id)
+    if offer is None:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    application = await services.get_authorized_application(
+        db, offer.application_id, user, write=write
+    )
+    return offer, application
+
+
+@router.get(
+    "/offers/{offer_id}/commercial-financing-disclosure",
+    response_model=schemas.CommercialFinancingDisclosureRead,
+    tags=["offers", "compliance"],
+)
+async def borrower_offer_disclosure(offer_id: uuid.UUID, db: Db, user: User):
+    await _authorized_offer(db, offer_id, user)
+    disclosure = await compliance_service.get_offer_disclosure(db, offer_id)
+    if disclosure is None:
+        raise HTTPException(status_code=404, detail="Disclosure not found")
+    return disclosure
+
+
+@router.post(
+    "/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
+    response_model=schemas.CommercialFinancingDisclosureRead,
+    tags=["offers", "compliance"],
+)
+async def borrower_acknowledge_offer_disclosure(offer_id: uuid.UUID, db: Db, user: User):
+    await _authorized_offer(db, offer_id, user, write=True)
+    disclosure = await compliance_service.acknowledge_offer_disclosure(
+        db, offer_id, actor=user.subject
+    )
+    if disclosure is None:
+        raise HTTPException(status_code=404, detail="Disclosure not found")
+    await db.commit()
+    await db.refresh(disclosure)
+    return disclosure
 
 
 @router.post(

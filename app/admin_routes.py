@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import compliance_models, domain_logic, models, schemas, services
+from app import compliance_models, compliance_service, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
 from app.compliance_service import (
     generate_commission_tax_records,
@@ -1300,11 +1300,7 @@ async def get_commercial_financing_disclosure(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.read"))],
 ):
-    disclosure = await db.scalar(
-        select(compliance_models.CommercialFinancingDisclosure).where(
-            compliance_models.CommercialFinancingDisclosure.offer_id == offer_id
-        )
-    )
+    disclosure = await compliance_service.get_offer_disclosure(db, offer_id)
     if disclosure is None:
         raise HTTPException(status_code=404, detail="Disclosure not found")
     return disclosure
@@ -1320,18 +1316,13 @@ async def acknowledge_commercial_financing_disclosure(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.edit"))],
 ):
-    disclosure = await db.scalar(
-        select(compliance_models.CommercialFinancingDisclosure).where(
-            compliance_models.CommercialFinancingDisclosure.offer_id == offer_id
-        )
+    disclosure = await compliance_service.acknowledge_offer_disclosure(
+        db, offer_id, actor=user.subject
     )
     if disclosure is None:
         raise HTTPException(status_code=404, detail="Disclosure not found")
-    if disclosure.acknowledged_at is None:
-        disclosure.acknowledged_at = models.utcnow()
-        disclosure.acknowledged_by = user.subject
-        await db.commit()
-        await db.refresh(disclosure)
+    await db.commit()
+    await db.refresh(disclosure)
     return disclosure
 
 

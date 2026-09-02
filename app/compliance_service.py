@@ -142,6 +142,28 @@ _PAYMENTS_PER_YEAR = {
 _MONEY = Decimal("0.01")
 
 
+async def get_offer_disclosure(
+    db: AsyncSession, offer_id, *, lock: bool = False
+) -> CommercialFinancingDisclosure | None:
+    statement = select(CommercialFinancingDisclosure).where(
+        CommercialFinancingDisclosure.offer_id == offer_id
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return await db.scalar(statement)
+
+
+async def acknowledge_offer_disclosure(
+    db: AsyncSession, offer_id, *, actor: str
+) -> CommercialFinancingDisclosure | None:
+    disclosure = await get_offer_disclosure(db, offer_id, lock=True)
+    if disclosure is not None and disclosure.acknowledged_at is None:
+        disclosure.acknowledged_at = models.utcnow()
+        disclosure.acknowledged_by = actor
+        await db.flush()
+    return disclosure
+
+
 async def create_offer_with_disclosure(
     db: AsyncSession,
     values: dict,

@@ -5,7 +5,9 @@
     "/api/v2/admin/commission-tax-records/generate": "05f2e9ff1ea6bd7438c3ec507e019a97b20da3e2772c8c237619d45cd91d7755",
     "/api/v2/admin/commission-tax-records/{record_id}/tin": "5e10feb71d775f109b55a845006db2f5f700e5f11f75665cd01ff5a0ebd0c93d",
     "/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure": "1efc08b4dcc96d8f2246d37609eaeb1df7163f8aad3865bfe767fd205569ef39",
-    "/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge": "dfb8c4363b72316111860df04525b47407812a1a0a7372b21b934cbabf66d9d8"
+    "/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge": "dfb8c4363b72316111860df04525b47407812a1a0a7372b21b934cbabf66d9d8",
+    "/api/v2/offers/{offer_id}/commercial-financing-disclosure": "6e0ca6fbdf296645b0ca672a51727f00923d587d653d339edc895a80d1711615",
+    "/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge": "099aa7ad425ceb6efb6bd459113fc43587bc8da7e61f096a7b5172150fd39a7d"
   },
   "schemas": {
     "AdverseActionNoticeRead": "752753fa14bec0718fdc48606a8ea6d834a60f235fd8d42dec84003bac8849a8",

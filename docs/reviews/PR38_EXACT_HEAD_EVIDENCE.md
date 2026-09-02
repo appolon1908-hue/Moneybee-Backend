@@ -42,7 +42,9 @@ external delivery/provider writes remain disabled by default.
   transaction ID, closing the accepted-response-lost duplicate window. Connect
   callback event names are normalized and envelope-summary status is preferred.
 - Offer acceptance locks and verifies the generated disclosure and refuses to
-  create funding until authenticated acknowledgment evidence exists.
+  create funding until authenticated acknowledgment evidence exists. Borrower
+  read/acknowledgment routes enforce application ownership and share the same
+  acknowledgment service used by the admin route.
 
 ## Migration contract
 

@@ -186,6 +186,8 @@ Generated from the FastAPI OpenAPI document. Do not edit endpoint rows by hand; 
 | Lender portal | `GET` | `/api/v2/lender/workspace` | `https://api.moneybeeloan.com/api/v2/lender/workspace` | OIDC bearer token plus local MoneyBee principal | None in app middleware | N/A; Lender Workspace |
 | Lender portal | `POST` | `/api/v2/lenders/{lender_id}/programs` | `https://api.moneybeeloan.com/api/v2/lenders/{lender_id}/programs` | OIDC bearer token plus local MoneyBee principal | None in app middleware | Domain-specific transition guards; Create Program |
 | Offers | `POST` | `/api/v2/offers/{offer_id}/accept` | `https://api.moneybeeloan.com/api/v2/offers/{offer_id}/accept` | OIDC bearer token plus local MoneyBee principal | None in app middleware | `Idempotency-Key` required or supported; Accept Offer |
+| Offers | `GET` | `/api/v2/offers/{offer_id}/commercial-financing-disclosure` | `https://api.moneybeeloan.com/api/v2/offers/{offer_id}/commercial-financing-disclosure` | OIDC bearer token plus local MoneyBee principal | None in app middleware | N/A; Borrower Offer Disclosure |
+| Offers | `POST` | `/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge` | `https://api.moneybeeloan.com/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge` | OIDC bearer token plus local MoneyBee principal | None in app middleware | Domain-specific transition guards; Borrower Acknowledge Offer Disclosure |
 | Provider webhook | `POST` | `/api/v2/webhooks/codestra` | `https://api.moneybeeloan.com/api/v2/webhooks/codestra` | Provider HMAC headers | Webhook fixed-window limit | Provider event/message ID plus payload hash; Codestra Webhook |
 | Provider webhook | `POST` | `/api/v2/webhooks/codestra/receipts` | `https://api.moneybeeloan.com/api/v2/webhooks/codestra/receipts` | Provider HMAC headers | Webhook fixed-window limit | Provider event/message ID plus payload hash; Codestra Receipt |
 | Provider webhook | `POST` | `/api/v2/webhooks/communications/{provider}` | `https://api.moneybeeloan.com/api/v2/webhooks/communications/{provider}` | Provider HMAC headers | Webhook fixed-window limit | Provider event/message ID plus payload hash; Communication Webhook |
@@ -206,4 +208,4 @@ Generated from the FastAPI OpenAPI document. Do not edit endpoint rows by hand; 
 | Public intake | `POST` | `/api/v2/public/prequalifications` | `https://api.moneybeeloan.com/api/v2/public/prequalifications` | No bearer token; idempotency key required on writes | Public intake fixed-window limit | `Idempotency-Key` hashes and replays matching payloads; Prequalify |
 | Public intake | `POST` | `/api/v2/public/referral-partner-inquiries` | `https://api.moneybeeloan.com/api/v2/public/referral-partner-inquiries` | No bearer token; idempotency key required on writes | Public intake fixed-window limit | `Idempotency-Key` hashes and replays matching payloads; Referral Partner Inquiry |
 
-Total canonical endpoints: 179
+Total canonical endpoints: 181
