@@ -208,7 +208,7 @@ async def approve_funding(
     if replay:
         return await _load_funding_or_404(db, funding_id)
 
-    services.transition_funding(db, funding, "APPROVED_FOR_FUNDING", user)
+    await services.transition_funding(db, funding, "APPROVED_FOR_FUNDING", user)
     await db.flush()
     db.add(
         models.IdempotencyRecord(
@@ -262,7 +262,7 @@ async def funding_funds_sent(
             },
         )
 
-    services.transition_funding(db, funding, "FUNDS_SENT", user)
+    await services.transition_funding(db, funding, "FUNDS_SENT", user)
     funding.provider_reference = payload.provider_reference
     funding.funds_sent_at = models.utcnow()
     await db.flush()
@@ -318,7 +318,7 @@ async def confirm_funding(
             },
         )
 
-    services.transition_funding(db, funding, "FUNDED", user)
+    await services.transition_funding(db, funding, "FUNDED", user)
     funding.funded_amount = payload.funded_amount
     funding.funding_confirmed_at = models.utcnow()
     expected_amount = payload.commission_expected_amount
@@ -376,7 +376,24 @@ async def decline_funding(
     if replay:
         return await _load_funding_or_404(db, funding_id)
 
-    services.transition_funding(db, funding, "DECLINED", user, reason=payload.reason)
+    contract = await db.scalar(
+        select(models.Contract)
+        .where(models.Contract.application_id == funding.application_id)
+        .order_by(models.Contract.created_at.desc())
+        .with_for_update()
+        .limit(1)
+    )
+    if contract is not None and contract.status == "SENT":
+        if not contract.external_envelope_id:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "CONTRACT_VOID_RECONCILIATION_REQUIRED"},
+            )
+        await ensure_provider_void_confirmed(
+            db, contract, reason=payload.reason, adapter=esign_adapter()
+        )
+        services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
+    await services.transition_funding(db, funding, "DECLINED", user, reason=payload.reason)
     await db.flush()
     db.add(
         models.IdempotencyRecord(

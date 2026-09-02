@@ -283,10 +283,18 @@ async def send_pending_contract_envelope() -> str | None:
                     )
                 )
             return None
-        contract.provider = "docusign"
-        contract.external_envelope_id = str(
+        envelope_id = str(
             result.get("envelopeId") or result.get("envelope_id") or ""
         ) or None
+        if envelope_id is None:
+            _provider_failed(
+                contract,
+                ProviderError("docusign", "provider response omitted envelope identifier"),
+                datetime.now(UTC),
+            )
+            return None
+        contract.provider = "docusign"
+        contract.external_envelope_id = envelope_id
         transition_contract(db, contract, "SENT", SYSTEM_PRINCIPAL)
         _provider_succeeded(contract)
         return str(contract.id)
@@ -328,7 +336,12 @@ async def scan_pending_document() -> str | None:
             return None
         _lease_provider_item(document, now)
         try:
-            content = await storage_adapter().get_private(object_key=document.storage_key)
+            if not document.storage_version_id:
+                raise ProviderError("s3", "immutable stored-object version is missing")
+            content = await storage_adapter().get_private(
+                object_key=document.storage_key,
+                version_id=document.storage_version_id,
+            )
             actual_sha256 = hashlib.sha256(content).hexdigest()
             if not secrets.compare_digest(actual_sha256, document.sha256.lower()):
                 document.status = "REJECTED"
@@ -478,7 +491,7 @@ async def process_pending_docusign_event() -> str | None:
                 ).with_for_update()
             )
             if funding is not None and funding.status == "CONDITIONS_SATISFIED":
-                transition_funding(db, funding, "CONTRACT_SIGNED", SYSTEM_PRINCIPAL)
+                await transition_funding(db, funding, "CONTRACT_SIGNED", SYSTEM_PRINCIPAL)
 
         message.status = "PROCESSED"
         return str(message.id)

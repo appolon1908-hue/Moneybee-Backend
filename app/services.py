@@ -109,18 +109,21 @@ APPLICATION_TRANSITIONS: dict[
             models.ApplicationStatus.CONDITIONS_PENDING,
             models.ApplicationStatus.CONTRACT_READY,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONDITIONS_COMPLETE: frozenset(
         {
             models.ApplicationStatus.CONTRACT_READY,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONTRACT_READY: frozenset(
         {
             models.ApplicationStatus.CONTRACT_SENT,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONTRACT_SENT: frozenset(
@@ -128,24 +131,28 @@ APPLICATION_TRANSITIONS: dict[
             models.ApplicationStatus.CONTRACT_SIGNED,
             models.ApplicationStatus.EXPIRED,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONTRACT_SIGNED: frozenset(
         {
             models.ApplicationStatus.APPROVED_FOR_FUNDING,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.APPROVED_FOR_FUNDING: frozenset(
         {
             models.ApplicationStatus.FUNDS_SENT,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.FUNDS_SENT: frozenset(
         {
             models.ApplicationStatus.FUNDED,
             models.ApplicationStatus.COMPLIANCE_REVIEW,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.FUNDED: frozenset(
@@ -546,7 +553,7 @@ FUNDING_TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 
-def transition_funding(
+async def transition_funding(
     db: AsyncSession,
     funding: models.Funding,
     to_status: str,
@@ -568,6 +575,43 @@ def transition_funding(
             },
         )
     funding.status = to_status
+    application = await db.scalar(
+        select(models.Application)
+        .where(models.Application.id == funding.application_id)
+        .with_for_update()
+    )
+    if application is None:
+        raise HTTPException(status_code=409, detail={"code": "FUNDING_APPLICATION_MISSING"})
+    target = {
+        "CONDITIONS_SATISFIED": models.ApplicationStatus.CONDITIONS_COMPLETE,
+        "CONTRACT_SIGNED": models.ApplicationStatus.CONTRACT_SIGNED,
+        "APPROVED_FOR_FUNDING": models.ApplicationStatus.APPROVED_FOR_FUNDING,
+        "FUNDS_SENT": models.ApplicationStatus.FUNDS_SENT,
+        "FUNDED": models.ApplicationStatus.FUNDED,
+        "DECLINED": models.ApplicationStatus.DECLINED,
+        "CANCELLED": models.ApplicationStatus.CANCELLED,
+    }[to_status]
+    if application.status != target:
+        lifecycle = [
+            models.ApplicationStatus.OFFER_ACCEPTED,
+            models.ApplicationStatus.CONDITIONS_PENDING,
+            models.ApplicationStatus.CONDITIONS_COMPLETE,
+            models.ApplicationStatus.CONTRACT_READY,
+            models.ApplicationStatus.CONTRACT_SENT,
+            models.ApplicationStatus.CONTRACT_SIGNED,
+            models.ApplicationStatus.APPROVED_FOR_FUNDING,
+            models.ApplicationStatus.FUNDS_SENT,
+            models.ApplicationStatus.FUNDED,
+        ]
+        if target in {models.ApplicationStatus.DECLINED, models.ApplicationStatus.CANCELLED}:
+            transition_application(db, application, target, principal, reason)
+        else:
+            current_index = lifecycle.index(application.status)
+            target_index = lifecycle.index(target)
+            if target_index < current_index:
+                raise HTTPException(status_code=409, detail={"code": "APPLICATION_AHEAD_OF_FUNDING"})
+            for next_status in lifecycle[current_index + 1 : target_index + 1]:
+                transition_application(db, application, next_status, principal, reason)
     db.add(
         models.AuditEvent(
             actor_id=principal.subject,
@@ -657,7 +701,7 @@ async def advance_funding_if_conditions_satisfied(
         )
     ).all()
     if all(item.status in {"SATISFIED", "WAIVED"} for item in conditions):
-        transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+        await transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
         existing_contract = await db.scalar(
             select(models.Contract).where(models.Contract.offer_id == funding.offer_id)
         )
@@ -681,7 +725,7 @@ async def advance_submissionless_funding(
     )
     if funding is None or funding.status != "CONDITIONS_PENDING":
         return
-    transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+    await transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
     if await db.scalar(select(models.Contract.id).where(models.Contract.offer_id == funding.offer_id)) is None:
         db.add(models.Contract(
             application_id=funding.application_id,
@@ -779,7 +823,8 @@ async def evaluate_renewal_eligibility(db: AsyncSession) -> list[uuid.UUID]:
         opportunity = models.RenewalOpportunity(
             original_funding_id=funding.id,
             application_id=funding.application_id,
-            eligible_from=funding.funding_confirmed_at,
+            eligible_from=funding.funding_confirmed_at
+            + timedelta(days=RENEWAL_ELIGIBILITY_DAYS),
             eligibility_status="ELIGIBLE",
             estimated_amount=funding.funded_amount,
             status="PENDING",

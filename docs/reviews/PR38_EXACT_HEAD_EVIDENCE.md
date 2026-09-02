@@ -22,6 +22,7 @@ external delivery/provider writes remain disabled by default.
 - Migration `20260901_0026` aligns tax-record uniqueness with the persisted
   recipient type/reference/year identity and protects unsafe downgrade.
 - Migration `20260902_0027` adds durable commission-split payment evidence;
+- migration `20260902_0028` binds document scanning and downloads to immutable object-storage versions;
   pending allocations no longer contribute to tax totals and downgrade refuses
   to discard recorded payments.
 - `moneybee_migrator` owns the application schema and existing application
@@ -59,7 +60,7 @@ external delivery/provider writes remain disabled by default.
 ## Migration contract
 
 - Before: `20260901_0023`
-- After: `20260902_0027`
+- After: `20260902_0028`
 - SQLite: empty upgrade, downgrade to base, and re-upgrade pass.
 - PostgreSQL: empty-to-head, historical-to-head, forward-fix, fail-closed legacy
   credential, and protected downgrade paths pass.

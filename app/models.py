@@ -496,6 +496,7 @@ class Document(Base, Record):
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_key: Mapped[str] = mapped_column(String(1000))
+    storage_version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sha256: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(40), default="QUARANTINED")
     uploaded_by: Mapped[str] = mapped_column(String(200))

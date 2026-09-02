@@ -47,13 +47,15 @@ class S3ObjectStorageAdapter:
             "object_key": object_key,
         }
 
-    async def get_private(self, *, object_key: str) -> bytes:
+    async def get_private(self, *, object_key: str, version_id: str | None = None) -> bytes:
         client = self._client()
+        params = {"Bucket": settings.object_storage_bucket, "Key": object_key}
+        if version_id:
+            params["VersionId"] = version_id
         try:
             response = await asyncio.to_thread(
                 client.get_object,
-                Bucket=settings.object_storage_bucket,
-                Key=object_key,
+                **params,
             )
         except Exception as exc:
             raise ProviderError("s3", "Stored object could not be retrieved") from exc
@@ -106,14 +108,15 @@ class S3ObjectStorageAdapter:
         *,
         object_key: str,
         expires_seconds: int = 300,
+        version_id: str | None = None,
     ) -> str:
         client = self._client()
+        params = {"Bucket": settings.object_storage_bucket, "Key": object_key}
+        if version_id:
+            params["VersionId"] = version_id
         return await asyncio.to_thread(
             client.generate_presigned_url,
             "get_object",
-            Params={
-                "Bucket": settings.object_storage_bucket,
-                "Key": object_key,
-            },
+            Params=params,
             ExpiresIn=min(max(expires_seconds, 60), 900),
         )

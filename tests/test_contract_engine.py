@@ -280,6 +280,34 @@ async def test_send_pending_contract_envelope_leaves_draft_when_provider_disable
         assert attempted.provider_next_attempt_at is not None
 
 
+async def test_send_envelope_without_provider_identifier_never_marks_contract_sent(monkeypatch):
+    class MissingIdentifierESign:
+        async def send_envelope(self, **kwargs):
+            return {"status": "sent"}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        _create_and_accept_offer(client, application_id, submission_id, lender_id, program_id)
+        contract_id = client.get(f"/api/v2/applications/{application_id}/contract").json()["id"]
+
+    async with SessionLocal() as db:
+        drafts = list((await db.scalars(select(models.Contract).where(models.Contract.status == "DRAFT"))).all())
+        for draft in drafts:
+            if draft.id != uuid.UUID(contract_id):
+                draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: MissingIdentifierESign())
+    assert await worker.send_pending_contract_envelope() is None
+    async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        assert contract.status == "DRAFT"
+        assert contract.external_envelope_id is None
+        assert contract.provider_attempt_count == 1
+        assert "identifier" in contract.provider_last_error
+
+
 async def test_process_pending_docusign_event_signs_contract_and_advances_funding():
     with TestClient(app) as client:
         application_id, submission_id, lender_id, program_id = (

@@ -24,8 +24,10 @@ class _FakeStorage:
     def __init__(self, content: bytes):
         self.content = content
         self.deleted_keys: list[str] = []
+        self.requested_versions: list[str | None] = []
 
-    async def get_private(self, *, object_key: str) -> bytes:
+    async def get_private(self, *, object_key: str, version_id: str | None = None) -> bytes:
+        self.requested_versions.append(version_id)
         return self.content
 
     async def delete_private(self, *, object_key: str) -> None:
@@ -33,7 +35,7 @@ class _FakeStorage:
 
 
 class _FailingStorage:
-    async def get_private(self, *, object_key: str) -> bytes:
+    async def get_private(self, *, object_key: str, version_id: str | None = None) -> bytes:
         raise ProviderError("storage", "temporary outage")
 
 
@@ -92,6 +94,7 @@ async def _seed_quarantined_document(content: bytes = b"harmless content") -> st
             mime_type="application/pdf",
             size_bytes=11,
             storage_key=f"documents/{uuid.uuid4().hex}",
+            storage_version_id="immutable-version-1",
             sha256=hashlib.sha256(content).hexdigest(),
             status="QUARANTINED",
             uploaded_by="test-subject",
@@ -141,6 +144,8 @@ async def test_scan_pending_document_marks_a_clean_result(monkeypatch):
         assert document.status == "CLEAN"
         assert document.scan_provider == "clamav"
         assert document.scanned_at is not None
+    assert fake_storage.requested_versions
+    assert set(fake_storage.requested_versions) == {"immutable-version-1"}
 
 
 async def test_scan_pending_document_rejects_and_deletes_an_infected_file(monkeypatch):
