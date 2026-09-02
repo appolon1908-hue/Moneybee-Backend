@@ -97,9 +97,13 @@ def _accept_an_offer_and_build_funding(client: TestClient) -> str:
         },
     ).json()["id"]
     client.post(f"/api/v2/applications/{application_id}/match")
-    submission_id = client.post(
-        f"/api/v2/admin/applications/{application_id}/prepare-matched-submissions"
-    ).json()[0]["id"]
+    submission_id = next(
+        item
+        for item in client.post(
+            f"/api/v2/admin/applications/{application_id}/prepare-matched-submissions"
+        ).json()
+        if item["program_id"] == program_id
+    )["id"]
     offer_id = client.post(
         f"/api/v2/lender/submissions/{submission_id}/offers",
         json={
