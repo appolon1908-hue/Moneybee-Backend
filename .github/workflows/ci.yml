@@ -90,6 +90,17 @@ jobs:
         run: |
           alembic upgrade 20260823_0011
           alembic upgrade 20260823_0012
+      - name: Verify published public-intake revision identity
+        run: |
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_published_0015
+          export DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_published_0015'
+          alembic upgrade 20260826_0015
+          PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_published_0015 \
+            -v ON_ERROR_STOP=1 -Atc "select to_regclass('public.public_intakes') is not null" | grep -qx t
+          PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_published_0015 \
+            -v ON_ERROR_STOP=1 -Atc "select to_regclass('public.journal_entries') is null" | grep -qx t
+          alembic upgrade head
+          alembic check
       - name: Upgrade to the current ORM schema
         run: |
           alembic upgrade head

@@ -60,7 +60,10 @@ def _portals_for_path(path: str) -> frozenset[PortalName] | None:
         "/api/v2/applications/"
     ):
         return frozenset({"borrower", "admin"})
-    if normalized.startswith("/api/v2/offers/") and normalized.endswith("/accept"):
+    if normalized.startswith("/api/v2/offers/") and (
+        normalized.endswith("/accept")
+        or "/commercial-financing-disclosure" in normalized
+    ):
         return frozenset({"borrower"})
     if normalized.startswith("/api/v2/conditions/") and normalized.endswith("/submit"):
         return frozenset({"borrower"})

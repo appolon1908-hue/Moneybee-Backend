@@ -132,8 +132,16 @@ async def admin_fundings(
     )
 
 
-async def _load_funding_or_404(db: AsyncSession, funding_id: uuid.UUID) -> models.Funding:
-    funding = await db.get(models.Funding, funding_id)
+async def _load_funding_or_404(
+    db: AsyncSession,
+    funding_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+) -> models.Funding:
+    query = select(models.Funding).where(models.Funding.id == funding_id)
+    if for_update:
+        query = query.with_for_update()
+    funding = await db.scalar(query)
     if funding is None:
         raise HTTPException(status_code=404, detail="Funding not found")
     return funding
@@ -185,7 +193,7 @@ async def approve_funding(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/approve"
     request_hash = _request_hash({})
     replay = await _funding_idempotency_replay(
@@ -229,7 +237,7 @@ async def funding_funds_sent(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/funds-sent"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -285,7 +293,7 @@ async def confirm_funding(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/confirm"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -353,7 +361,7 @@ async def decline_funding(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/decline"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -829,6 +837,7 @@ async def create_commission_adjustment(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+    commission = await _load_commission_or_404(db, commission_id)
     replay = await db.scalar(
         select(models.IdempotencyRecord).where(
             models.IdempotencyRecord.actor_id == user.subject,
@@ -846,7 +855,6 @@ async def create_commission_adjustment(
             raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
         return replay_adjustment
 
-    commission = await _load_commission_or_404(db, commission_id)
     current_net = await _net_expected_amount(db, commission)
     adjusted_net = current_net + payload.amount
     split_total = await db.scalar(

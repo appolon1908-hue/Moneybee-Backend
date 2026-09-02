@@ -1,7 +1,7 @@
 """Add public intake and consent evidence records.
 
-Revision ID: 20260827_0017
-Revises: 20260827_0016
+Revision ID: 20260826_0015
+Revises: 20260826_0014
 Create Date: 2026-08-26
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260827_0017"
-down_revision: str | None = "20260827_0016"
+revision: str = "20260826_0015"
+down_revision: str | None = "20260826_0014"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
