@@ -52,6 +52,10 @@ external delivery/provider writes remain disabled by default.
   create funding until authenticated acknowledgment evidence exists. Borrower
   read/acknowledgment routes enforce application ownership and share the same
   acknowledgment service used by the admin route.
+- Admin underwriting decisions acquire a PostgreSQL row lock before replay and
+  transition checks, so competing approve/decline requests cannot both commit.
+- Commission tax attribution requires durable `paid_at` and
+  `payment_reference` evidence; pending splits never contribute to paid totals.
 - Funding, contract, condition-completion, renewal, and commission transitions
   use PostgreSQL aggregate locks. Provider callbacks retry if they arrive before
   envelope persistence, and sent-envelope voids are confirmed upstream first.
@@ -97,17 +101,22 @@ python scripts/generate_endpoint_catalog.py --check
 python ops/verify-compose-contract.py
 ```
 
-Observed on implementation head `c03f049e84472b89c5847794128a9551a4fefc14`:
+Observed locally on candidate head `60c25bcdeefb41865a5ddc1737497cc05b4dfebd`;
+the authoritative final results remain the GitHub checks attached to the exact
+remote PR head:
 
 - SQLite/application tests: 247 passed, 10 skipped.
-- Clean PostgreSQL/runtime tests: 258 passed.
+- Clean PostgreSQL/runtime tests: 262 passed.
 - API smoke: 57 passed, 4 intentionally unavailable surfaces skipped.
 - OpenAPI: 159 canonical paths and 39 reviewed additions.
 - Identity/email repository readiness: 20 passed, 21 operator-only checks
   skipped, 0 failed.
-- Compose contract: 3 manifests and 28 variables synchronized.
+- Compose contract: 3 manifests and 32 variables synchronized; all three
+  Compose models also pass `docker compose ... config --quiet` with disposable
+  fail-closed fixtures.
 - Private-key scan: no tracked PEM/OpenSSH/PGP private-key blocks.
-- API, worker, and migrate release targets built and ran as `moneybee`.
+- API, worker, and migrate release targets built and ran as `moneybee`; local
+  image IDs were `df9556a4e6af`, `f841318471e3`, and `78db0d174b06`.
 - Trivy: 0 fixable HIGH/CRITICAL findings per release image.
 - CycloneDX SBOM generated per release image.
 
