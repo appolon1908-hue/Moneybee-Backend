@@ -11218,6 +11218,7 @@
               "application/json": {
                 "schema": {
                   "items": {
+                    "additionalProperties": true,
                     "type": "object"
                   },
                   "title": "Response Lender Fundings Api V2 Lender Fundings Get",
@@ -11261,6 +11262,7 @@
               "application/json": {
                 "schema": {
                   "items": {
+                    "additionalProperties": true,
                     "type": "object"
                   },
                   "title": "Response Lender Programs Api V2 Lender Programs Get",
@@ -11323,6 +11325,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "title": "Response Update Lender Program Api V2 Lender Programs  Program Id  Patch",
                   "type": "object"
                 }
