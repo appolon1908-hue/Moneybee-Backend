@@ -14,7 +14,9 @@ from app.encryption import decrypt_secret
 from app.main import app
 
 
-async def _seed_commission_split(recipient_reference: str, amount: str, tax_year: int) -> None:
+async def _seed_commission_split(
+    recipient_reference: str, amount: str, tax_year: int, recipient_type: str = "BROKER"
+) -> None:
     async with SessionLocal() as db:
         lead = models.Lead(
             first_name="Tax",
@@ -66,7 +68,7 @@ async def _seed_commission_split(recipient_reference: str, amount: str, tax_year
         await db.flush()
         split = models.CommissionSplit(
             commission_id=commission.id,
-            recipient_type="BROKER",
+            recipient_type=recipient_type,
             recipient_reference=recipient_reference,
             amount=amount,
             status="PENDING",
@@ -110,6 +112,21 @@ async def test_generate_commission_tax_records_aggregates_by_recipient_and_appli
         assert {row["recipient_reference"] for row in listed.json()} >= {
             ref_over_threshold,
             ref_under_threshold,
+        }
+
+
+async def test_tax_records_keep_recipient_types_as_distinct_persisted_identities():
+    tax_year = 2029
+    reference = f"shared-{uuid.uuid4().hex}"
+    with TestClient(app) as client:
+        await _seed_commission_split(reference, "400.00", tax_year, "BROKER")
+        await _seed_commission_split(reference, "700.00", tax_year, "HOUSE")
+        response = client.post(
+            "/api/v2/admin/commission-tax-records/generate", params={"tax_year": tax_year}
+        )
+        records = [row for row in response.json() if row["recipient_reference"] == reference]
+        assert {(row["recipient_type"], row["total_amount"]) for row in records} == {
+            ("BROKER", "400.00"), ("HOUSE", "700.00")
         }
 
 

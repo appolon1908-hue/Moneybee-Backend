@@ -19,6 +19,8 @@ external delivery/provider writes remain disabled by default.
   duplicate adverse-action notices for one underwriting review.
 - Migration `20260901_0025` fail-closes on duplicate contracts, enforces one
   contract per offer, and adds durable inbox callback retry scheduling.
+- Migration `20260901_0026` aligns tax-record uniqueness with the persisted
+  recipient type/reference/year identity and protects unsafe downgrade.
 - `moneybee_migrator` owns the application schema and existing application
   objects after an idempotent administrator-run transfer. `moneybee_runtime`
   has DML/sequence/function access only and cannot perform DDL, truncate, grant,
@@ -54,7 +56,7 @@ external delivery/provider writes remain disabled by default.
 ## Migration contract
 
 - Before: `20260901_0023`
-- After: `20260901_0025`
+- After: `20260901_0026`
 - SQLite: empty upgrade, downgrade to base, and re-upgrade pass.
 - PostgreSQL: empty-to-head, historical-to-head, forward-fix, fail-closed legacy
   credential, and protected downgrade paths pass.

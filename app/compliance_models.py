@@ -87,7 +87,8 @@ class CommissionTaxRecord(Base, Record):
     __tablename__ = "commission_tax_records"
     __table_args__ = (
         UniqueConstraint(
-            "recipient_reference", "tax_year", name="uq_commission_tax_record_recipient_year"
+            "recipient_type", "recipient_reference", "tax_year",
+            name="uq_commission_tax_record_type_recipient_year"
         ),
     )
 

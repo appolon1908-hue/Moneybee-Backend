@@ -208,6 +208,13 @@ async def create_condition(
     user: Annotated[Principal, Depends(require_permission("lender.condition.create"))],
 ):
     submission = await authorized_submission(submission_id, db, user)
+    application = await db.scalar(
+        select(models.Application)
+        .where(models.Application.id == submission.application_id)
+        .with_for_update()
+    )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
     funding = await db.scalar(
         select(models.Funding)
         .join(models.Offer, models.Offer.id == models.Funding.offer_id)
@@ -227,9 +234,6 @@ async def create_condition(
         status="BORROWER_ACTION_REQUIRED",
     )
     submission.status = "CONDITIONS"
-    application = await db.get(models.Application, submission.application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found")
     if application.status in {
         models.ApplicationStatus.SUBMITTED_TO_LENDERS,
         models.ApplicationStatus.UNDERWRITING,
@@ -351,7 +355,11 @@ async def decide_condition(
     db: AsyncSession,
     user: Principal,
 ) -> models.UnderwritingCondition:
-    item = await db.get(models.UnderwritingCondition, condition_id)
+    item = await db.scalar(
+        select(models.UnderwritingCondition)
+        .where(models.UnderwritingCondition.id == condition_id)
+        .with_for_update()
+    )
     if item is None:
         raise HTTPException(status_code=404, detail="Condition not found")
     submission = await authorized_submission(item.submission_id, db, user)

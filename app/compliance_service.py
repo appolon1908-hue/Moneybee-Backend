@@ -357,6 +357,7 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     for (recipient_type, recipient_reference), bucket in totals.items():
         existing = await db.scalar(
             select(CommissionTaxRecord).where(
+                CommissionTaxRecord.recipient_type == recipient_type,
                 CommissionTaxRecord.recipient_reference == recipient_reference,
                 CommissionTaxRecord.tax_year == tax_year,
             )

@@ -75,7 +75,10 @@ python ops/verify-runtime-env.py \
   --env-file /etc/moneybee/runtime.env --release-lock release.lock.json
 eval "$(python ops/render-compose-env.py \
   --runtime-lock runtime-paths.lock.json --release-lock release.lock.json)"
+# Bundled PostgreSQL/Redis mode:
 docker compose -f compose.data.yml -f compose.backend.yml -f compose.edge.yml config
+# External PostgreSQL/Redis mode (data services and bootstrap are intentionally omitted):
+docker compose -f compose.backend.yml -f compose.edge.yml config
 ```
 
 ## Migrate
@@ -89,12 +92,15 @@ part of API or worker runtime:
 docker compose -f compose.data.yml --profile bootstrap run --rm role-bootstrap
 ```
 
+Skip `role-bootstrap` in external-data mode; provision the documented roles
+through the external database administrator and validate them before migration.
+
 For an existing database with bank-provider rows, first stop at the supported
 compatibility boundary, create and verify each external secret, and apply an
 approved reference-only mapping (never credential values):
 
 ```bash
-docker compose -f compose.data.yml -f compose.backend.yml --profile migrate run --rm \
+docker compose -f compose.backend.yml --profile migrate run --rm \
   migrate alembic upgrade 20260901_0022a
 python ../ops/stage-bank-credential-references.py \
   --database-url "$APPROVED_MIGRATOR_DATABASE_URL" \
