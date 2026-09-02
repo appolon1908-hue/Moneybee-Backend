@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "mission_id": "MONEYBEE_CONTINUOUS_REPOSITORY_TO_PRODUCTION_2026_09_02",
+  "generated_at": "2026-09-02T15:05:00-04:00",
+  "status": "BLOCKED_REPOSITORY_AND_CODEX_ENVIRONMENT_REMEDIATION",
+  "continuous_execution": true,
+  "bypass_prohibited": true,
+  "repository_first": true,
+  "target": {
+    "host": "49.12.145.107",
+    "production_state": "LIVE_WITH_EXTERNAL_EFFECTS_DISABLED",
+    "public_surfaces": [
+      "https://moneybeeloan.com",
+      "https://www.moneybeeloan.com",
+      "https://app.moneybeeloan.com",
+      "https://lenders.moneybeeloan.com",
+      "https://admin.moneybeeloan.com",
+      "https://api.moneybeeloan.com/api/v2"
+    ],
+    "identity_issuer": "https://auth.codestra.co/realms/codestra"
+  },
+  "execution_threads": {
+    "master_issue": "appolon1908-hue/Moneybee-Backend#44",
+    "mission_pr": "appolon1908-hue/Moneybee-Backend#45",
+    "backend_release_pr": "appolon1908-hue/Moneybee-Backend#42",
+    "frontend_release_pr": "appolon1908-hue/Moneybee-frontend-#27"
+  },
+  "starting_state": {
+    "backend_main_sha": "aa6a8413b79885c499482b53e0c3ffaf8637c9d4",
+    "backend_release_branch": "release/moneybee-repository-complete-20260902",
+    "backend_candidate_sha": "b8682c4542738caae9f58c00f628a7f74dccfb10",
+    "backend_exact_head_ci": "FAIL_4_TESTS_277_PASSED",
+    "frontend_main_sha": "b40d519ccc4318f0525171b1d71f64176daabbd2",
+    "frontend_release_branch": "release/moneybee-frontend-repository-complete-20260902",
+    "frontend_candidate_sha": "7058cd7c49b59931bc8c462e721511fd0b77f012",
+    "frontend_last_backend_contract_sha": "bb5e00016be80c036500fb8cb382b3c47fd88c9b",
+    "sdk_sha": "fd9a5c3fd49534a7f7492a452f53815c386687b9",
+    "alembic_head": "20260901_0026",
+    "codex_backend_environment_verified": false,
+    "codex_frontend_environment_verified": false
+  },
+  "repository_authorities": {
+    "moneybee_backend": "appolon1908-hue/Moneybee-Backend",
+    "moneybee_frontend": "appolon1908-hue/Moneybee-frontend-",
+    "connector_sdk": "appolon1908-hue/SDK-repository",
+    "identity": "appolon1908-hue/Keycloak",
+    "api_ingress": "appolon1908-hue/Kong",
+    "edge_tls": "appolon1908-hue/Caddy",
+    "middleware": "appolon1908-hue/Middleware-",
+    "erp_crm": "appolon1908-hue/Odoo",
+    "automation": "appolon1908-hue/N8N",
+    "runtime_authority_planned": "appolon1908-hue/codestra-production-runtime-authority",
+    "shared_infrastructure": "appolon1908-hue/Infustruction-repo",
+    "secret_management": "appolon1908-hue/Codestra-OpenBao",
+    "metrics": "appolon1908-hue/Codestra-Prometheus",
+    "dashboards": "appolon1908-hue/Codestra-Grafana-",
+    "logs": "appolon1908-hue/Codestra-Loki",
+    "traces": "appolon1908-hue/Codestra-Tempo",
+    "telemetry_shipping": "appolon1908-hue/Codestra-Alloy",
+    "host_metrics": "appolon1908-hue/Codestra-Node-Exporter",
+    "container_metrics": "appolon1908-hue/Codestra-cAdvisor",
+    "synthetic_probes": "appolon1908-hue/Codestra-Blackbox-Exporter",
+    "alert_routing": "appolon1908-hue/Codestra-Alertmanager"
+  },
+  "release_components": [
+    "moneybee-api",
+    "moneybee-worker",
+    "moneybee-migrate",
+    "moneybee-marketing",
+    "moneybee-borrower",
+    "moneybee-lender",
+    "moneybee-admin"
+  ],
+  "phases": [
+    {
+      "id": "01",
+      "document": "docs/codex/production-orchestration/01_REPOSITORY_COMPLETION.md",
+      "name": "repository_completion_and_protected_merges",
+      "depends_on": [],
+      "server_mutation_allowed": false,
+      "exit_state": "BACKEND_AND_FRONTEND_MAIN_CERTIFIED"
+    },
+    {
+      "id": "02",
+      "document": "docs/codex/production-orchestration/02_IMMUTABLE_RELEASE.md",
+      "name": "immutable_artifacts_and_release_lock",
+      "depends_on": ["01"],
+      "server_mutation_allowed": false,
+      "exit_state": "REPOSITORY_PHASE_CERTIFIED"
+    },
+    {
+      "id": "03",
+      "document": "docs/codex/production-orchestration/03_SERVER_SAFETY.md",
+      "name": "server_discovery_backup_restore_and_database_authority",
+      "depends_on": ["02"],
+      "server_mutation_allowed": "backup_and_preparation_only_after_read_only_inventory",
+      "exit_state": "SERVER_BASELINE_AND_RESTORE_CERTIFIED"
+    },
+    {
+      "id": "04",
+      "document": "docs/codex/production-orchestration/04_INSTALL_IDENTITY_INGRESS.md",
+      "name": "immutable_installation_migration_identity_and_ingress",
+      "depends_on": ["03"],
+      "server_mutation_allowed": true,
+      "exit_state": "CORE_RUNTIME_INSTALLED_EXTERNAL_EFFECTS_DISABLED"
+    },
+    {
+      "id": "05",
+      "document": "docs/codex/production-orchestration/05_INTEGRATION_SYNC.md",
+      "name": "integration_synchronization_and_end_to_end_validation",
+      "depends_on": ["04"],
+      "server_mutation_allowed": "configuration_and_synthetic_validation_only",
+      "exit_state": "INTEGRATIONS_SYNCHRONIZED_WRITE_DISABLED"
+    },
+    {
+      "id": "06",
+      "document": "docs/codex/production-orchestration/06_GO_LIVE_CANARY_ROLLBACK.md",
+      "name": "write_disabled_production_canary_observability_and_rollback",
+      "depends_on": ["05"],
+      "server_mutation_allowed": true,
+      "exit_state": "LIVE_WITH_EXTERNAL_EFFECTS_DISABLED"
+    },
+    {
+      "id": "07",
+      "document": "docs/codex/production-orchestration/07_FINAL_CERTIFICATION.md",
+      "name": "final_certification_and_capability_activation_queue",
+      "depends_on": ["06"],
+      "server_mutation_allowed": false,
+      "exit_state": "PRODUCTION_CERTIFIED_WRITE_DISABLED"
+    }
+  ],
+  "initial_capabilities": {
+    "codestra_sdk_enabled": false,
+    "middleware_provider": "disabled",
+    "external_delivery": false,
+    "live_writes": false,
+    "odoo_write": false,
+    "n8n_delivery": false,
+    "bank_provider": "disabled",
+    "kyb_provider": "disabled",
+    "credit_provider": "disabled",
+    "lender_provider": "disabled",
+    "esign_provider": "disabled",
+    "email_provider": "disabled",
+    "sms_provider": "disabled",
+    "object_storage": "disabled",
+    "malware_scanning": "disabled",
+    "payment_provider": "disabled",
+    "funding": false,
+    "payouts": false,
+    "tax_filing": false,
+    "live_dialing": false
+  },
+  "hard_stops": [
+    "codex_repository_environment_unavailable",
+    "required_ci_or_review_failed_or_stale",
+    "source_image_or_configuration_lock_mismatch",
+    "secret_exposure",
+    "backup_or_isolated_restore_failure",
+    "database_role_separation_or_runtime_ddl_denial_failure",
+    "migration_or_schema_ambiguity",
+    "identity_tenant_or_portal_isolation_failure",
+    "unexpected_external_effect",
+    "ambiguous_consequential_provider_outcome_without_reconciliation",
+    "monitoring_or_alerting_blindness",
+    "canary_or_rollback_failure",
+    "unexplained_source_runtime_drift"
+  ],
+  "current_authorization": {
+    "repository_remediation_authorized": true,
+    "protected_merge_authorized_only_after_required_gates": true,
+    "artifact_build_authorized_only_after_protected_merges": true,
+    "server_contact_authorized": false,
+    "production_deployment_authorized": false,
+    "external_capability_activation_authorized": false
+  }
+}
