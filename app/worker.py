@@ -217,11 +217,12 @@ def _provider_succeeded(item: Contract | Document) -> None:
 
 
 async def send_pending_contract_envelope() -> str | None:
-    """Claims and sends at most one DRAFT contract per call. Not wired
-    into run()'s loop - deployment decides how this gets scheduled,
-    independent of the CRM outbox delivery loop above so the two
-    concerns' retry/failure semantics don't get entangled. Returns the
-    contract id processed, or None if there was nothing to do."""
+    """Claim and send at most one eligible DRAFT contract per worker tick.
+
+    ``run()`` invokes this independently from CRM outbox delivery so each
+    integration retains its own lease, retry, and terminal-failure semantics.
+    Returns the processed contract id, or ``None`` when no work was eligible.
+    """
     if not esign_live_send_enabled():
         return None
     now = datetime.now(UTC)

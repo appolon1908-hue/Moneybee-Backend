@@ -48,8 +48,10 @@ evidence) and `deploy/runtime-paths.lock.json` (absolute host paths,
 verified hostname). Both start `UNVERIFIED` and stay that way — and
 `ops/validate-release-lock.py` / `ops/verify-runtime-env.py` fail closed on
 anything else — until a human reviews and commits real evidence.
-`ops/deploy-staging.sh` refuses to run at all today; it is an intentional
-placeholder pending that separately reviewed executor.
+`ops/deploy-staging.sh` is the fail-closed executor for these records. It is
+dry-run by default, accepts staging locks only, and requires both verified
+locks plus `MONEYBEE_DEPLOY_CONFIRMATION=DEPLOY-VERIFIED-STAGING` before
+`--execute` can mutate a target. It has no production mode.
 
 ## Prepare
 
@@ -80,6 +82,22 @@ docker compose -f compose.data.yml -f compose.backend.yml -f compose.edge.yml co
 # External PostgreSQL/Redis mode (data services and bootstrap are intentionally omitted):
 docker compose -f compose.backend.yml -f compose.edge.yml config
 ```
+
+The equivalent guarded dry-run from a repository checkout is:
+
+```bash
+ops/deploy-staging.sh --external-data
+```
+
+Execution is a separate operator action after reviewing that output. For the
+external data-plane example above:
+
+```bash
+MONEYBEE_DEPLOY_CONFIRMATION=DEPLOY-VERIFIED-STAGING \
+  ops/deploy-staging.sh --execute --external-data
+```
+
+For a Compose-managed data plane, omit `--external-data`.
 
 ## Migrate
 
