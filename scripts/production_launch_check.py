@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -97,6 +96,28 @@ def read_text(path: Path) -> str:
 
 def repo_marketing_checks(marketing_root: Path) -> list[Check]:
     src = marketing_root / "src"
+    required_assets = (
+        src / "landingPages.ts",
+        src / "resourcePages.ts",
+        marketing_root / "public" / "sitemap.xml",
+        marketing_root / "public" / "robots.txt",
+        marketing_root / "public" / "ads.txt",
+        marketing_root / "index.html",
+    )
+    missing_assets = [
+        str(path.relative_to(marketing_root))
+        for path in required_assets
+        if not path.is_file()
+    ]
+    if missing_assets:
+        return [
+            check(
+                "marketing.repository.assets",
+                "BLOCKED",
+                "frontend marketing checkout is incomplete: " + ", ".join(missing_assets),
+            )
+        ]
+
     landing = read_text(src / "landingPages.ts")
     resources = read_text(src / "resourcePages.ts")
     sitemap = read_text(marketing_root / "public" / "sitemap.xml")

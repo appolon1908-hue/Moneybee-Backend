@@ -1,9 +1,9 @@
 {
   "name": "lender-frontend-compat",
   "paths": {
-    "/api/v2/lender/portfolio": "2c4b22ce6fab2fa0c6312a0ad60479f6c7b4923894a917ce4aa71722404d2b04",
-    "/api/v2/lender/submissions/{submission_id}/assignment": "279374f80104919191739dbf0575fffee45917c64c410c1d9288fa40382d22ac",
-    "/api/v2/lender/workspace": "73cb3450a3be7801ddc5357e73125350732270cbc3aa0c16dd03683267e42716"
+    "/api/v2/lender/portfolio": "b1f3f1c8626532409cadff2b736fc447064ff9000aafe11096267b8a9e9138ad",
+    "/api/v2/lender/submissions/{submission_id}/assignment": "0a6c0a400aba1b388f926033c08ebf3e8c986020b151ae246b38e12a713a33f7",
+    "/api/v2/lender/workspace": "0c4b906e3194769fc234748161364f7573d00039b9ed4773e6e4aa5945f3667b"
   },
   "schemas": {
     "LenderSubmissionAssignment": "b4a03bfc40e2f8139d758e6cb3d98adeff59144d07d9d2bab259e71cdd9d2fc5"
