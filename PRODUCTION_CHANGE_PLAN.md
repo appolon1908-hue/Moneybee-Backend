@@ -9,7 +9,7 @@
 - Source baseline: PR 38 exact head; record the final SHA after required checks and reviews pass.
 - Current deployed source: not re-verified by this repository-only change.
 - Current production Alembic revision: must be captured in the approved pre-change baseline.
-- Candidate Alembic head: `20260901_0026`.
+- Candidate Alembic head: `20260902_0027`.
 - Production images must not be updated until CI produces immutable digest references, an SBOM, and security results.
 
 ## Planned sequence after blockers close and owner approves
@@ -33,6 +33,7 @@
 | `20260901_0024` provider retry and notice uniqueness | SHORT LOCK | Adds nullable retry columns and a uniqueness constraint after rejecting duplicate legacy notice evidence. Re-measure on current restored data. |
 | `20260901_0025` contract/inbox concurrency | SHORT LOCK | Rejects duplicate existing contracts, enforces one contract per offer, and adds nullable inbox retry scheduling. |
 | `20260901_0026` tax-record identity | SHORT LOCK | Aligns uniqueness with recipient type; downgrade fails closed if identities would merge. |
+| `20260902_0027` split payment evidence | SHORT LOCK | Adds paid-at/reference evidence and a paid-state constraint; downgrade fails closed once payment evidence exists. |
 
 ## Rollback
 
@@ -44,7 +45,7 @@
 ## Required approval evidence
 
 - Exact-head GitHub checks and fresh code/human review pass.
-- Repository migration rehearsal through `20260901_0026` passes; production-derived rehearsal remains an operator prerequisite.
+- Repository migration rehearsal through `20260902_0027` passes; production-derived rehearsal remains an operator prerequisite.
 - Verified off-host backup retrieval and PITR recovery point.
 - Immutable image provenance/SBOM/security gate.
 - Approved external object storage and malware scanner.

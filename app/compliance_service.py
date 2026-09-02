@@ -311,17 +311,9 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     Sec. 6041 as it applies to nonemployee compensation) - state filing
     thresholds can be lower and aren't accounted for.
 
-    Attribution caveat: there is no dedicated commission-receipt ledger
-    table in this schema (POST /admin/commissions/{id}/receipts just
-    increments Commission.received_amount and logs an AuditEvent) and no
-    split-level "paid" status or date - CommissionSplit.status is set to
-    "PENDING" on creation and nothing ever transitions it. This uses
-    CommissionSplit.created_at as the tax-year attribution date, which
-    approximates but does not guarantee "when the recipient was actually
-    paid." Wiring a real split-disbursement workflow (naturally, through
-    the payment adapters added alongside this) would let this generator
-    key off an actual payment date instead - worth doing before this
-    runs against real payout data.
+    Only split rows carrying durable payment evidence (status PAID,
+    paid_at, and a provider/accounting payment reference) contribute.
+    Merely allocating a split is not reportable compensation.
 
     Idempotent: re-running for a year replaces each recipient's totals
     rather than accumulating, since it always recomputes from
@@ -350,8 +342,11 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
                 models.CommissionSplit.recipient_reference,
                 models.CommissionSplit.amount,
             ).where(
-                models.CommissionSplit.created_at >= year_start,
-                models.CommissionSplit.created_at < year_end,
+                models.CommissionSplit.status == "PAID",
+                models.CommissionSplit.paid_at.is_not(None),
+                models.CommissionSplit.payment_reference.is_not(None),
+                models.CommissionSplit.paid_at >= year_start,
+                models.CommissionSplit.paid_at < year_end,
             )
         )
     ).all()
@@ -363,15 +358,16 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
         bucket["total"] += Decimal(str(receipt_amount))
         bucket["count"] += 1
 
+    existing_rows = list((await db.scalars(
+        select(CommissionTaxRecord).where(CommissionTaxRecord.tax_year == tax_year)
+    )).all())
+    existing_by_key = {
+        (row.recipient_type, row.recipient_reference): row for row in existing_rows
+    }
     results: list[CommissionTaxRecord] = []
-    for (recipient_type, recipient_reference), bucket in totals.items():
-        existing = await db.scalar(
-            select(CommissionTaxRecord).where(
-                CommissionTaxRecord.recipient_type == recipient_type,
-                CommissionTaxRecord.recipient_reference == recipient_reference,
-                CommissionTaxRecord.tax_year == tax_year,
-            )
-        )
+    for recipient_type, recipient_reference in sorted(set(totals) | set(existing_by_key)):
+        bucket = totals.get((recipient_type, recipient_reference), {"total": Decimal("0"), "count": 0})
+        existing = existing_by_key.get((recipient_type, recipient_reference))
         total_amount = bucket["total"]
         requires_1099 = total_amount >= _FORM_1099_NEC_THRESHOLD
         if existing is not None:

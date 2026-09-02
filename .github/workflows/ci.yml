@@ -105,6 +105,25 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+      - name: Verify split-payment evidence blocks unsafe downgrade
+        run: |
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO commission_splits
+            (id, created_at, updated_at, commission_id, recipient_type,
+             recipient_reference, amount, status, paid_at, payment_reference)
+          VALUES
+            ('00000000-0000-0000-0000-000000000029', now(), now(),
+             '00000000-0000-0000-0000-000000000030', 'BROKER',
+             'downgrade-fixture', 100.00, 'PAID', now(), 'fixture-payment');
+          SET session_replication_role = origin;
+          SQL
+          if alembic downgrade 20260901_0026; then
+            echo 'Downgrade discarded commission split payment evidence' >&2
+            exit 1
+          fi
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee -c \
+            "DELETE FROM commission_splits WHERE id='00000000-0000-0000-0000-000000000029'"
       - name: Verify migration 0023 legacy fail-closed and compatibility paths
         run: |
           sudo -u postgres createdb --owner=moneybee_migrator moneybee_legacy

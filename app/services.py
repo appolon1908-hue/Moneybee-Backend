@@ -421,8 +421,12 @@ async def get_authorized_application(
     principal: Principal,
     *,
     write: bool = False,
+    lock_for_update: bool = False,
 ) -> models.Application:
-    application = await db.get(models.Application, application_id)
+    statement = select(models.Application).where(models.Application.id == application_id)
+    if lock_for_update:
+        statement = statement.with_for_update()
+    application = await db.scalar(statement)
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
     authorize_application(application, principal, write=write)

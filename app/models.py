@@ -768,6 +768,8 @@ class CommissionSplit(Base, Record):
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     status: Mapped[str] = mapped_column(String(40), default="PENDING")
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class CommissionAdjustment(Base, Record):
