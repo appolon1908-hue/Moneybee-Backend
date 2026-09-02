@@ -18,7 +18,8 @@ dependencies = [
   "httpx>=0.28,<1",
   "alembic>=1.16,<2",
   "boto3>=1.40,<2",
-  "cryptography>=46,<51"
+  "cryptography>=46,<51",
+  "codestra-moneybee-connectors @ git+https://github.com/appolon1908-hue/SDK-repository.git@fdde064c8eb151eff7a154c79943273e5c45c970#subdirectory=python/moneybee-connectors"
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,9 @@ dev = ["pytest>=8.4,<9", "pytest-asyncio>=1.0,<2", "ruff>=0.12,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
     codestra_middleware_webhook_tolerance_seconds: int = 300
+    codestra_sdk_enabled: bool = False
+    codestra_sdk_capabilities_csv: str = ""
     provider_webhook_allowlist_csv: str = (
         "lender,docusign,sendgrid,twilio,odoo,n8n,experian"
     )
@@ -167,6 +169,10 @@ class Settings(BaseSettings):
             for item in self.provider_webhook_allowlist_csv.split(",")
             if item.strip()
         }
+
+    @property
+    def codestra_sdk_capabilities(self) -> frozenset[str]:
+        return self._csv_set(self.codestra_sdk_capabilities_csv)
 
     @property
     def provider_webhook_secrets(self) -> dict[str, str]:
