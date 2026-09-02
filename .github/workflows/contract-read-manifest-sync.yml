@@ -1,0 +1,68 @@
+name: contract-read-manifest-sync
+
+on:
+  push:
+    branches:
+      - "release/moneybee-repository-complete-20260902"
+    paths-ignore:
+      - "docs/openapi/contract-read-completion-manifest.json"
+      - "docs/API_ENDPOINT_CATALOG.md"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: contract-read-manifest-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite+aiosqlite:///./contract-read-manifest.db
+      AUTO_CREATE_SCHEMA: "true"
+      LOCAL_AUTH_BYPASS: "true"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install reviewed dependencies
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+      - name: Generate and verify reviewed contract evidence
+        run: |
+          python scripts/sync_contract_completion_manifest.py
+          python scripts/generate_endpoint_catalog.py
+          python scripts/verify_openapi_contract.py
+      - name: Commit only deterministic contract evidence
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          allowed='^( M|M |A |AM|MM|\?\?) (docs/API_ENDPOINT_CATALOG\.md|docs/openapi/contract-read-completion-manifest\.json)$'
+          unexpected="$(git status --porcelain | grep -Ev "$allowed" || true)"
+          if test -n "$unexpected"; then
+            echo "Refusing to commit changes outside deterministic contract evidence:" >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          if git diff --quiet -- docs/API_ENDPOINT_CATALOG.md docs/openapi/contract-read-completion-manifest.json \
+            && test -z "$(git status --porcelain -- docs/openapi/contract-read-completion-manifest.json)"; then
+            echo "Contract evidence is already synchronized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/API_ENDPOINT_CATALOG.md docs/openapi/contract-read-completion-manifest.json
+          git commit -m "docs(api): synchronize contract read evidence"
+          git push origin "HEAD:${BRANCH_NAME}"
