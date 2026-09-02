@@ -32,7 +32,16 @@ RUN python -m venv /opt/venv \
     && adduser --system --ingroup moneybee --home /nonexistent --no-create-home moneybee
 
 COPY --from=wheel /wheels /wheels
-RUN /opt/venv/bin/python -m pip install --no-cache-dir /wheels/*.whl \
+# The wheel stage has already resolved and built the complete transitive
+# dependency set, including the exact Git-pinned Codestra SDK. Install only
+# those local artifacts without re-resolving the backend wheel's direct URL
+# metadata; then prove the resulting environment is internally consistent.
+RUN /opt/venv/bin/python -m pip install \
+        --no-cache-dir \
+        --no-index \
+        --no-deps \
+        /wheels/*.whl \
+    && /opt/venv/bin/python -m pip check \
     && rm -rf /wheels
 
 COPY alembic.ini ./alembic.ini
