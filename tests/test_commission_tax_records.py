@@ -15,7 +15,12 @@ from app.main import app
 
 
 async def _seed_commission_split(
-    recipient_reference: str, amount: str, tax_year: int, recipient_type: str = "BROKER"
+    recipient_reference: str,
+    amount: str,
+    tax_year: int,
+    recipient_type: str = "BROKER",
+    *,
+    paid: bool = True,
 ) -> None:
     async with SessionLocal() as db:
         lead = models.Lead(
@@ -71,14 +76,27 @@ async def _seed_commission_split(
             recipient_type=recipient_type,
             recipient_reference=recipient_reference,
             amount=amount,
-            status="PENDING",
+            status="PAID" if paid else "PENDING",
+            paid_at=datetime(tax_year, 6, 15, tzinfo=UTC) if paid else None,
+            payment_reference=f"fixture-payment-{uuid.uuid4().hex}" if paid else None,
         )
         db.add(split)
         await db.flush()
-        # created_at defaults to "now" - backdate it into the target tax
-        # year so this test doesn't depend on which year it happens to run in.
-        split.created_at = datetime(tax_year, 6, 15, tzinfo=UTC)
         await db.commit()
+
+
+async def test_pending_split_is_not_reportable_compensation():
+    tax_year = 2026
+    recipient_reference = f"pending-{uuid.uuid4().hex}"
+    with TestClient(app) as client:
+        await _seed_commission_split(recipient_reference, "900.00", tax_year, paid=False)
+        response = client.post(
+            "/api/v2/admin/commission-tax-records/generate", params={"tax_year": tax_year}
+        )
+        assert response.status_code == 200
+        assert recipient_reference not in {
+            row["recipient_reference"] for row in response.json()
+        }
 
 
 async def test_generate_commission_tax_records_aggregates_by_recipient_and_applies_the_1099_threshold():

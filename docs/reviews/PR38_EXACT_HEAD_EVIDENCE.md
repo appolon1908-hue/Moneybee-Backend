@@ -21,6 +21,9 @@ external delivery/provider writes remain disabled by default.
   contract per offer, and adds durable inbox callback retry scheduling.
 - Migration `20260901_0026` aligns tax-record uniqueness with the persisted
   recipient type/reference/year identity and protects unsafe downgrade.
+- Migration `20260902_0027` adds durable commission-split payment evidence;
+  pending allocations no longer contribute to tax totals and downgrade refuses
+  to discard recorded payments.
 - `moneybee_migrator` owns the application schema and existing application
   objects after an idempotent administrator-run transfer. `moneybee_runtime`
   has DML/sequence/function access only and cannot perform DDL, truncate, grant,
@@ -56,12 +59,13 @@ external delivery/provider writes remain disabled by default.
 ## Migration contract
 
 - Before: `20260901_0023`
-- After: `20260901_0026`
+- After: `20260902_0027`
 - SQLite: empty upgrade, downgrade to base, and re-upgrade pass.
 - PostgreSQL: empty-to-head, historical-to-head, forward-fix, fail-closed legacy
   credential, and protected downgrade paths pass.
 - Downgrade limitation: `0023` intentionally aborts if an external credential
   reference would be stranded. `0024` intentionally aborts if provider retry
+  evidence would be discarded. `0027` intentionally aborts if split-payment
   evidence would be discarded. Forward-fix is the operational default.
 
 ## API, authorization, tenancy, and compatibility

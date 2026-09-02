@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 
@@ -12,6 +13,7 @@ from sqlalchemy import select
 
 from app import compliance_models, identity_models, models
 from app.db import SessionLocal
+from app.config import settings
 from app.main import app
 
 
@@ -177,6 +179,45 @@ async def test_admin_decline_with_submission_is_atomic_and_idempotent():
         ).json()
         assert len(notices) == 1
         assert notices[0]["underwriting_review_id"] == first.json()["id"]
+
+
+async def test_postgres_concurrent_admin_decisions_are_serialized():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL application row-lock evidence")
+    with TestClient(app) as client:
+        application_id, submission_id, _ = _prepare_matched_submission(client)
+
+        async def decide(decision: str):
+            payload = {"decision": decision, "reason_codes": []}
+            if decision == "DECLINE":
+                payload.update({
+                    "submission_id": submission_id,
+                    "reason_codes": ["CONCURRENT_FIXTURE_DECLINE"],
+                })
+            return await asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/applications/{application_id}/underwriting/reviews",
+                json=payload,
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            )
+
+        approve, decline = await asyncio.gather(decide("APPROVE"), decide("DECLINE"))
+        assert sorted((approve.status_code, decline.status_code)) == [201, 409]
+        async with SessionLocal() as db:
+            application = await db.get(models.Application, uuid.UUID(application_id))
+            reviews = list((await db.scalars(
+                select(models.UnderwritingReview).where(
+                    models.UnderwritingReview.application_id == uuid.UUID(application_id)
+                )
+            )).all())
+            notices = list((await db.scalars(
+                select(compliance_models.AdverseActionNotice).where(
+                    compliance_models.AdverseActionNotice.application_id == uuid.UUID(application_id)
+                )
+            )).all())
+            assert application is not None
+            assert len(reviews) == 1
+            assert len(notices) == (1 if application.status == "DECLINED" else 0)
 
 
 async def test_admin_lender_decline_requires_specific_notice_reasons():

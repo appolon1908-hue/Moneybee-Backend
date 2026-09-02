@@ -744,7 +744,9 @@ async def create_underwriting_review(
     idempotency_key = request.headers.get("Idempotency-Key")
     if idempotency_key is not None and not 8 <= len(idempotency_key) <= 160:
         raise HTTPException(status_code=422, detail="Invalid Idempotency-Key length")
-    application = await services.get_authorized_application(db, application_id, user, write=True)
+    application = await services.get_authorized_application(
+        db, application_id, user, write=True, lock_for_update=True
+    )
     route = f"/admin/applications/{application_id}/underwriting/reviews"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     if idempotency_key is not None:
