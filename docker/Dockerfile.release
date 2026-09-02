@@ -8,6 +8,10 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
 WORKDIR /build
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml README.md ./
 COPY app ./app
 RUN python -m pip wheel --wheel-dir /wheels .
@@ -25,7 +29,10 @@ RUN python -m venv /opt/venv \
     && adduser --system --ingroup moneybee --home /nonexistent --no-create-home moneybee
 
 COPY --from=wheel /wheels /wheels
-RUN /opt/venv/bin/python -m pip install --no-cache-dir /wheels/*.whl \
+RUN set -eu; \
+    find /wheels -maxdepth 1 -type f -name '*.whl' ! -name 'moneybee_backend-*' \
+      -exec /opt/venv/bin/python -m pip install --no-cache-dir --no-deps {} +; \
+    /opt/venv/bin/python -m pip install --no-cache-dir --no-deps /wheels/moneybee_backend-*.whl \
     && rm -rf /wheels
 
 COPY alembic.ini ./alembic.ini
