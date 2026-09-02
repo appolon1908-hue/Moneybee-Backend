@@ -136,7 +136,10 @@ class DocuSignAdapter:
             url=self._envelope_url(envelope_id),
             headers={**_bearer(settings.docusign_access_token, "docusign"), "Content-Type": "application/json"},
             json={"status": "voided", "voidedReason": reason},
-            retries=1,
+            # A void is consequential and may have succeeded when its response
+            # is lost. Never repeat it at the transport layer; the domain
+            # reconciliation path performs a provider status read-back.
+            retries=0,
         )
 
 

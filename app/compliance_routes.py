@@ -433,6 +433,20 @@ async def generate_tax_records(
         return existing.response_body
 
     records = await generate_commission_tax_records(db, tax_year)
+    existing = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            _problem(
+                "IDEMPOTENCY_CONFLICT",
+                "The idempotency key was already used for a different tax year.",
+            )
+        return existing.response_body
     response = [_tax_record_read(record) for record in records]
     db.add(
         models.AuditEvent(
@@ -545,6 +559,23 @@ async def record_tax_filing(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Commission tax record not found")
+    # The row lock serializes concurrent calls. Re-read the idempotency
+    # identity after acquiring it because another transaction may have
+    # committed the same key while this request was waiting.
+    existing = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            _problem(
+                "IDEMPOTENCY_CONFLICT",
+                "The idempotency key was already used with different filing evidence.",
+            )
+        return existing.response_body
     if (
         record.filed_at is not None
         and record.filing_reference != payload.filing_reference

@@ -8,10 +8,11 @@ sending anything this produces to a real applicant or filing anything
 with the IRS.
 """
 
+import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import identity_models, models
@@ -331,6 +332,15 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     update_recipient_tin(), are stored encrypted with app/encryption.py's
     versioned scheme and never returned in the clear by any endpoint
     built so far."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        # Serialize generation independently of HTTP idempotency keys so two
+        # valid operator commands cannot race the recipient/year unique key.
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"commission-tax-records:{tax_year}".encode()).digest()[:8],
+            "big",
+        ) & ((1 << 63) - 1)
+        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
     year_start = datetime(tax_year, 1, 1, tzinfo=UTC)
     year_end = datetime(tax_year + 1, 1, 1, tzinfo=UTC)
     rows = (

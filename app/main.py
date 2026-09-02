@@ -91,10 +91,23 @@ app.add_middleware(DistributedRateLimitMiddleware)
 
 @app.middleware("http")
 async def live_write_gate(request: Request, call_next):
+    get_side_effect = (
+        request.method == "GET"
+        and (
+            request.url.path in {
+                "/api/v1/me/notification-preferences",
+                "/api/v2/me/notification-preferences",
+            }
+            or (
+                request.url.path.startswith(("/api/v1/borrower/conversations/", "/api/v2/borrower/conversations/"))
+                and request.url.path.endswith("/messages")
+            )
+        )
+    )
     if (
         settings.app_env in {"staging", "production"}
         and not settings.live_writes
-        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and (request.method in {"POST", "PUT", "PATCH", "DELETE"} or get_side_effect)
     ):
         return JSONResponse(
             status_code=503,
@@ -122,6 +135,8 @@ def _api_v1_sunset_http_date() -> str:
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     correlation_id = request.headers.get("X-Correlation-ID", request_id)
+    request.state.request_id = request_id
+    request.state.correlation_id = correlation_id
     bind_request_id(request_id)
     timer = Timer()
     response = await call_next(request)
@@ -209,7 +224,7 @@ async def http_exception_problem(request: Request, exc: StarletteHTTPException):
             "status": exc.status_code,
             "detail": message or "The request could not be completed.",
             "instance": request.url.path,
-            "request_id": request.headers.get("X-Request-ID"),
+            "request_id": getattr(request.state, "request_id", None),
             "code": code,
             **({"context": context} if context else {}),
         },
@@ -235,14 +250,14 @@ async def validation_problem(request: Request, exc: RequestValidationError):
                 exc.errors(),
                 custom_encoder={ValueError: str, Exception: str},
             ),
-            "request_id": request.headers.get("X-Request-ID"),
+            "request_id": getattr(request.state, "request_id", None),
         },
     )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_problem(request: Request, exc: Exception):
-    request_id = request.headers.get("X-Request-ID")
+    request_id = getattr(request.state, "request_id", None)
     request_logger().exception(
         "request.unhandled_exception",
         extra={

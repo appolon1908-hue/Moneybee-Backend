@@ -148,6 +148,10 @@ async def ensure_provider_void_confirmed(
                 503,
             )
         _clear_provider_failure(contract)
+        # A definite synchronous response closes the retry sequence. Ambiguous
+        # attempts retain their count through the read-back path below as
+        # reconciliation evidence.
+        contract.provider_attempt_count = 0
         return
     except ProviderError:
         pass

@@ -13,8 +13,8 @@ from app.compliance_service import (
     generate_commission_tax_records,
     update_recipient_tin,
 )
+from app.contract_void_service import ensure_provider_void_confirmed
 from app.db import get_db
-from app.integrations.base import ProviderError
 from app.integrations.registry import esign_adapter, provider_statuses
 
 
@@ -425,13 +425,12 @@ async def void_contract(
         return await _load_contract_or_404(db, contract_id)
 
     if contract.status == "SENT" and contract.external_envelope_id:
-        try:
-            await esign_adapter().void_envelope(
-                envelope_id=contract.external_envelope_id,
-                reason=payload.reason,
-            )
-        except ProviderError as exc:
-            raise HTTPException(status_code=503, detail="E-sign void could not be confirmed") from exc
+        await ensure_provider_void_confirmed(
+            db,
+            contract,
+            reason=payload.reason,
+            adapter=esign_adapter(),
+        )
     services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
     await db.flush()
     db.add(

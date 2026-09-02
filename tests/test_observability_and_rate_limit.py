@@ -40,6 +40,28 @@ def test_unhandled_exception_returns_problem_json_and_logs(caplog):
     assert any("request.unhandled_exception" in record.message for record in caplog.records)
 
 
+def test_generated_request_id_is_shared_by_error_body_and_header():
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v2/lender/submissions/00000000-0000-0000-0000-000000000000/workspace"
+        )
+
+    assert response.status_code == 404
+    assert response.json()["request_id"] == response.headers["X-Request-ID"]
+
+
+def test_write_disabled_gate_blocks_get_handlers_with_database_side_effects(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "app_env", "staging")
+    monkeypatch.setattr(settings, "live_writes", False)
+    with TestClient(app) as client:
+        response = client.get("/api/v2/me/notification-preferences")
+
+    assert response.status_code == 503
+    assert response.json()["type"].endswith("/live-writes-disabled")
+
+
 def test_request_completed_is_logged(caplog):
     with TestClient(app) as client:
         with caplog.at_level("INFO"):

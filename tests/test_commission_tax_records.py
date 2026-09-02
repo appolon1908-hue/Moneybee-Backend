@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from datetime import UTC, datetime
@@ -7,9 +8,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import func, select
 
-from app import models
-from app.db import SessionLocal
+from app import compliance_models, models
+from app.compliance_service import generate_commission_tax_records
+from app.db import SessionLocal, engine
 from app.encryption import decrypt_secret
 from app.main import app
 
@@ -128,6 +132,34 @@ async def test_tax_records_keep_recipient_types_as_distinct_persisted_identities
         assert {(row["recipient_type"], row["total_amount"]) for row in records} == {
             ("BROKER", "400.00"), ("HOUSE", "700.00")
         }
+
+
+@pytest.mark.skipif(
+    engine.dialect.name != "postgresql",
+    reason="PostgreSQL advisory-lock concurrency test",
+)
+async def test_concurrent_tax_generation_serializes_by_year():
+    tax_year = 2031
+    recipient = f"concurrent-{uuid.uuid4().hex}"
+    await _seed_commission_split(recipient, "700.00", tax_year)
+
+    async def generate() -> None:
+        async with SessionLocal() as db:
+            await generate_commission_tax_records(db, tax_year)
+            await db.commit()
+
+    await asyncio.gather(generate(), generate())
+
+    async with SessionLocal() as db:
+        count = await db.scalar(
+            select(func.count())
+            .select_from(compliance_models.CommissionTaxRecord)
+            .where(
+                compliance_models.CommissionTaxRecord.tax_year == tax_year,
+                compliance_models.CommissionTaxRecord.recipient_reference == recipient,
+            )
+        )
+    assert count == 1
 
 
 async def test_regenerating_commission_tax_records_replaces_rather_than_accumulates():
