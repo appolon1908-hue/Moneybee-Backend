@@ -409,6 +409,10 @@ async def update_recipient_tin(
     recipient_name: str,
     tin: str,
 ) -> CommissionTaxRecord:
+    if record.filed_at is not None:
+        raise ValueError(
+            "Filed recipient identity is immutable; create a controlled amendment first"
+        )
     record.recipient_name = recipient_name
     record.tin_ciphertext = encrypt_secret(tin)
     await db.flush()

@@ -203,6 +203,13 @@ async def test_tax_record_api_never_returns_tin_and_records_filing_evidence():
         assert filed.json()["filed_at"] is not None
         assert filed.json()["filing_reference"] == "IRS-TEST-2029-0001"
 
+        identity_rewrite = client.patch(
+            f"/api/v2/admin/compliance/commission-tax-records/{record_id}/tin",
+            json={"recipient_name": "Different Recipient", "tin": "98-7654321"},
+        )
+        assert identity_rewrite.status_code == 409
+        assert identity_rewrite.json()["code"] == "FILED_RECIPIENT_IDENTITY_IMMUTABLE"
+
         replay = client.patch(
             f"/api/v2/admin/compliance/commission-tax-records/{record_id}/filing",
             headers={"Idempotency-Key": filing_key},

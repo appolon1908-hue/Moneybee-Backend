@@ -496,12 +496,15 @@ async def set_tax_record_tin(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Commission tax record not found")
-    await update_recipient_tin(
-        db,
-        record,
-        recipient_name=payload.recipient_name,
-        tin=payload.tin,
-    )
+    try:
+        await update_recipient_tin(
+            db,
+            record,
+            recipient_name=payload.recipient_name,
+            tin=payload.tin,
+        )
+    except ValueError as exc:
+        _problem("FILED_RECIPIENT_IDENTITY_IMMUTABLE", str(exc), status_code=409)
     db.add(
         models.AuditEvent(
             actor_id=user.subject,

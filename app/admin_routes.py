@@ -9,10 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import compliance_models, compliance_service, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
-from app.compliance_service import (
-    generate_commission_tax_records,
-    update_recipient_tin,
-)
 from app.contract_void_service import ensure_provider_void_confirmed
 from app.db import get_db
 from app.integrations.registry import esign_adapter, provider_statuses
@@ -1436,15 +1432,13 @@ async def generate_commission_tax_records_endpoint(
     tax_year: int,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
-    try:
-        records = await generate_commission_tax_records(db, tax_year)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await db.commit()
-    for record in records:
-        await db.refresh(record)
-    return records
+    from app.compliance_routes import generate_tax_records
+
+    return await generate_tax_records(tax_year, db, user, idempotency_key)
 
 
 @router.get(
@@ -1480,12 +1474,6 @@ async def set_commission_tax_record_tin(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
 ):
-    record = await db.get(compliance_models.CommissionTaxRecord, record_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Commission tax record not found")
-    await update_recipient_tin(
-        db, record, recipient_name=payload.recipient_name, tin=payload.tin
-    )
-    await db.commit()
-    await db.refresh(record)
-    return record
+    from app.compliance_routes import set_tax_record_tin
+
+    return await set_tax_record_tin(record_id, payload, db, user)
