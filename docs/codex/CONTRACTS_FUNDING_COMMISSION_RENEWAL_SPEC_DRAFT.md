@@ -1,4 +1,10 @@
-# Contracts, funding, commission, and renewal engines — draft spec
+# Contracts, funding, commission, and renewal engines — historical design spec
+
+> Status (2026-09-02): IMPLEMENTED. This document is retained as design and
+> decision history. The executable authority is the current domain services,
+> workers, Alembic migrations, and their contract/concurrency regression tests.
+> Any future discrepancy must be resolved in favor of tested current behavior
+> and recorded as a new design decision; this file is not a launch checklist.
 
 Status: **approved to build.** The one substantive business decision
 (commission is deal-negotiated, splittable across brokers) is confirmed;
