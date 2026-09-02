@@ -12,8 +12,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -30,7 +30,7 @@ jobs:
           python scripts/check_no_private_keys.py
           python scripts/check_identity_email_readiness.py
       - name: Upload reviewed OpenAPI sources
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: moneybee-openapi
           path: |
@@ -64,7 +64,7 @@ jobs:
       LOCAL_IDENTITY_ENFORCEMENT: "true"
       DATABASE_URL: postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start runner PostgreSQL
         run: |
           sudo systemctl start postgresql.service
@@ -80,7 +80,7 @@ jobs:
           PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee \
             -v ON_ERROR_STOP=1 -c 'ALTER TABLE public.legacy_owned ADD COLUMN migrated boolean DEFAULT false; DROP TABLE public.legacy_owned'
           pg_isready --host=localhost --port=5432 --username=moneybee_migrator
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -105,6 +105,25 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+      - name: Verify split-payment evidence blocks unsafe downgrade
+        run: |
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO commission_splits
+            (id, created_at, updated_at, commission_id, recipient_type,
+             recipient_reference, amount, status, paid_at, payment_reference)
+          VALUES
+            ('00000000-0000-0000-0000-000000000029', now(), now(),
+             '00000000-0000-0000-0000-000000000030', 'BROKER',
+             'downgrade-fixture', 100.00, 'PAID', now(), 'fixture-payment');
+          SET session_replication_role = origin;
+          SQL
+          if alembic downgrade 20260901_0026; then
+            echo 'Downgrade discarded commission split payment evidence' >&2
+            exit 1
+          fi
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee -c \
+            "DELETE FROM commission_splits WHERE id='00000000-0000-0000-0000-000000000029'"
       - name: Verify migration 0023 legacy fail-closed and compatibility paths
         run: |
           sudo -u postgres createdb --owner=moneybee_migrator moneybee_legacy
@@ -193,10 +212,10 @@ jobs:
       matrix:
         role: [api, worker, migrate]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build backend ${{ matrix.role }} image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v7.0.0
         with:
           context: .
           target: ${{ matrix.role }}
@@ -219,14 +238,14 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
       - name: Generate release SBOM
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: moneybee-${{ matrix.role }}:ci
           format: cyclonedx-json
           output-file: moneybee-${{ matrix.role }}.sbom.cdx.json
           upload-artifact: false
       - name: Upload release SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: moneybee-${{ matrix.role }}-sbom
           path: moneybee-${{ matrix.role }}.sbom.cdx.json

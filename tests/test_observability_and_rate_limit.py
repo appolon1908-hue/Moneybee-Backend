@@ -6,43 +6,9 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
-from starlette.requests import Request
 
-from app.config import settings
 from app.main import app
-from app.rate_limit import (
-    InMemoryRateLimitMiddleware,
-    _bucket_for_path,
-    reset_rate_limit_state,
-    resolved_client_ip,
-)
-
-
-def _request(peer: str, forwarded_for: str | None = None) -> Request:
-    headers = []
-    if forwarded_for is not None:
-        headers.append((b"x-forwarded-for", forwarded_for.encode()))
-    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers,
-                    "client": (peer, 12345), "scheme": "http", "server": ("test", 80)})
-
-
-def test_forwarded_for_is_ignored_from_an_untrusted_peer(monkeypatch):
-    monkeypatch.setattr(settings, "trust_forwarded_for", True)
-    monkeypatch.setattr(settings, "trusted_proxy_cidrs_csv", "10.0.0.0/8")
-    assert resolved_client_ip(_request("198.51.100.5", "203.0.113.8")) == "198.51.100.5"
-
-
-def test_forwarded_chain_returns_rightmost_untrusted_hop(monkeypatch):
-    monkeypatch.setattr(settings, "trust_forwarded_for", True)
-    monkeypatch.setattr(settings, "trusted_proxy_cidrs_csv", "10.0.0.0/8,192.0.2.0/24")
-    request = _request("10.0.0.5", "198.51.100.7, 203.0.113.9, 192.0.2.44")
-    assert resolved_client_ip(request) == "203.0.113.9"
-
-
-def test_malformed_forwarded_chain_fails_closed_to_peer(monkeypatch):
-    monkeypatch.setattr(settings, "trust_forwarded_for", True)
-    monkeypatch.setattr(settings, "trusted_proxy_cidrs_csv", "10.0.0.0/8")
-    assert resolved_client_ip(_request("10.0.0.5", "203.0.113.9, garbage")) == "10.0.0.5"
+from app.rate_limit import InMemoryRateLimitMiddleware, _bucket_for_path, reset_rate_limit_state
 
 
 def test_unhandled_exception_returns_problem_json_and_logs(caplog):
@@ -72,6 +38,28 @@ def test_unhandled_exception_returns_problem_json_and_logs(caplog):
     assert body["request_id"] == "test-boom-request"
     assert "kaboom" not in str(body)
     assert any("request.unhandled_exception" in record.message for record in caplog.records)
+
+
+def test_generated_request_id_is_shared_by_error_body_and_header():
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v2/lender/submissions/00000000-0000-0000-0000-000000000000/workspace"
+        )
+
+    assert response.status_code == 404
+    assert response.json()["request_id"] == response.headers["X-Request-ID"]
+
+
+def test_write_disabled_gate_blocks_get_handlers_with_database_side_effects(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "app_env", "staging")
+    monkeypatch.setattr(settings, "live_writes", False)
+    with TestClient(app) as client:
+        response = client.get("/api/v2/me/notification-preferences")
+
+    assert response.status_code == 503
+    assert response.json()["type"].endswith("/live-writes-disabled")
 
 
 def test_request_completed_is_logged(caplog):

@@ -26,7 +26,7 @@ No mock adapter is selectable in production configuration.
 1. Select a provider in environment configuration.
 2. Install credentials through the approved secret manager; never commit them.
 3. Configure `FIELD_ENCRYPTION_KEYS_JSON` (a `{"<version>": "<fernet key>"}` map)
-   and `FIELD_ENCRYPTION_CURRENT_VERSION` before enabling banking.
+   and `FIELD_ENCRYPTION_ACTIVE_KEY_VERSION` before enabling banking.
    Ciphertext is prefixed with the key version it was encrypted under
    (`<version>:<token>`), so a new key can be added and made active without
    invalidating values already encrypted under the previous one - decrypt

@@ -203,3 +203,47 @@ async def test_plaid_webhook_is_idempotent_for_a_replayed_event(monkeypatch):
     assert first.json()["duplicate"] is False
     assert second.status_code == 200
     assert second.json()["duplicate"] is True
+
+
+async def test_plaid_webhook_rejects_reused_explicit_id_with_changed_payload(monkeypatch):
+    async def accept(self, body, signed_token):
+        return True
+
+    monkeypatch.setattr(PlaidAdapter, "verify_webhook", accept)
+    webhook_id = f"webhook-{uuid.uuid4().hex}"
+    first_payload = json.dumps(
+        {
+            "webhook_id": webhook_id,
+            "webhook_type": "ITEM",
+            "webhook_code": "ERROR",
+            "item_id": f"item-{uuid.uuid4().hex}",
+        }
+    ).encode()
+    changed_payload = json.dumps(
+        {
+            "webhook_id": webhook_id,
+            "webhook_type": "ITEM",
+            "webhook_code": "LOGIN_REPAIRED",
+            "item_id": json.loads(first_payload)["item_id"],
+        }
+    ).encode()
+
+    with TestClient(app) as client:
+        await _set_bank_live_connection_capability(True)
+        try:
+            first = client.post(
+                "/api/v2/webhooks/plaid",
+                content=first_payload,
+                headers={"Plaid-Verification": "signed-token"},
+            )
+            conflict = client.post(
+                "/api/v2/webhooks/plaid",
+                content=changed_payload,
+                headers={"Plaid-Verification": "signed-token"},
+            )
+        finally:
+            await _set_bank_live_connection_capability(False)
+
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "WEBHOOK_EVENT_ID_CONFLICT"

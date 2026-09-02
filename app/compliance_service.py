@@ -8,10 +8,11 @@ sending anything this produces to a real applicant or filing anything
 with the IRS.
 """
 
+import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import identity_models, models
@@ -310,17 +311,9 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     Sec. 6041 as it applies to nonemployee compensation) - state filing
     thresholds can be lower and aren't accounted for.
 
-    Attribution caveat: there is no dedicated commission-receipt ledger
-    table in this schema (POST /admin/commissions/{id}/receipts just
-    increments Commission.received_amount and logs an AuditEvent) and no
-    split-level "paid" status or date - CommissionSplit.status is set to
-    "PENDING" on creation and nothing ever transitions it. This uses
-    CommissionSplit.created_at as the tax-year attribution date, which
-    approximates but does not guarantee "when the recipient was actually
-    paid." Wiring a real split-disbursement workflow (naturally, through
-    the payment adapters added alongside this) would let this generator
-    key off an actual payment date instead - worth doing before this
-    runs against real payout data.
+    Only split rows carrying durable payment evidence (status PAID,
+    paid_at, and a provider/accounting payment reference) contribute.
+    Merely allocating a split is not reportable compensation.
 
     Idempotent: re-running for a year replaces each recipient's totals
     rather than accumulating, since it always recomputes from
@@ -331,6 +324,15 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     update_recipient_tin(), are stored encrypted with app/encryption.py's
     versioned scheme and never returned in the clear by any endpoint
     built so far."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        # Serialize generation independently of HTTP idempotency keys so two
+        # valid operator commands cannot race the recipient/year unique key.
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"commission-tax-records:{tax_year}".encode()).digest()[:8],
+            "big",
+        ) & ((1 << 63) - 1)
+        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
     year_start = datetime(tax_year, 1, 1, tzinfo=UTC)
     year_end = datetime(tax_year + 1, 1, 1, tzinfo=UTC)
     rows = (
@@ -340,8 +342,11 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
                 models.CommissionSplit.recipient_reference,
                 models.CommissionSplit.amount,
             ).where(
-                models.CommissionSplit.created_at >= year_start,
-                models.CommissionSplit.created_at < year_end,
+                models.CommissionSplit.status == "PAID",
+                models.CommissionSplit.paid_at.is_not(None),
+                models.CommissionSplit.payment_reference.is_not(None),
+                models.CommissionSplit.paid_at >= year_start,
+                models.CommissionSplit.paid_at < year_end,
             )
         )
     ).all()
@@ -353,18 +358,30 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
         bucket["total"] += Decimal(str(receipt_amount))
         bucket["count"] += 1
 
+    existing_rows = list((await db.scalars(
+        select(CommissionTaxRecord).where(CommissionTaxRecord.tax_year == tax_year)
+    )).all())
+    existing_by_key = {
+        (row.recipient_type, row.recipient_reference): row for row in existing_rows
+    }
     results: list[CommissionTaxRecord] = []
-    for (recipient_type, recipient_reference), bucket in totals.items():
-        existing = await db.scalar(
-            select(CommissionTaxRecord).where(
-                CommissionTaxRecord.recipient_type == recipient_type,
-                CommissionTaxRecord.recipient_reference == recipient_reference,
-                CommissionTaxRecord.tax_year == tax_year,
-            )
-        )
+    for recipient_type, recipient_reference in sorted(set(totals) | set(existing_by_key)):
+        bucket = totals.get((recipient_type, recipient_reference), {"total": Decimal("0"), "count": 0})
+        existing = existing_by_key.get((recipient_type, recipient_reference))
         total_amount = bucket["total"]
         requires_1099 = total_amount >= _FORM_1099_NEC_THRESHOLD
         if existing is not None:
+            regenerated = (total_amount, bucket["count"], requires_1099)
+            persisted = (
+                Decimal(str(existing.total_amount)),
+                existing.commission_count,
+                existing.requires_1099,
+            )
+            if existing.filed_at is not None and regenerated != persisted:
+                raise ValueError(
+                    "Filed commission tax records are immutable; create a controlled "
+                    "amendment before regenerating this recipient and tax year"
+                )
             existing.recipient_type = recipient_type
             existing.total_amount = total_amount
             existing.commission_count = bucket["count"]
@@ -392,6 +409,10 @@ async def update_recipient_tin(
     recipient_name: str,
     tin: str,
 ) -> CommissionTaxRecord:
+    if record.filed_at is not None:
+        raise ValueError(
+            "Filed recipient identity is immutable; create a controlled amendment first"
+        )
     record.recipient_name = recipient_name
     record.tin_ciphertext = encrypt_secret(tin)
     await db.flush()

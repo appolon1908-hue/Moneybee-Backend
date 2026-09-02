@@ -9,12 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import compliance_models, compliance_service, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
-from app.compliance_service import (
-    generate_commission_tax_records,
-    update_recipient_tin,
-)
+from app.contract_void_service import ensure_provider_void_confirmed
 from app.db import get_db
-from app.integrations.base import ProviderError
 from app.integrations.registry import esign_adapter, provider_statuses
 
 
@@ -425,13 +421,12 @@ async def void_contract(
         return await _load_contract_or_404(db, contract_id)
 
     if contract.status == "SENT" and contract.external_envelope_id:
-        try:
-            await esign_adapter().void_envelope(
-                envelope_id=contract.external_envelope_id,
-                reason=payload.reason,
-            )
-        except ProviderError as exc:
-            raise HTTPException(status_code=503, detail="E-sign void could not be confirmed") from exc
+        await ensure_provider_void_confirmed(
+            db,
+            contract,
+            reason=payload.reason,
+            adapter=esign_adapter(),
+        )
     services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
     await db.flush()
     db.add(
@@ -744,7 +739,9 @@ async def create_underwriting_review(
     idempotency_key = request.headers.get("Idempotency-Key")
     if idempotency_key is not None and not 8 <= len(idempotency_key) <= 160:
         raise HTTPException(status_code=422, detail="Invalid Idempotency-Key length")
-    application = await services.get_authorized_application(db, application_id, user, write=True)
+    application = await services.get_authorized_application(
+        db, application_id, user, write=True, lock_for_update=True
+    )
     route = f"/admin/applications/{application_id}/underwriting/reviews"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     if idempotency_key is not None:
@@ -1103,6 +1100,83 @@ async def create_commission_split(
     return split
 
 
+@router.post(
+    "/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+    response_model=schemas.CommissionSplitRead,
+    tags=["admin", "funding"],
+)
+async def mark_commission_split_paid(
+    commission_id: uuid.UUID,
+    split_id: uuid.UUID,
+    payload: schemas.CommissionSplitPaymentInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.split.manage"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    """Record externally verified payout evidence; this never initiates a payout."""
+    await _load_commission_or_404(db, commission_id)
+    route = f"/admin/commissions/{commission_id}/splits/{split_id}/mark-paid"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        replay_split = await db.get(models.CommissionSplit, split_id)
+        if replay_split is None or replay_split.commission_id != commission_id:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_split
+
+    split = await db.scalar(
+        select(models.CommissionSplit)
+        .where(
+            models.CommissionSplit.id == split_id,
+            models.CommissionSplit.commission_id == commission_id,
+        )
+        .with_for_update()
+    )
+    if split is None:
+        raise HTTPException(status_code=404, detail="Commission split not found")
+    if split.status != "PENDING":
+        raise HTTPException(status_code=409, detail="Commission split is not pending")
+
+    split.status = "PAID"
+    split.paid_at = payload.paid_at
+    split.payment_reference = payload.payment_reference
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="COMMISSION_SPLIT_PAYMENT_RECORDED",
+            resource_type="commission_split",
+            resource_id=str(split.id),
+            details={
+                "commission_id": str(commission_id),
+                "paid_at": payload.paid_at.isoformat(),
+                "payment_reference": payload.payment_reference,
+            },
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
+            response_body={"split_id": str(split.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(split)
+    return split
+
+
 @router.get(
     "/admin/sla-alerts",
     response_model=list[schemas.SLAAlertRead],
@@ -1333,15 +1407,20 @@ async def acknowledge_commercial_financing_disclosure(
     offer_id: uuid.UUID,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.edit"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
-    disclosure = await compliance_service.acknowledge_offer_disclosure(
-        db, offer_id, actor=user.subject
+    from app.compliance_routes import _acknowledge_disclosure, _disclosure_for_offer
+
+    disclosure = await _disclosure_for_offer(db, offer_id, lock=True)
+    return await _acknowledge_disclosure(
+        db=db,
+        disclosure=disclosure,
+        user=user,
+        idempotency_key=idempotency_key,
+        route=f"/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
     )
-    if disclosure is None:
-        raise HTTPException(status_code=404, detail="Disclosure not found")
-    await db.commit()
-    await db.refresh(disclosure)
-    return disclosure
 
 
 @router.post(
@@ -1353,12 +1432,13 @@ async def generate_commission_tax_records_endpoint(
     tax_year: int,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
-    records = await generate_commission_tax_records(db, tax_year)
-    await db.commit()
-    for record in records:
-        await db.refresh(record)
-    return records
+    from app.compliance_routes import generate_tax_records
+
+    return await generate_tax_records(tax_year, db, user, idempotency_key)
 
 
 @router.get(
@@ -1394,12 +1474,6 @@ async def set_commission_tax_record_tin(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
 ):
-    record = await db.get(compliance_models.CommissionTaxRecord, record_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Commission tax record not found")
-    await update_recipient_tin(
-        db, record, recipient_name=payload.recipient_name, tin=payload.tin
-    )
-    await db.commit()
-    await db.refresh(record)
-    return record
+    from app.compliance_routes import set_tax_record_tin
+
+    return await set_tax_record_tin(record_id, payload, db, user)

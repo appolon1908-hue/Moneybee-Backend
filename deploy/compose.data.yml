@@ -5,8 +5,7 @@ services:
     image: ${MONEYBEE_POSTGRES_IMAGE:?set an immutable PostgreSQL image digest}
     environment:
       POSTGRES_DB: moneybee
-      # Fresh clusters only. Changing POSTGRES_USER does not alter an existing data directory.
-      POSTGRES_USER: moneybee_admin
+      POSTGRES_USER: moneybee_db_admin
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
     secrets:
       - postgres_admin_password
@@ -26,7 +25,7 @@ services:
     pids_limit: 300
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U moneybee_admin -d moneybee"]
+      test: ["CMD-SHELL", "pg_isready -U moneybee_db_admin -d moneybee"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -46,7 +45,7 @@ services:
     command:
       - >-
         export PGPASSWORD="$$(cat /run/secrets/postgres_admin_password)";
-        exec psql -h moneybee-postgres -U moneybee_admin -d moneybee
+        exec psql -h moneybee-postgres -U moneybee_db_admin -d moneybee
         -v ON_ERROR_STOP=1
         -v migrator_password="$$(cat /run/secrets/postgres_migrator_password)"
         -v runtime_password="$$(cat /run/secrets/postgres_runtime_password)"

@@ -14,7 +14,7 @@ os.environ.setdefault(
     "FIELD_ENCRYPTION_KEYS_JSON",
     '{"1": "zJ8vQ3mK7pR2sT5wX9aB1cD4eF6gH0iJ2kL4mN6oP8q="}',
 )
-os.environ.setdefault("FIELD_ENCRYPTION_CURRENT_VERSION", "1")
+os.environ.setdefault("FIELD_ENCRYPTION_ACTIVE_KEY_VERSION", "1")
 
 
 def _remove_local_sqlite_file(url: str) -> None:

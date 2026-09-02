@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -60,7 +61,7 @@ class _FakeClamd:
         await self._server.wait_closed()
 
 
-async def _seed_quarantined_document() -> str:
+async def _seed_quarantined_document(content: bytes = b"harmless content") -> str:
     async with SessionLocal() as db:
         lead = models.Lead(
             first_name="Doc",
@@ -91,7 +92,7 @@ async def _seed_quarantined_document() -> str:
             mime_type="application/pdf",
             size_bytes=11,
             storage_key=f"documents/{uuid.uuid4().hex}",
-            sha256="0" * 64,
+            sha256=hashlib.sha256(content).hexdigest(),
             status="QUARANTINED",
             uploaded_by="test-subject",
         )
@@ -123,7 +124,7 @@ async def test_scan_pending_document_marks_a_clean_result(monkeypatch):
     monkeypatch.setattr(worker, "storage_adapter", lambda: fake_storage)
 
     with TestClient(app):
-        document_id = await _seed_quarantined_document()
+        document_id = await _seed_quarantined_document(b"harmless content")
         try:
             # Loop until this test's own document is claimed - the worker
             # claims globally-oldest QUARANTINED, and other tests in this
@@ -152,7 +153,7 @@ async def test_scan_pending_document_rejects_and_deletes_an_infected_file(monkey
     monkeypatch.setattr(worker, "storage_adapter", lambda: fake_storage)
 
     with TestClient(app):
-        document_id = await _seed_quarantined_document()
+        document_id = await _seed_quarantined_document(b"fake malware bytes")
         try:
             for _ in range(10):
                 processed = await worker.scan_pending_document()
@@ -168,11 +169,39 @@ async def test_scan_pending_document_rejects_and_deletes_an_infected_file(monkey
     assert fake_storage.deleted_keys
 
 
+async def test_scan_pending_document_rejects_checksum_mismatch_before_scanning(monkeypatch):
+    class ScannerMustNotRun:
+        async def scan(self, content: bytes):
+            raise AssertionError("checksum-mismatched bytes must not reach the scanner")
+
+    fake_storage = _FakeStorage(b"tampered stored bytes")
+    monkeypatch.setattr(settings, "malware_scan_provider", "clamav")
+    monkeypatch.setattr(worker, "storage_adapter", lambda: fake_storage)
+    monkeypatch.setattr(worker, "malware_scanner", lambda: ScannerMustNotRun())
+    with TestClient(app):
+        document_id = await _seed_quarantined_document(b"original uploaded bytes")
+        assert await worker.scan_pending_document() == document_id
+
+    async with SessionLocal() as db:
+        document = await db.get(models.Document, uuid.UUID(document_id))
+        assert document.status == "REJECTED"
+        assert document.scan_provider == "integrity-check"
+        assert document.scan_result == "STORED_DOCUMENT_CHECKSUM_MISMATCH"
+        assert document.provider_terminal_at is not None
+        exception = await db.scalar(
+            select(OperationalException).where(
+                OperationalException.fingerprint
+                == f"DOCUMENT_CHECKSUM_MISMATCH:{document_id}"
+            )
+        )
+        assert exception is not None
+
+
 async def test_scan_failure_persists_backoff_and_does_not_starve_another_document(monkeypatch):
     monkeypatch.setattr(settings, "malware_scan_provider", "clamav")
     monkeypatch.setattr(worker, "storage_adapter", lambda: _FailingStorage())
     with TestClient(app):
-        first_id = await _seed_quarantined_document()
+        first_id = await _seed_quarantined_document(b"safe")
         assert await worker.scan_pending_document() is None
         async with SessionLocal() as db:
             first = await db.get(models.Document, uuid.UUID(first_id))
@@ -186,7 +215,7 @@ async def test_scan_failure_persists_backoff_and_does_not_starve_another_documen
         monkeypatch.setattr(settings, "clamav_host", "127.0.0.1")
         monkeypatch.setattr(settings, "clamav_port", port)
         monkeypatch.setattr(worker, "storage_adapter", lambda: _FakeStorage(b"safe"))
-        second_id = await _seed_quarantined_document()
+        second_id = await _seed_quarantined_document(b"safe")
         try:
             processed = await worker.scan_pending_document()
             assert processed == second_id
@@ -208,7 +237,7 @@ async def test_repeated_scan_failure_dead_letters_and_survives_worker_restart(mo
     monkeypatch.setattr(settings, "malware_scan_provider", "clamav")
     monkeypatch.setattr(worker, "storage_adapter", lambda: _FailingStorage())
     with TestClient(app):
-        document_id = await _seed_quarantined_document()
+        document_id = await _seed_quarantined_document(b"safe")
         async with SessionLocal() as db:
             document = await db.get(models.Document, uuid.UUID(document_id))
             document.provider_attempt_count = worker.PROVIDER_MAX_ATTEMPTS - 1
@@ -261,7 +290,7 @@ async def test_postgres_concurrent_workers_cannot_claim_the_same_document(monkey
     monkeypatch.setattr(worker, "storage_adapter", lambda: _FakeStorage(b"safe"))
     monkeypatch.setattr(worker, "malware_scanner", lambda: BlockingScanner())
     with TestClient(app):
-        document_id = await _seed_quarantined_document()
+        document_id = await _seed_quarantined_document(b"safe")
         first = asyncio.create_task(worker.scan_pending_document())
         await asyncio.wait_for(started.wait(), timeout=5)
         second = await worker.scan_pending_document()

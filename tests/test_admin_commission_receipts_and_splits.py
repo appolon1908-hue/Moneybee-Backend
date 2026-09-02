@@ -287,6 +287,64 @@ async def test_commission_splits_are_created_and_capped_at_net_expected():
         assert overflow.status_code == 422
 
 
+async def test_commission_split_payment_evidence_is_audited_and_idempotent():
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+        created = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits",
+            json={
+                "recipient_type": "BROKER",
+                "recipient_reference": "broker-paid-evidence",
+                "amount": "600.00",
+            },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert created.status_code == 201
+        split_id = created.json()["id"]
+        key = uuid.uuid4().hex
+        payload = {
+            "paid_at": "2026-08-31T12:00:00Z",
+            "payment_reference": "accounting-proof-2026-0001",
+        }
+        paid = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+            json=payload,
+            headers={"Idempotency-Key": key},
+        )
+        replay = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+            json=payload,
+            headers={"Idempotency-Key": key},
+        )
+        assert paid.status_code == replay.status_code == 200
+        assert paid.json() == replay.json()
+        assert paid.json()["status"] == "PAID"
+
+        conflict = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+            json={**payload, "payment_reference": "different-proof"},
+            headers={"Idempotency-Key": key},
+        )
+        assert conflict.status_code == 409
+
+    async with SessionLocal() as db:
+        stored_split = await db.get(models.CommissionSplit, uuid.UUID(split_id))
+        assert stored_split.payment_reference == payload["payment_reference"]
+        assert stored_split.paid_at is not None
+        audit_count = await db.scalar(
+            select(func.count(models.AuditEvent.id)).where(
+                models.AuditEvent.action == "COMMISSION_SPLIT_PAYMENT_RECORDED",
+                models.AuditEvent.resource_id == split_id,
+            )
+        )
+        idempotency_count = await db.scalar(
+            select(func.count(models.IdempotencyRecord.id)).where(
+                models.IdempotencyRecord.key == key,
+            )
+        )
+        assert audit_count == idempotency_count == 1
+
+
 async def test_postgres_concurrent_receipts_are_serialized_without_lost_updates():
     if not settings.database_url.startswith("postgresql"):
         pytest.skip("PostgreSQL row-lock evidence")

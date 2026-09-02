@@ -51,15 +51,12 @@ class Settings(BaseSettings):
 
     field_encryption_keys_json: str = "{}"
     field_encryption_active_key_version: str | None = None
-    field_encryption_current_version: str | None = None
-    pii_lookup_hmac_key: str | None = None
     provider_timeout_seconds: float = 30.0
     live_writes: bool = False
     odoo_write: bool = False
 
     log_level: str = "INFO"
     rate_limit_enabled: bool = True
-    rate_limit_backend: Literal["memory", "redis"] = "memory"
     rate_limit_window_seconds: int = 60
     public_rate_limit_per_minute: int = 60
     webhook_rate_limit_per_minute: int = 120
@@ -208,16 +205,16 @@ class Settings(BaseSettings):
         )
 
     @property
+    def codestra_sdk_capabilities(self) -> frozenset[str]:
+        return self._csv_set(self.codestra_sdk_capabilities_csv)
+
+    @property
     def provider_webhook_allowlist(self) -> set[str]:
         return {
             item.strip().lower()
             for item in self.provider_webhook_allowlist_csv.split(",")
             if item.strip()
         }
-
-    @property
-    def codestra_sdk_capabilities(self) -> frozenset[str]:
-        return self._csv_set(self.codestra_sdk_capabilities_csv)
 
     @property
     def provider_webhook_secrets(self) -> dict[str, str]:
@@ -244,10 +241,6 @@ class Settings(BaseSettings):
         ):
             raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be a string map")
         return {key: secret for key, secret in value.items() if secret}
-
-    @property
-    def current_field_encryption_version(self) -> str | None:
-        return self.field_encryption_current_version or self.field_encryption_active_key_version
 
     @property
     def oidc_algorithms(self) -> list[str]:
@@ -302,10 +295,6 @@ class Settings(BaseSettings):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
             if self.oidc_algorithms != ["RS256"]:
                 raise ValueError("Production OIDC tokens must use RS256")
-            if not self.database_runtime_role:
-                raise ValueError("DATABASE_RUNTIME_ROLE is required")
-            if self.rate_limit_enabled and self.rate_limit_backend != "redis":
-                raise ValueError("Staging/production rate limiting requires RATE_LIMIT_BACKEND=redis")
             if self.rate_limit_enabled and not self.redis_url.startswith(("redis://", "rediss://")):
                 raise ValueError("Distributed rate limiting requires REDIS_URL")
             if self.trust_forwarded_for and not self.trusted_proxy_cidrs:
@@ -316,18 +305,18 @@ class Settings(BaseSettings):
                 [
                     self.plaid_client_id,
                     self.plaid_secret,
-                    self.current_field_encryption_version,
+                    self.field_encryption_active_key_version,
                     self.field_encryption_keys,
                 ]
             ):
                 raise ValueError(
                     "Plaid requires credentials and a configured field encryption key"
                 )
-            if self.current_field_encryption_version and (
-                self.current_field_encryption_version not in self.field_encryption_keys
+            if self.field_encryption_active_key_version and (
+                self.field_encryption_active_key_version not in self.field_encryption_keys
             ):
                 raise ValueError(
-                    "FIELD_ENCRYPTION_CURRENT_VERSION must name a key present in "
+                    "FIELD_ENCRYPTION_ACTIVE_KEY_VERSION must name a key present in "
                     "FIELD_ENCRYPTION_KEYS_JSON"
                 )
             if self.middleware_provider == "codestra" and not all(
@@ -339,6 +328,19 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Codestra middleware configuration is incomplete")
+            if self.codestra_sdk_enabled:
+                if self.middleware_provider != "codestra":
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires MIDDLEWARE_PROVIDER=codestra"
+                    )
+                if not self.codestra_sdk_capabilities:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires a nonempty capability allowlist"
+                    )
+                if not self.source_sha:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires immutable SOURCE_SHA provenance"
+                    )
             if self.crm_provider == "odoo" and not all(
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):

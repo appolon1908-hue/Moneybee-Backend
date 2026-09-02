@@ -48,15 +48,20 @@ async def borrower_offer_disclosure(offer_id: uuid.UUID, db: Db, user: User):
     tags=["offers", "compliance"],
 )
 async def borrower_acknowledge_offer_disclosure(offer_id: uuid.UUID, db: Db, user: User):
+    # Keep this compatibility operation on the same audited/idempotent domain
+    # command as the canonical borrower compliance route.  The legacy shape
+    # predates the header, so its stable offer-scoped key is server-derived.
+    from app.compliance_routes import _acknowledge_disclosure, _disclosure_for_offer
+
     await _authorized_offer(db, offer_id, user, write=True)
-    disclosure = await compliance_service.acknowledge_offer_disclosure(
-        db, offer_id, actor=user.subject
+    disclosure = await _disclosure_for_offer(db, offer_id, lock=True)
+    return await _acknowledge_disclosure(
+        db=db,
+        disclosure=disclosure,
+        user=user,
+        idempotency_key=f"offer-disclosure-ack:{offer_id}",
+        route=f"/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
     )
-    if disclosure is None:
-        raise HTTPException(status_code=404, detail="Disclosure not found")
-    await db.commit()
-    await db.refresh(disclosure)
-    return disclosure
 
 
 @router.post(
