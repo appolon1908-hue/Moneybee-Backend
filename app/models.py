@@ -3,7 +3,19 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -757,6 +769,13 @@ class UnderwritingReview(Base, Record):
 
 class CommissionSplit(Base, Record):
     __tablename__ = "commission_splits"
+    __table_args__ = (
+        CheckConstraint(
+            "status != 'PAID' OR "
+            "(paid_at IS NOT NULL AND payment_reference IS NOT NULL)",
+            name="ck_commission_split_paid_evidence",
+        ),
+    )
 
     commission_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("commissions.id", ondelete="CASCADE"), index=True
