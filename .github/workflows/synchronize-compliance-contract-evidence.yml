@@ -52,6 +52,7 @@ jobs:
           BRANCH_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          rm -f compliance-contract.db
           allowed='^( M|M |A |AM|MM|\?\?) (docs/API_ENDPOINT_CATALOG\.md|docs/openapi/compliance-operator-api-manifest\.json)$'
           unexpected="$(git status --porcelain | grep -Ev "$allowed" || true)"
           if test -n "$unexpected"; then
