@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
     codestra_middleware_webhook_tolerance_seconds: int = 300
+    codestra_sdk_enabled: bool = False
+    codestra_sdk_capabilities_csv: str = ""
     provider_webhook_allowlist_csv: str = (
         "lender,docusign,sendgrid,twilio,odoo,n8n,experian"
     )
@@ -189,6 +191,10 @@ class Settings(BaseSettings):
         )
 
     @property
+    def codestra_sdk_capabilities(self) -> frozenset[str]:
+        return self._csv_set(self.codestra_sdk_capabilities_csv)
+
+    @property
     def provider_webhook_allowlist(self) -> set[str]:
         return {
             item.strip().lower()
@@ -304,6 +310,19 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Codestra middleware configuration is incomplete")
+            if self.codestra_sdk_enabled:
+                if self.middleware_provider != "codestra":
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires MIDDLEWARE_PROVIDER=codestra"
+                    )
+                if not self.codestra_sdk_capabilities:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires a nonempty capability allowlist"
+                    )
+                if not self.source_sha:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires immutable SOURCE_SHA provenance"
+                    )
             if self.crm_provider == "odoo" and not all(
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):
