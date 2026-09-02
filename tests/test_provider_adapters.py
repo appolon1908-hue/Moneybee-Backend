@@ -4,6 +4,8 @@ import json
 import os
 import uuid
 
+import pytest
+
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
@@ -21,6 +23,7 @@ from app.integrations.middleware import (
     serialize_event_envelope,
     sign_outbound_event,
 )
+from app.integrations.base import ProviderError
 from app.integrations.middesk import MiddeskAdapter
 from app.integrations.providers import DocuSignAdapter
 from app.integrations.registry import provider_statuses
@@ -139,6 +142,21 @@ def test_codestra_outbound_envelope_is_canonical_and_signed():
         "https://moneybee-events.codestra.co/",
         "/v1/events",
     ) == "https://moneybee-events.codestra.co/v1/events"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://api.codestra.co", "https://api.codestra.agency"],
+)
+def test_moneybee_rejects_public_codestra_gateway_as_middleware(base_url):
+    with pytest.raises(ProviderError, match="dedicated Middleware ingress"):
+        middleware_event_url(base_url, "/v1/events")
+
+
+@pytest.mark.parametrize("base_url", ["", "not-a-url", "/relative"])
+def test_moneybee_rejects_malformed_middleware_base_url(base_url):
+    with pytest.raises(ProviderError, match="base URL is invalid"):
+        middleware_event_url(base_url, "/v1/events")
 
 
 def test_external_delivery_gate_requires_explicit_opt_in(monkeypatch):
