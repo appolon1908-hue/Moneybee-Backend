@@ -325,14 +325,41 @@ async def ready():
     try:
         async with SessionLocal() as db:
             await db.execute(text("SELECT 1"))
+            if settings.app_env in {"staging", "production"}:
+                role = (
+                    await db.execute(
+                        text(
+                            "SELECT current_user, rolsuper, rolcreatedb, rolcreaterole, "
+                            "rolreplication, rolbypassrls FROM pg_roles "
+                            "WHERE rolname = current_user"
+                        )
+                    )
+                ).one_or_none()
+                if role is None:
+                    raise RuntimeError("runtime database role is not visible")
+                current_user, *privileged = role
+                if current_user != settings.database_runtime_role or any(privileged):
+                    raise RuntimeError("runtime database role violates least privilege")
         checks["database"] = "ok"
+        checks["database_role"] = (
+            "ok" if settings.app_env in {"staging", "production"} else "not_required"
+        )
     except Exception:
         checks["database"] = "unreachable"
+        checks["database_role"] = "invalid_or_unverified"
         healthy = False
 
     if healthy and not settings.auto_create_schema:
         try:
             expected_heads = set(_expected_migration_heads())
+            if settings.app_env in {"staging", "production"}:
+                if not settings.migration_head:
+                    raise RuntimeError("MIGRATION_HEAD is required")
+                configured_heads = set(settings.migration_head.split(","))
+                if configured_heads != expected_heads:
+                    raise RuntimeError(
+                        "configured migration head does not match release code"
+                    )
             async with SessionLocal() as db:
                 result = await db.execute(text("SELECT version_num FROM alembic_version"))
                 current_heads = {str(row[0]) for row in result.all() if row[0]}
@@ -345,15 +372,15 @@ async def ready():
                 healthy = False
             else:
                 checks["migrations"] = "ok"
-        except Exception as exc:
-            checks["migrations"] = (
-                f"unreadable: {exc.__class__.__name__}: {str(exc) or 'no detail'}"
-            )
+        except Exception:
+            checks["migrations"] = "unreadable_or_drifted"
             healthy = False
     else:
         checks["migrations"] = "skipped (auto_create_schema)"
 
-    if settings.rate_limit_enabled and settings.app_env != "test":
+    if settings.redis_required_for_readiness or (
+        settings.rate_limit_enabled and settings.app_env != "test"
+    ):
         try:
             await RedisRateLimitBackend().redis.ping()
             checks["redis_rate_limit"] = "ok"

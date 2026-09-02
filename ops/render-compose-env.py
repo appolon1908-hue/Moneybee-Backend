@@ -32,6 +32,11 @@ def main() -> int:
     urls = release["urls"]
     networks = runtime["networks"]
 
+    emit(
+        "MONEYBEE_POSTGRES_ADMIN_USER",
+        runtime.get("postgres_admin_user", "moneybee_admin"),
+    )
+
     for key, env_name in {
         "api": "MONEYBEE_API_IMAGE",
         "worker": "MONEYBEE_WORKER_IMAGE",

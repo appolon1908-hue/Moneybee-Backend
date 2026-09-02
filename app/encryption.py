@@ -3,7 +3,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from app.config import settings
 from app.integrations.base import ProviderError
 
-_PREFIX_SEPARATOR = ":"
+_ENVELOPE_PREFIX = "mbenc"
 
 
 def _fernet_for_version(version: str) -> Fernet:
@@ -31,12 +31,17 @@ def encrypt_secret(value: str) -> str:
             "FIELD_ENCRYPTION_ACTIVE_KEY_VERSION is not configured",
         )
     token = _fernet_for_version(version).encrypt(value.encode()).decode()
-    return f"{version}{_PREFIX_SEPARATOR}{token}"
+    return f"{_ENVELOPE_PREFIX}:{version}:{token}"
 
 
 def decrypt_secret(value: str) -> str:
-    version, _, token = value.partition(_PREFIX_SEPARATOR)
-    if not token:
+    parts = value.split(":", 2)
+    if len(parts) == 3 and parts[0] == _ENVELOPE_PREFIX:
+        _, version, token = parts
+    elif len(parts) == 2:
+        # Compatibility with the short-lived ``version:token`` format.
+        version, token = parts
+    else:
         raise ProviderError(
             "encryption",
             "Encrypted value is missing its key-version prefix",

@@ -11,6 +11,7 @@ from app import compliance_models, compliance_service, domain_logic, models, sch
 from app.auth import Principal, current_principal, require_permission
 from app.contract_void_service import ensure_provider_void_confirmed
 from app.db import get_db
+from app.idempotency import acquire_idempotency_lock
 from app.integrations.registry import esign_adapter, provider_statuses
 
 
@@ -1119,6 +1120,12 @@ async def mark_commission_split_paid(
     await _load_commission_or_404(db, commission_id)
     route = f"/admin/commissions/{commission_id}/splits/{split_id}/mark-paid"
     request_hash = _request_hash(payload.model_dump(mode="json"))
+    await acquire_idempotency_lock(
+        db,
+        actor_id=user.subject,
+        route=route,
+        key=idempotency_key,
+    )
     replay = await _funding_idempotency_replay(
         db,
         route=route,

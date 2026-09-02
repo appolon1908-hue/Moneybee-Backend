@@ -12,7 +12,7 @@ from app.integrations.base import ProviderError
 
 def test_encrypt_round_trips_and_prefixes_the_active_key_version():
     token = encrypt_secret("plaid-access-token-abc123")
-    assert token.startswith("1:")
+    assert token.startswith("mbenc:1:")
     assert decrypt_secret(token) == "plaid-access-token-abc123"
 
 
@@ -30,3 +30,9 @@ def test_rewrap_produces_a_value_that_still_decrypts_to_the_same_plaintext():
     original = encrypt_secret("broker-tin-123-45-6789")
     rewrapped = rewrap_secret(original)
     assert decrypt_secret(rewrapped) == "broker-tin-123-45-6789"
+
+
+def test_decrypt_accepts_legacy_short_version_envelope():
+    current = encrypt_secret("legacy-compatible")
+    legacy = current.removeprefix("mbenc:")
+    assert decrypt_secret(legacy) == "legacy-compatible"
