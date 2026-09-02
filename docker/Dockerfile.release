@@ -14,7 +14,13 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN python -m pip wheel --wheel-dir /wheels .
+# Keep bootstrap tooling and the transitive msgpack runtime above the fixed
+# security floors enforced by the release scanner. Explicit requirements make
+# these wheels available to the offline runtime installation below.
+RUN python -m pip wheel --wheel-dir /wheels \
+        "setuptools>=78.1.1" \
+        "msgpack>=1.2.1" \
+        .
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
