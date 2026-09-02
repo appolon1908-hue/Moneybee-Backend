@@ -12,7 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -54,7 +54,7 @@ jobs:
       LOCAL_IDENTITY_ENFORCEMENT: "true"
       DATABASE_URL: postgresql+asyncpg://moneybee:moneybee_test@localhost:5432/moneybee_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Start runner PostgreSQL
         run: |
           sudo systemctl start postgresql.service
@@ -104,7 +104,7 @@ jobs:
       matrix:
         role: [api, worker, migrate]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - name: Build backend ${{ matrix.role }} image
         uses: docker/build-push-action@v7
