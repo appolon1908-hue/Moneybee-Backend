@@ -17,6 +17,8 @@ external delivery/provider writes remain disabled by default.
   staged column only from the deployed legacy ciphertext shape.
 - Migration `20260901_0024` adds durable provider retry/lease state and prevents
   duplicate adverse-action notices for one underwriting review.
+- Migration `20260901_0025` fail-closes on duplicate contracts, enforces one
+  contract per offer, and adds durable inbox callback retry scheduling.
 - `moneybee_migrator` owns the application schema and existing application
   objects after an idempotent administrator-run transfer. `moneybee_runtime`
   has DML/sequence/function access only and cannot perform DDL, truncate, grant,
@@ -45,6 +47,9 @@ external delivery/provider writes remain disabled by default.
   create funding until authenticated acknowledgment evidence exists. Borrower
   read/acknowledgment routes enforce application ownership and share the same
   acknowledgment service used by the admin route.
+- Funding, contract, condition-completion, renewal, and commission transitions
+  use PostgreSQL aggregate locks. Provider callbacks retry if they arrive before
+  envelope persistence, and sent-envelope voids are confirmed upstream first.
 
 ## Migration contract
 
@@ -86,10 +91,10 @@ python scripts/generate_endpoint_catalog.py --check
 python ops/verify-compose-contract.py
 ```
 
-Observed before the final commit:
+Observed on implementation head `c03f049e84472b89c5847794128a9551a4fefc14`:
 
-- SQLite/application tests: 232 passed, 8 skipped.
-- Clean PostgreSQL/runtime tests: 240 passed.
+- SQLite/application tests: 247 passed, 10 skipped.
+- Clean PostgreSQL/runtime tests: 258 passed.
 - API smoke: 57 passed, 4 intentionally unavailable surfaces skipped.
 - OpenAPI: 159 canonical paths and 39 reviewed additions.
 - Identity/email repository readiness: 20 passed, 21 operator-only checks
