@@ -29,7 +29,10 @@ RUN python -m venv /opt/venv \
     && adduser --system --ingroup moneybee --home /nonexistent --no-create-home moneybee
 
 COPY --from=wheel /wheels /wheels
-RUN /opt/venv/bin/python -m pip install --no-cache-dir /wheels/*.whl \
+RUN set -eu; \
+    find /wheels -maxdepth 1 -type f -name '*.whl' ! -name 'moneybee_backend-*' \
+      -exec /opt/venv/bin/python -m pip install --no-cache-dir --no-deps {} +; \
+    /opt/venv/bin/python -m pip install --no-cache-dir --no-deps /wheels/moneybee_backend-*.whl \
     && rm -rf /wheels
 
 COPY alembic.ini ./alembic.ini
