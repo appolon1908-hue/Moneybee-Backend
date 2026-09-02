@@ -1,4 +1,5 @@
 {
+  "name": "compliance-operator-api",
   "paths": {
     "/api/v2/admin/compliance/adverse-action-notices": "4d2cefdc1aa57e616c9308a4d4ef7b13cb9d302d767fd315cf595d175272ef06",
     "/api/v2/admin/compliance/commercial-financing-disclosures": "991f842da6d7cf12a093126c2aa7dfc472e7d9257ddfa6c98d54c45ff69009df",
@@ -19,5 +20,6 @@
     "CommissionTaxRecordPage": "cc325422af522c80495d6d93d8fd6cfbf9a69d00248de92a3289433ee95174fc",
     "ComplianceOverviewRead": "a42a5a1f0ad7fd272ca37db501aa84be59cbbcfc49d136c12072892e39163dde",
     "StrictCommissionTaxRecordTinInput": "87a6fa2b70690f68b1a57e3598acf16389ba2b906bdabbe229311666ff4c4f2f"
-  }
+  },
+  "version": 1
 }
