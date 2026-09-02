@@ -53,7 +53,9 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Apply deterministic review fixes
-        run: python scripts/apply_codex_review_fixes.py
+        run: |
+          python scripts/apply_codex_review_fixes.py
+          sed -i '\#^from app.integrations.base import ProviderError$#d' app/admin_routes.py
       - name: Install and migrate
         run: |
           python -m pip install --upgrade pip wheel setuptools
