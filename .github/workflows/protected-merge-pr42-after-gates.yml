@@ -1,0 +1,95 @@
+name: protected-merge-pr42-after-gates
+
+on:
+  push:
+    branches:
+      - release/moneybee-repository-complete-20260902
+    paths:
+      - .github/workflows/protected-merge-pr42-after-gates.yml
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  merge-after-protected-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: "42"
+      REVIEWER: kazan555
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release/moneybee-repository-complete-20260902
+          fetch-depth: 1
+      - name: Remove one-shot merge workflow from candidate source
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/protected-merge-pr42-after-gates.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(ci): remove one-shot protected merge workflow"
+          git push origin HEAD:release/moneybee-repository-complete-20260902
+      - name: Request exact-head independent review
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -f "reviewers[]=${REVIEWER}" || true
+      - name: Wait for protected gates and merge exact head
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          last_status="not evaluated"
+          for attempt in $(seq 1 120); do
+            pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+            if test "$(jq -r '.merged' <<<"$pr")" = "true"; then
+              echo "PR already merged."
+              exit 0
+            fi
+            head_sha="$(jq -r '.head.sha' <<<"$pr")"
+            draft="$(jq -r '.draft' <<<"$pr")"
+
+            workflows="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${head_sha}&per_page=100")"
+            secure="$(jq -r --arg sha "$head_sha" '[.workflow_runs[] | select(.head_sha == $sha and .name == "secure-scaffold-ci")] | sort_by(.run_number) | last | (.status + ":" + (.conclusion // "")) // "missing"' <<<"$workflows")"
+            backend="$(jq -r --arg sha "$head_sha" '[.workflow_runs[] | select(.head_sha == $sha and .name == "backend-ci")] | sort_by(.run_number) | last | (.status + ":" + (.conclusion // "")) // "missing"' <<<"$workflows")"
+
+            review_data="$(gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}' \
+              -F owner="$owner" -F repo="$repo" -F number="${PR_NUMBER}")"
+            decision="$(jq -r '.data.repository.pullRequest.reviewDecision // "NONE"' <<<"$review_data")"
+            unresolved="$(jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' <<<"$review_data")"
+
+            last_status="head=${head_sha} draft=${draft} secure=${secure} backend=${backend} review=${decision} unresolved=${unresolved}"
+            echo "$last_status"
+
+            if test "$draft" = "false" \
+              && test "$secure" = "completed:success" \
+              && test "$backend" = "completed:success" \
+              && test "$decision" = "APPROVED" \
+              && test "$unresolved" = "0"; then
+              result="$(gh api --method PUT \
+                "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/merge" \
+                -f sha="$head_sha" \
+                -f merge_method=squash \
+                -f commit_title='release: complete MoneyBee backend repository and API contract (#42)' \
+                -f commit_message='Protected merge after exact-head CI, resolved review threads, and independent approval.')"
+              test "$(jq -r '.merged' <<<"$result")" = "true"
+              merge_sha="$(jq -r '.sha' <<<"$result")"
+              gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/issues/44/comments" \
+                -f body="Backend PR #42 protected-merged at \`${merge_sha}\` after exact-head CI, zero unresolved review threads, and independent approval. No deployment, SSH change, production access, or external-effect activation occurred."
+              echo "BACKEND_PROTECTED_MERGE_SHA=${merge_sha}"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -f body="Protected merge remains blocked after the one-shot gate wait. Last observed status: \`${last_status}\`. No protection was bypassed and no production or SSH change occurred."
+          exit 1
