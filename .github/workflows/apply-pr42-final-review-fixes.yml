@@ -1,0 +1,123 @@
+name: apply-pr42-final-review-fixes
+
+on:
+  push:
+    branches:
+      - release/moneybee-repository-complete-20260902
+    paths-ignore:
+      - app/admin_routes.py
+      - app/integrations/storage.py
+      - app/portal/borrower.py
+      - app/worker.py
+      - migrations/versions/20260902_0028_document_storage_version.py
+      - tests/test_contract_engine.py
+      - tests/test_document_scan_worker.py
+      - tests/test_storage_version_guards.py
+      - docs/reviews/PR42_FINAL_EXACT_HEAD_REMEDIATION.md
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pr42-final-review-fixes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_pr42
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_pr42"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_pr42
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
+      LOCAL_IDENTITY_ENFORCEMENT: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      ESIGN_LIVE_SEND: "false"
+      FIELD_ENCRYPTION_KEYS_JSON: '{"1":"zJ8vQ3mK7pR2sT5wX9aB1cD4eF6gH0iJ2kL4mN6oP8q="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY_VERSION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Apply deterministic review fixes
+        run: python scripts/apply_pr42_final_review_fixes.py
+      - name: Install repository
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+      - name: Validate source and migrations
+        run: |
+          git diff --check
+          python -m compileall -q app tests migrations scripts ops
+          python -m ruff check app tests migrations scripts ops
+          alembic upgrade head
+      - name: Run focused regression gates
+        run: |
+          python -m pytest -q \
+            tests/test_contract_engine.py \
+            tests/test_document_scan_worker.py \
+            tests/test_storage_version_guards.py
+          python scripts/verify_openapi_contract.py
+          python scripts/generate_endpoint_catalog.py --check
+      - name: Commit reviewed outputs
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git add \
+            app/admin_routes.py \
+            app/integrations/storage.py \
+            app/portal/borrower.py \
+            app/worker.py \
+            migrations/versions/20260902_0028_document_storage_version.py \
+            tests/test_contract_engine.py \
+            tests/test_document_scan_worker.py \
+            tests/test_storage_version_guards.py \
+            docs/reviews/PR42_FINAL_EXACT_HEAD_REMEDIATION.md
+          if git diff --cached --quiet; then
+            echo "Final PR #42 review fixes already applied."
+            exit 0
+          fi
+          while IFS= read -r path; do
+            case "$path" in
+              app/admin_routes.py|\
+              app/integrations/storage.py|\
+              app/portal/borrower.py|\
+              app/worker.py|\
+              migrations/versions/20260902_0028_document_storage_version.py|\
+              tests/test_contract_engine.py|\
+              tests/test_document_scan_worker.py|\
+              tests/test_storage_version_guards.py|\
+              docs/reviews/PR42_FINAL_EXACT_HEAD_REMEDIATION.md)
+                ;;
+              *)
+                echo "Unexpected staged path: $path" >&2
+                exit 1
+                ;;
+            esac
+          done < <(git diff --cached --name-only)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(review): close final MoneyBee backend findings"
+          git push origin "HEAD:${BRANCH_NAME}"
