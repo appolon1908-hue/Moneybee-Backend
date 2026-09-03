@@ -1,0 +1,121 @@
+name: close-pr42-final-review-threads
+
+on:
+  push:
+    branches:
+      - release/moneybee-repository-complete-20260902
+    paths:
+      - .github/workflows/close-pr42-final-review-threads.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate-and-close:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: moneybee
+          POSTGRES_PASSWORD: moneybee
+          POSTGRES_DB: moneybee_pr42_closure
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moneybee -d moneybee_pr42_closure"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee@127.0.0.1:5432/moneybee_pr42_closure
+      AUTO_CREATE_SCHEMA: "false"
+      LOCAL_AUTH_BYPASS: "true"
+      LOCAL_IDENTITY_ENFORCEMENT: "false"
+      ENABLE_EXTERNAL_DELIVERY: "false"
+      ESIGN_LIVE_SEND: "false"
+      FIELD_ENCRYPTION_KEYS_JSON: '{"1":"zJ8vQ3mK7pR2sT5wX9aB1cD4eF6gH0iJ2kL4mN6oP8q="}'
+      FIELD_ENCRYPTION_ACTIVE_KEY_VERSION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release/moneybee-repository-complete-20260902
+          fetch-depth: 1
+      - name: Wait for the validated remediation commit
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 60); do
+            git fetch origin release/moneybee-repository-complete-20260902
+            git reset --hard origin/release/moneybee-repository-complete-20260902
+            if test -f docs/reviews/PR42_FINAL_EXACT_HEAD_REMEDIATION.md \
+              && test -f tests/test_storage_version_guards.py \
+              && grep -q 'DOCUMENT_STORAGE_VERSIONING_REQUIRED' app/portal/borrower.py \
+              && grep -q 'elif contract.status == "DRAFT"' app/admin_routes.py \
+              && grep -q 'ApplicationStatus.CONTRACT_SENT' app/worker.py \
+              && grep -q "status = 'REUPLOAD_REQUIRED'" migrations/versions/20260902_0028_document_storage_version.py; then
+              ready=true
+              break
+            fi
+            sleep 15
+          done
+          test "$ready" = true
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install and validate exact branch head
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -e ".[dev]"
+          python -m pip check
+          git diff --check
+          python -m compileall -q app tests migrations scripts ops
+          python -m ruff check app tests migrations scripts ops
+          alembic upgrade head
+          python -m pytest -q \
+            tests/test_contract_engine.py \
+            tests/test_document_scan_worker.py \
+            tests/test_storage_version_guards.py
+          python scripts/verify_openapi_contract.py
+          python scripts/generate_endpoint_catalog.py --check
+      - name: Record evidence and resolve remediated threads
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="Final exact-head review remediation is present and the focused PostgreSQL/source/contract gates passed at \`${head_sha}\`.
+
+Implemented and tested:
+- DRAFT contracts are atomically voided when funding is declined;
+- bucket versioning must be confirmed enabled and blank/\`null\` S3 VersionIds are rejected;
+- pre-existing unversioned QUARANTINED documents move to recoverable \`REUPLOAD_REQUIRED\`;
+- successful envelope sends advance the application atomically to \`CONTRACT_SENT\`;
+- whitespace-only envelope identifiers are rejected.
+
+Evidence: ${run_url}
+
+No deployment, server access, SSH change, secret addition, or external-effect activation occurred. Normal exact-head CI and fresh independent approval remain required before merge."
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/42/comments" \
+            -f body="$body"
+          for thread_id in \
+            PRRT_kwDOUBgoGc6etVXS \
+            PRRT_kwDOUBgoGc6etVXT \
+            PRRT_kwDOUBgoGc6etVXV \
+            PRRT_kwDOUBgoGc6etVXW \
+            PRRT_kwDOUBgoGc6etVXY; do
+            gh api graphql \
+              -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' \
+              -F threadId="$thread_id"
+          done
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/pulls/42/requested_reviewers" \
+            -f 'reviewers[]=kazan555' || true
