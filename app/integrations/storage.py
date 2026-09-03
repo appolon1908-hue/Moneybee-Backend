@@ -47,6 +47,31 @@ class S3ObjectStorageAdapter:
             "object_key": object_key,
         }
 
+    async def get_private(self, *, object_key: str, version_id: str | None = None) -> bytes:
+        client = self._client()
+        params = {"Bucket": settings.object_storage_bucket, "Key": object_key}
+        if version_id:
+            params["VersionId"] = version_id
+        try:
+            response = await asyncio.to_thread(
+                client.get_object,
+                **params,
+            )
+        except Exception as exc:
+            raise ProviderError("s3", "Stored object could not be retrieved") from exc
+        return await asyncio.to_thread(response["Body"].read)
+
+    async def delete_private(self, *, object_key: str) -> None:
+        client = self._client()
+        try:
+            await asyncio.to_thread(
+                client.delete_object,
+                Bucket=settings.object_storage_bucket,
+                Key=object_key,
+            )
+        except Exception as exc:
+            raise ProviderError("s3", "Stored object could not be deleted") from exc
+
     async def presigned_upload(
         self,
         *,
@@ -67,6 +92,19 @@ class S3ObjectStorageAdapter:
             ExpiresIn=min(max(expires_seconds, 60), 900),
         )
 
+    async def bucket_versioning_enabled(self) -> bool:
+        client = self._client()
+        try:
+            response = await asyncio.to_thread(
+                client.get_bucket_versioning,
+                Bucket=settings.object_storage_bucket,
+            )
+        except Exception as exc:
+            raise ProviderError(
+                "s3", "Bucket versioning status could not be verified"
+            ) from exc
+        return response.get("Status") == "Enabled"
+
     async def head_private(self, *, object_key: str) -> dict:
         client = self._client()
         try:
@@ -83,14 +121,15 @@ class S3ObjectStorageAdapter:
         *,
         object_key: str,
         expires_seconds: int = 300,
+        version_id: str | None = None,
     ) -> str:
         client = self._client()
+        params = {"Bucket": settings.object_storage_bucket, "Key": object_key}
+        if version_id:
+            params["VersionId"] = version_id
         return await asyncio.to_thread(
             client.generate_presigned_url,
             "get_object",
-            Params={
-                "Bucket": settings.object_storage_bucket,
-                "Key": object_key,
-            },
+            Params=params,
             ExpiresIn=min(max(expires_seconds, 60), 900),
         )

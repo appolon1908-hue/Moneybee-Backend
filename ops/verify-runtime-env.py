@@ -31,9 +31,12 @@ REQUIRED_EXACT = {
     "EMAIL_PROVIDER": "disabled",
     "SMS_PROVIDER": "disabled",
     "OBJECT_STORAGE_MODE": "disabled",
+    "PAYMENT_PROVIDER": "disabled",
+    "MALWARE_SCAN_PROVIDER": "disabled",
 }
 OPTIONAL_FALSE = {
     "ENABLE_EXTERNAL_DELIVERY",
+    "CODESTRA_SDK_ENABLED",
     "LIVE_WRITES",
     "ODOO_WRITE",
     "N8N_DELIVERY_ENABLED",
@@ -158,10 +161,12 @@ def main() -> int:
         if values.get("STAGING_STATUS") not in {"NOT_CONFIGURED", "FAIL"}:
             raise ValidationError("STAGING_STATUS must not claim PASS before deployment")
 
-        if not values.get("FIELD_ENCRYPTION_KEY"):
-            raise ValidationError("FIELD_ENCRYPTION_KEY must be configured outside Git")
-        if values.get("FIELD_ENCRYPTION_KEY", "").startswith(("CHANGE_", "example", "test")):
-            raise ValidationError("FIELD_ENCRYPTION_KEY appears to be a placeholder")
+        if not values.get("FIELD_ENCRYPTION_KEYS_JSON") or values.get("FIELD_ENCRYPTION_KEYS_JSON") == "{}":
+            raise ValidationError("FIELD_ENCRYPTION_KEYS_JSON must be configured outside Git")
+        if values.get("FIELD_ENCRYPTION_KEYS_JSON", "").startswith(("CHANGE_", "example", "test")):
+            raise ValidationError("FIELD_ENCRYPTION_KEYS_JSON appears to be a placeholder")
+        if not values.get("FIELD_ENCRYPTION_ACTIVE_KEY_VERSION"):
+            raise ValidationError("FIELD_ENCRYPTION_ACTIVE_KEY_VERSION must be configured outside Git")
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
         print(f"ERROR={exc}", file=sys.stderr)
         return 1

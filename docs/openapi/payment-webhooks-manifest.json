@@ -1,0 +1,7 @@
+{
+  "paths": {
+    "/api/v2/webhooks/paypal": "082068b14416c200cd9c7d47e67f19b1da70e23f139cd2f17ab4864912282ff3",
+    "/api/v2/webhooks/stripe": "b8b74c900f2303aeea3224219485053b1a19bf6f35253514562041f9aba1cae8"
+  },
+  "schemas": {}
+}

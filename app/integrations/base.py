@@ -110,6 +110,12 @@ class ESignAdapter(Protocol):
     ) -> dict:
         ...
 
+    async def void_envelope(self, *, envelope_id: str, reason: str) -> dict:
+        ...
+
+    async def envelope_status(self, *, envelope_id: str) -> dict:
+        ...
+
 
 class EmailAdapter(Protocol):
     async def send(
@@ -127,6 +133,32 @@ class SMSAdapter(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class PayoutResult:
+    provider: str
+    payout_id: str
+    status: str
+    raw: dict
+
+
+class PaymentAdapter(Protocol):
+    name: str
+
+    async def send_payout(
+        self,
+        *,
+        idempotency_key: str,
+        amount: str,
+        currency: str,
+        destination: str,
+        description: str,
+    ) -> PayoutResult:
+        ...
+
+    async def get_payout_status(self, payout_id: str) -> PayoutResult:
+        ...
+
+
 class ObjectStorageAdapter(Protocol):
     async def put_private(
         self,
@@ -137,10 +169,32 @@ class ObjectStorageAdapter(Protocol):
     ) -> dict:
         ...
 
+    async def get_private(self, *, object_key: str, version_id: str | None = None) -> bytes:
+        ...
+
+    async def delete_private(self, *, object_key: str) -> None:
+        ...
+
     async def presigned_download(
         self,
         *,
         object_key: str,
         expires_seconds: int,
+        version_id: str | None = None,
     ) -> str:
+        ...
+
+
+@dataclass(frozen=True)
+class MalwareScanResult:
+    provider: str
+    clean: bool
+    signature: str | None
+    raw: str
+
+
+class MalwareScanner(Protocol):
+    name: str
+
+    async def scan(self, content: bytes) -> MalwareScanResult:
         ...

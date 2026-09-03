@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 import sys
@@ -26,11 +27,14 @@ REQUIRED_IMAGES = {
     "lender": "moneybee-lender",
     "admin": "moneybee-admin",
 }
-INFRA_IMAGES = {"postgres", "redis", "caddy"}
+INFRA_IMAGES = {"postgres", "redis", "caddy", "clamav"}
 REQUIRED_PATHS = {
     "release_root",
     "current_symlink",
-    "backend_env_file",
+    "migrator_env_file",
+    "runtime_env_file",
+    "roles_sql_path",
+    "clamav_database_path",
     "caddy_data_path",
     "caddy_config_path",
     "backup_root",
@@ -38,7 +42,9 @@ REQUIRED_PATHS = {
 COMPOSE_DATA_PATHS = {
     "postgres_data_path",
     "redis_data_path",
-    "postgres_password_file",
+    "postgres_admin_password_file",
+    "postgres_migrator_password_file",
+    "postgres_runtime_password_file",
     "redis_acl_file",
 }
 
@@ -162,6 +168,14 @@ def validate_release(lock: dict[str, Any], *, allow_unverified: bool) -> None:
             or len(acme_email) > 320
         ):
             raise ValidationError("caddy_acme_email is required for a verified release")
+        proxy_cidrs = lock.get("trusted_proxy_cidrs_csv")
+        if not isinstance(proxy_cidrs, str) or not proxy_cidrs.strip():
+            raise ValidationError("trusted_proxy_cidrs_csv is required for a verified release")
+        try:
+            for value in proxy_cidrs.split(","):
+                ipaddress.ip_network(value.strip(), strict=False)
+        except ValueError as exc:
+            raise ValidationError("trusted_proxy_cidrs_csv contains an invalid CIDR") from exc
 
         for key in ("runtime_paths_evidence_sha256", "configuration_checksum"):
             value = lock.get(key)

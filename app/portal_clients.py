@@ -74,6 +74,8 @@ def token_client_id(claims: Mapping[str, Any]) -> str:
 
 def _portal_names_for_path(path: str) -> frozenset[PortalName] | None:
     normalized = path.rstrip("/") or "/"
+    if normalized == "/api/v1" or normalized.startswith("/api/v1/"):
+        normalized = "/api/v2" + normalized[len("/api/v1"):]
     if normalized == "/api/v2/auth/bootstrap":
         return frozenset({"borrower"})
     if normalized == "/api/v2/borrower" or normalized.startswith("/api/v2/borrower/"):
@@ -89,7 +91,10 @@ def _portal_names_for_path(path: str) -> frozenset[PortalName] | None:
         return frozenset({"admin"})
     if normalized == "/api/v2/applications" or normalized.startswith("/api/v2/applications/"):
         return frozenset({"borrower", "admin"})
-    if normalized.startswith("/api/v2/offers/") and normalized.endswith("/accept"):
+    if normalized.startswith("/api/v2/offers/") and (
+        normalized.endswith("/accept")
+        or "/commercial-financing-disclosure" in normalized
+    ):
         return frozenset({"borrower"})
     if normalized.startswith("/api/v2/conditions/") and normalized.endswith("/submit"):
         return frozenset({"borrower"})

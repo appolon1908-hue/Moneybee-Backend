@@ -84,12 +84,18 @@ def test_lender_dashboard_programs_and_versioned_decision():
             },
         )
         assert program.status_code == 200
+        program_id = program.json()["id"]
         client.post(f"/api/v2/applications/{application_id}/match")
         submissions = client.post(
             f"/api/v2/admin/applications/{application_id}/prepare-matched-submissions"
         )
         assert submissions.status_code == 200
-        submission_id = submissions.json()[0]["id"]
+        # The application can match against lender programs created by other
+        # tests sharing this database, so select this test's own submission
+        # by program_id rather than assuming it is the only (or first) match.
+        submission_id = next(
+            item["id"] for item in submissions.json() if item["program_id"] == program_id
+        )
 
         dashboard = client.get("/api/v2/lender/dashboard")
         assert dashboard.status_code == 200

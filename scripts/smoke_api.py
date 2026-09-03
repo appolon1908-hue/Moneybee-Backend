@@ -239,7 +239,7 @@ def smoke_login_and_auth(client: TestClient) -> list[SmokeResult]:
             "auth.bootstrap.fails_without_token",
             client.post("/api/v2/auth/bootstrap", headers={"Idempotency-Key": uuid.uuid4().hex}),
             401,
-            lambda payload: payload["detail"]["code"] == "AUTHENTICATION_REQUIRED",
+            lambda payload: payload["code"] == "AUTHENTICATION_REQUIRED",
         ),
     ]
     token = os.getenv("MONEYBEE_SMOKE_ACCESS_TOKEN")
@@ -295,7 +295,7 @@ def smoke_public_prequalification(client: TestClient) -> list[SmokeResult]:
             "public.prequalification.conflict",
             conflict,
             409,
-            lambda payload: payload["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT",
+            lambda payload: payload["code"] == "IDEMPOTENCY_KEY_CONFLICT",
         ),
     ]
 
@@ -346,7 +346,7 @@ def smoke_capability_gates(client: TestClient) -> list[SmokeResult]:
             "capability.bank_link.fail_closed",
             client.post(f"/api/v2/applications/{application_id}/bank/link-session"),
             503,
-            lambda payload: payload["detail"]["code"] == "CAPABILITY_UNAVAILABLE",
+            lambda payload: payload["code"] == "CAPABILITY_UNAVAILABLE",
         ),
         _expect(
             "capability.effective_flags.available",
@@ -523,6 +523,9 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
     offer_id = offer.json().get("id") if offer.status_code == 201 else ""
     application = client.get(f"/api/v2/applications/{application_id}")
     expected_version = application.json().get("version") if application.status_code == 200 else None
+    disclosure_ack = client.post(
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
     results.extend(
         [
             _expect(
@@ -530,6 +533,12 @@ def smoke_portal_workflows(client: TestClient) -> list[SmokeResult]:
                 client.get(f"/api/v2/applications/{application_id}/offers"),
                 200,
                 lambda payload: any(item["id"] == offer_id for item in payload),
+            ),
+            _expect(
+                "portal.borrower_offer.disclosure_acknowledge",
+                disclosure_ack,
+                200,
+                lambda payload: payload["acknowledged_at"] is not None,
             ),
             _expect(
                 "portal.borrower_offer.accept",

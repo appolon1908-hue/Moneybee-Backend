@@ -248,7 +248,7 @@ def test_financial_ledger_rejects_same_key_with_different_economic_command():
             ),
         )
         assert collision.status_code == 409, collision.text
-        assert collision.json()["detail"]["code"] == "IDEMPOTENCY_CONFLICT"
+        assert collision.json()["code"] == "IDEMPOTENCY_CONFLICT"
         assert asyncio.run(journal_count_for_organization(organization_id)) == 1
 
 
@@ -294,7 +294,7 @@ def test_financial_ledger_requires_open_accounting_period():
             ),
         )
         assert response.status_code == 409
-        assert response.json()["detail"]["code"] == "ACCOUNTING_PERIOD_REQUIRED"
+        assert response.json()["code"] == "ACCOUNTING_PERIOD_REQUIRED"
 
 
 def test_trial_balance_requires_currency_for_multi_currency_chart():
@@ -308,7 +308,7 @@ def test_trial_balance_requires_currency_for_multi_currency_chart():
             headers=tenant_headers(organization_id),
         )
         assert ambiguous.status_code == 422
-        assert ambiguous.json()["detail"]["code"] == "CURRENCY_REQUIRED"
+        assert ambiguous.json()["code"] == "CURRENCY_REQUIRED"
 
         usd = client.get(
             "/api/v2/finance/trial-balance",
@@ -325,7 +325,7 @@ def test_finance_contract_uses_headers_not_query_or_body_for_tenant_and_replay()
         organization_id = asyncio.run(create_organization())
         missing_context = client.get("/api/v2/finance/accounts")
         assert missing_context.status_code == 422
-        assert missing_context.json()["detail"]["code"] == "ORGANIZATION_REQUIRED"
+        assert missing_context.json()["code"] == "ORGANIZATION_REQUIRED"
 
         forbidden_body = client.post(
             "/api/v2/finance/accounts",

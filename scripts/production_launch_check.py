@@ -134,7 +134,10 @@ def repo_marketing_checks(marketing_root: Path) -> list[Check]:
         ),
         check(
             "marketing.seo.runtime_meta",
-            "PASS" if (src / "seo.ts").exists() and "application/ld+json" in read_text(src / "seo.ts") else "FAIL",
+            "PASS"
+            if (src / "seo.ts").exists()
+            and "application/ld+json" in read_text(src / "seo.ts")
+            else "FAIL",
             "route metadata and JSON-LD are configured",
         ),
         check(
@@ -149,7 +152,9 @@ def repo_marketing_checks(marketing_root: Path) -> list[Check]:
         ),
         check(
             "marketing.sitemap",
-            "PASS" if sitemap.count("<url>") >= REQUIRED_LANDING_COUNT + len(REQUIRED_POLICY_SLUGS) else "FAIL",
+            "PASS"
+            if sitemap.count("<url>") >= REQUIRED_LANDING_COUNT + len(REQUIRED_POLICY_SLUGS)
+            else "FAIL",
             f"{sitemap.count('<url>')} sitemap URLs found",
         ),
         check(
@@ -169,7 +174,11 @@ def repo_marketing_checks(marketing_root: Path) -> list[Check]:
         )
 
     publisher_id = os.getenv("GOOGLE_ADSENSE_PUBLISHER_ID", "").strip()
-    has_real_adsense = bool(publisher_id) and publisher_id in ads and "pub-0000000000000000" not in ads
+    has_real_adsense = (
+        bool(publisher_id)
+        and publisher_id in ads
+        and "pub-0000000000000000" not in ads
+    )
     results.append(
         check(
             "google.ads_txt.publisher",

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
 from app.auth import Principal, current_principal
+from app.compliance_service import generate_adverse_action_notice
 from app.db import get_db
 from app.portal.common import problem, require_any_permission
 from app.portal import models as portal_models
@@ -638,6 +639,12 @@ async def lender_decision(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=160)],
 ):
     require_any_permission(user, "lender.decision.create", "underwriting.review")
+    if payload.decision == "DECLINE" and not payload.reason_codes:
+        problem(
+            "DECLINE_REASON_REQUIRED",
+            "A lender decline requires at least one specific reason code.",
+            422,
+        )
     submission = await _authorized_submission(db, submission_id, user, lock=True)
     if submission.version != payload.expected_version:
         problem(
@@ -688,6 +695,8 @@ async def lender_decision(
     )
     db.add(review)
     await db.flush()
+    if payload.decision == "DECLINE":
+        await generate_adverse_action_notice(db, review)
     db.add(
         models.AuditEvent(
             actor_id=user.subject,

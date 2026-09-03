@@ -86,4 +86,4 @@ def test_borrower_overview_messages_and_safe_document_gate():
             },
         )
         assert upload.status_code == 503
-        assert upload.json()["detail"]["code"] == "CAPABILITY_UNAVAILABLE"
+        assert upload.json()["code"] == "CAPABILITY_UNAVAILABLE"
