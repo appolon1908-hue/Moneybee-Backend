@@ -1,14 +1,19 @@
 # MoneyBee Hetzner deployment
 
-Target layout:
+Historical source checkouts are not deployment inputs. The target consumes
+only reviewed lock files, external environment/secret files, and immutable
+image digests.
+
+Reference release layout:
 
 ```text
 /opt/moneybee/
-├── Moneybee-Backend/
-└── Moneybee-frontend-/
+├── releases/
+└── current -> releases/<release-id>
 ```
 
-The production Compose file is run from `Moneybee-Backend/deploy` and expects the frontend repository as the sibling directory shown above.
+All API, worker, migrator, and frontend services are pulled by digest. No
+Compose service builds source on the target.
 
 ## Mandatory preflight
 
@@ -35,12 +40,6 @@ networks (`moneybee_internal`, `moneybee_edge`), created once out-of-band:
   and pushed by the `release-backend-images` GitHub Actions workflow
   (`workflow_dispatch` on `release/staging`), never locally.
 - `compose.edge.yml` — Caddy, terminating TLS for the five public domains.
-- `compose.data.yml`'s `vault` service — self-hosted HashiCorp Vault, the
-  external store bank access tokens live in (`BANK_CREDENTIAL_STORE_PROVIDER`,
-  `app/integrations/vault.py`; see `docs/PROVIDER_ADAPTERS.md`). Optional —
-  not started by a plain `up`, only by `--profile bank-credential-store` —
-  and requires a one-time `vault operator init`/`unseal` this repo does not
-  and cannot perform. Never exposed on `moneybee_edge` or a published port.
 
 `ops/render-compose-env.py` renders the `MONEYBEE_*_IMAGE`/`MONEYBEE_*_PATH`
 environment Compose needs from two reviewed, committed lock files:
@@ -55,12 +54,13 @@ placeholder pending that separately reviewed executor.
 ## Prepare
 
 ```bash
-cd /opt/moneybee/Moneybee-Backend/deploy
-cp ../.env.production.example .env.production
-chmod 600 .env.production
+install -m 600 /dev/null /etc/moneybee/migrator.env
+install -m 600 /dev/null /etc/moneybee/runtime.env
 ```
 
-Replace every placeholder. Keep the canonical issuer `https://auth.codestra.co/realms/codestra`. The production API base URL is `https://api.moneybeeloan.com/api/v2`.
+Populate both files through the approved secret mechanism. The migrator file
+uses only `moneybee_migrator`; API and worker use only `moneybee_runtime`.
+Keep the canonical issuer `https://auth.codestra.co/realms/codestra`.
 
 ## Validate
 
@@ -72,28 +72,50 @@ that evidence actually existing):
 python ops/validate-release-lock.py \
   --runtime-lock runtime-paths.lock.json --release-lock release.lock.json
 python ops/verify-runtime-env.py \
-  --env-file .env.production --release-lock release.lock.json
+  --env-file /etc/moneybee/runtime.env --release-lock release.lock.json
 eval "$(python ops/render-compose-env.py \
   --runtime-lock runtime-paths.lock.json --release-lock release.lock.json)"
+# Bundled PostgreSQL/Redis mode:
 docker compose -f compose.data.yml -f compose.backend.yml -f compose.edge.yml config
+# External PostgreSQL/Redis mode (data services and bootstrap are intentionally omitted):
+docker compose -f compose.backend.yml -f compose.edge.yml config
 ```
 
 ## Migrate
+
+Bootstrap or reconcile the database identities first. This one-shot service
+uses the administrator secret only for provisioning; it passes separate
+secret-backed passwords to the idempotent role/ownership script and is never
+part of API or worker runtime:
+
+```bash
+docker compose -f compose.data.yml --profile bootstrap run --rm role-bootstrap
+```
+
+Skip `role-bootstrap` in external-data mode; provision the documented roles
+through the external database administrator and validate them before migration.
+
+For an existing database with bank-provider rows, first stop at the supported
+compatibility boundary, create and verify each external secret, and apply an
+approved reference-only mapping (never credential values):
+
+```bash
+docker compose -f compose.backend.yml --profile migrate run --rm \
+  migrate alembic upgrade 20260901_0022a
+python ../ops/stage-bank-credential-references.py \
+  --database-url "$APPROVED_MIGRATOR_DATABASE_URL" \
+  --mapping /approved/change-evidence/bank-credential-references.json
+```
+
+Rehearse and approve that write separately. Migration `0023` fails closed until
+every row has a verified `secret://` reference; it never copies or deletes a
+credential value.
 
 ```bash
 docker compose -f compose.data.yml -f compose.backend.yml --profile migrate up migrate
 ```
 
 Production uses Alembic. `AUTO_CREATE_SCHEMA` and `LOCAL_AUTH_BYPASS` must remain false — both are enforced by `ops/verify-runtime-env.py` above.
-
-`compose.data.yml`'s `postgres` service creates two roles on its first boot
-(`deploy/postgres/init-app-roles.sh`, `MONEYBEE_MIGRATOR_PASSWORD_FILE`/
-`MONEYBEE_APP_PASSWORD_FILE`): `moneybee_migrator` owns the database and is
-the only role with DDL rights, used exclusively by the `migrate` service
-above (`DATABASE_MIGRATION_URL` in `.env.production`); `moneybee_app` has
-DML only and is what `api`/`worker` actually connect as (`DATABASE_URL`).
-Neither the running application nor routine migrations use the
-`POSTGRES_USER` bootstrap superuser after that first boot.
 
 ## Start and verify
 

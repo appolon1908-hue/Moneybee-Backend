@@ -202,7 +202,8 @@ def test_compliance_acknowledge_endpoint_requires_application_edit(client):
     _override_principal(frozenset({"application.edit"}))
     not_a_permission_error = client.post(
         "/api/v2/admin/offers/00000000-0000-0000-0000-000000000000"
-        "/commercial-financing-disclosure/acknowledge"
+        "/commercial-financing-disclosure/acknowledge",
+        headers={"Idempotency-Key": uuid.uuid4().hex},
     )
     assert not_a_permission_error.status_code == 404
 

@@ -5,7 +5,7 @@ services:
     image: ${MONEYBEE_MIGRATE_IMAGE:?set an immutable migrate image digest}
     command: ["alembic", "upgrade", "head"]
     env_file:
-      - ${MONEYBEE_BACKEND_ENV_FILE:?runtime path is not verified}
+      - ${MONEYBEE_MIGRATOR_ENV_FILE:?migrator environment path is not verified}
     profiles: ["migrate"]
     init: true
     read_only: true
@@ -21,7 +21,10 @@ services:
   api:
     image: ${MONEYBEE_API_IMAGE:?set an immutable API image digest}
     env_file:
-      - ${MONEYBEE_BACKEND_ENV_FILE:?runtime path is not verified}
+      - ${MONEYBEE_RUNTIME_ENV_FILE:?runtime environment path is not verified}
+    environment:
+      TRUST_FORWARDED_FOR: "true"
+      TRUSTED_PROXY_CIDRS_CSV: ${MONEYBEE_TRUSTED_PROXY_CIDRS_CSV:?trusted Caddy proxy CIDRs are not verified}
     init: true
     read_only: true
     tmpfs:
@@ -51,8 +54,7 @@ services:
   worker:
     image: ${MONEYBEE_WORKER_IMAGE:?set an immutable worker image digest}
     env_file:
-      - ${MONEYBEE_BACKEND_ENV_FILE:?runtime path is not verified}
-    profiles: ["external-delivery"]
+      - ${MONEYBEE_RUNTIME_ENV_FILE:?runtime environment path is not verified}
     init: true
     read_only: true
     tmpfs:
@@ -65,6 +67,34 @@ services:
     stop_grace_period: 45s
     networks:
       - moneybee_internal
+
+  clamav:
+    image: ${MONEYBEE_CLAMAV_IMAGE:?set an immutable ClamAV image digest}
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+      - /run/clamav:rw,nosuid,size=32m
+    volumes:
+      - type: bind
+        source: ${MONEYBEE_CLAMAV_DATABASE_PATH:?ClamAV database path is not verified}
+        target: /var/lib/clamav
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 300
+    mem_limit: 4g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 3 >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks:
+      moneybee_internal:
+        aliases:
+          - moneybee-clamav
 
 networks:
   moneybee_internal:

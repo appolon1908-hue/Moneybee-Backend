@@ -5,27 +5,14 @@ services:
     image: ${MONEYBEE_POSTGRES_IMAGE:?set an immutable PostgreSQL image digest}
     environment:
       POSTGRES_DB: moneybee
-      # This is the initdb bootstrap superuser Postgres always needs - not
-      # what the api/worker/migrate services connect as day to day. Their
-      # DATABASE_URL/DATABASE_MIGRATION_URL point at moneybee_app/
-      # moneybee_migrator instead, created on first boot by
-      # deploy/postgres/init-app-roles.sh below (see .env.production.example).
-      POSTGRES_USER: moneybee
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      MONEYBEE_MIGRATOR_PASSWORD_FILE: /run/secrets/moneybee_migrator_password
-      MONEYBEE_APP_PASSWORD_FILE: /run/secrets/moneybee_app_password
+      POSTGRES_USER: moneybee_db_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
     secrets:
-      - postgres_password
-      - moneybee_migrator_password
-      - moneybee_app_password
+      - postgres_admin_password
     volumes:
       - type: bind
         source: ${MONEYBEE_POSTGRES_DATA_PATH:?runtime path is not verified}
         target: /var/lib/postgresql/data
-      - type: bind
-        source: ./postgres/init-app-roles.sh
-        target: /docker-entrypoint-initdb.d/10-init-app-roles.sh
-        read_only: true
     init: true
     read_only: true
     tmpfs:
@@ -38,7 +25,7 @@ services:
     pids_limit: 300
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U moneybee -d moneybee"]
+      test: ["CMD-SHELL", "pg_isready -U moneybee_db_admin -d moneybee"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -47,6 +34,39 @@ services:
       moneybee_internal:
         aliases:
           - moneybee-postgres
+
+  role-bootstrap:
+    image: ${MONEYBEE_POSTGRES_IMAGE:?set an immutable PostgreSQL image digest}
+    profiles: ["bootstrap"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        export PGPASSWORD="$$(cat /run/secrets/postgres_admin_password)";
+        exec psql -h moneybee-postgres -U moneybee_db_admin -d moneybee
+        -v ON_ERROR_STOP=1
+        -v migrator_password="$$(cat /run/secrets/postgres_migrator_password)"
+        -v runtime_password="$$(cat /run/secrets/postgres_runtime_password)"
+        -f /bootstrap/moneybee_roles.sql
+    secrets:
+      - postgres_admin_password
+      - postgres_migrator_password
+      - postgres_runtime_password
+    volumes:
+      - type: bind
+        source: ${MONEYBEE_ROLES_SQL_PATH:?role bootstrap SQL path is not verified}
+        target: /bootstrap/moneybee_roles.sql
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - moneybee_internal
 
   redis:
     image: ${MONEYBEE_REDIS_IMAGE:?set an immutable Redis image digest}
@@ -88,58 +108,15 @@ services:
         aliases:
           - moneybee-redis
 
-  # Optional: the external credential store bank access tokens are stored
-  # in (see app/integrations/vault.py) - not started by a plain `up`, and
-  # not required for the API/worker to run, matching how
-  # BANK_CREDENTIAL_STORE_PROVIDER stays "disabled" until this capability
-  # is certified. Start explicitly with `--profile bank-credential-store`.
-  # A freshly started Vault from this config is sealed and empty -
-  # `vault operator init`/`unseal` are one-time operator actions this repo
-  # does not and cannot perform. Never exposed on moneybee_edge or a
-  # published port; only reachable from other containers on
-  # moneybee_internal, the same way Postgres and Redis already are.
-  vault:
-    image: ${MONEYBEE_VAULT_IMAGE:?set an immutable Vault image digest}
-    command: ["server", "-config=/vault/config/vault.hcl"]
-    profiles: ["bank-credential-store"]
-    volumes:
-      - type: bind
-        source: ./vault-config.hcl
-        target: /vault/config/vault.hcl
-        read_only: true
-      - type: bind
-        source: ${MONEYBEE_VAULT_DATA_PATH:?runtime path is not verified}
-        target: /vault/data
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cap_drop: ["ALL"]
-    cap_add: ["IPC_LOCK"]
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 200
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 15s
-    networks:
-      moneybee_internal:
-        aliases:
-          - moneybee-vault
-
 secrets:
-  postgres_password:
-    file: ${MONEYBEE_POSTGRES_PASSWORD_FILE:?runtime path is not verified}
+  postgres_admin_password:
+    file: ${MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE:?admin password path is not verified}
+  postgres_migrator_password:
+    file: ${MONEYBEE_POSTGRES_MIGRATOR_PASSWORD_FILE:?migrator password path is not verified}
+  postgres_runtime_password:
+    file: ${MONEYBEE_POSTGRES_RUNTIME_PASSWORD_FILE:?runtime password path is not verified}
   redis_acl:
     file: ${MONEYBEE_REDIS_ACL_FILE:?runtime path is not verified}
-  moneybee_migrator_password:
-    file: ${MONEYBEE_MIGRATOR_PASSWORD_FILE:?runtime path is not verified}
-  moneybee_app_password:
-    file: ${MONEYBEE_APP_PASSWORD_FILE:?runtime path is not verified}
 
 networks:
   moneybee_internal:

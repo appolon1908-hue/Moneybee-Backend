@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 class Attribution(BaseModel):
@@ -41,62 +41,6 @@ class PrequalificationInput(BaseModel):
     consents: list[ConsentInput] = Field(min_length=1)
     marketing: Attribution
     anti_bot_token: str | None = None
-
-
-class PrequalificationUpdateInput(BaseModel):
-    funding_amount: Decimal | None = Field(default=None, ge=1000, le=10_000_000)
-    use_of_funds: str | None = None
-    time_in_business_months: int | None = Field(default=None, ge=0)
-    monthly_revenue: Decimal | None = Field(default=None, ge=0)
-    business_name: str | None = Field(default=None, min_length=2, max_length=240)
-    first_name: str | None = None
-    last_name: str | None = None
-    email: EmailStr | None = None
-    phone: str | None = Field(default=None, pattern=r"^\+[1-9]\d{7,14}$")
-    postal_code: str | None = None
-
-
-class LeadRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    first_name: str
-    last_name: str
-    email: str
-    phone: str
-    business_name: str
-    funding_amount: Decimal
-    monthly_revenue: Decimal
-    use_of_funds: str
-    time_in_business_months: int
-    postal_code: str
-    status: str
-
-
-class ProductRead(BaseModel):
-    product_type: str
-    display_name: str
-    description: str
-    min_amount: Decimal
-    max_amount: Decimal
-    lender_count: int
-
-
-class LoginEventRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    issuer: str
-    ip_address: str | None
-    user_agent: str | None
-    created_at: datetime
-
-
-class ConsentRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    consent_type: str
-    document_version: str
-    evidence: dict
-    created_at: datetime
 
 
 class LeadAccepted(BaseModel):
@@ -253,6 +197,23 @@ class OfferInput(BaseModel):
     personal_guarantee_required: bool = False
     collateral_description: str | None = Field(default=None, max_length=10_000)
     expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_schedule(self):
+        if self.total_repayment is not None:
+            return self
+        payments_per_year = {
+            "MONTHLY": 12,
+            "WEEKLY": 52,
+            "BIWEEKLY": 26,
+            "SEMIMONTHLY": 24,
+            "DAILY": 365,
+        }.get(self.payment_frequency.upper())
+        if payments_per_year is None:
+            raise ValueError("Unsupported payment frequency")
+        if (self.term_months * payments_per_year) % 12:
+            raise ValueError("A partial payment period requires total_repayment")
+        return self
 
 
 class OfferRead(OfferInput):
@@ -472,20 +433,6 @@ class FraudAssessmentRead(BaseModel):
     created_at: datetime
 
 
-class VerificationRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    application_id: uuid.UUID
-    owner_id: uuid.UUID | None
-    verification_type: str
-    provider: str
-    provider_reference: str | None
-    status: str
-    normalized_result: dict
-    created_at: datetime
-    updated_at: datetime
-
-
 class CommissionSplitRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -503,6 +450,11 @@ class CommissionSplitInput(BaseModel):
     recipient_reference: str = Field(min_length=1, max_length=255)
     percentage: Decimal | None = Field(default=None, ge=0, le=100)
     amount: Decimal = Field(gt=0)
+
+
+class CommissionSplitPaymentInput(BaseModel):
+    paid_at: datetime
+    payment_reference: str = Field(min_length=1, max_length=255)
 
 
 class CommissionReceiptInput(BaseModel):

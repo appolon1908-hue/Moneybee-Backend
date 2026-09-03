@@ -38,24 +38,10 @@ def token_client_id(claims: Mapping[str, Any]) -> str:
     return str(claims.get("azp") or claims.get("client_id") or "").strip()
 
 
-def _canonical_api_path(path: str) -> str:
-    """Normalize compatibility aliases before applying security boundaries.
-
-    `/api/v1` intentionally maps to the same router objects as `/api/v2` while
-    clients migrate. Authentication and portal-client isolation must therefore
-    classify both prefixes identically; version aliases are never a security
-    bypass.
-    """
-    normalized = path.rstrip("/") or "/"
-    if normalized == "/api/v1":
-        return "/api/v2"
-    if normalized.startswith("/api/v1/"):
-        return f"/api/v2/{normalized.removeprefix('/api/v1/')}"
-    return normalized
-
-
 def _portals_for_path(path: str) -> frozenset[PortalName] | None:
-    normalized = _canonical_api_path(path)
+    normalized = path.rstrip("/") or "/"
+    if normalized == "/api/v1" or normalized.startswith("/api/v1/"):
+        normalized = "/api/v2" + normalized[len("/api/v1"):]
     if normalized == "/api/v2/borrower" or normalized.startswith("/api/v2/borrower/"):
         return frozenset({"borrower"})
     if (
@@ -76,7 +62,10 @@ def _portals_for_path(path: str) -> frozenset[PortalName] | None:
         "/api/v2/applications/"
     ):
         return frozenset({"borrower", "admin"})
-    if normalized.startswith("/api/v2/offers/") and normalized.endswith("/accept"):
+    if normalized.startswith("/api/v2/offers/") and (
+        normalized.endswith("/accept")
+        or "/commercial-financing-disclosure" in normalized
+    ):
         return frozenset({"borrower"})
     if normalized.startswith("/api/v2/conditions/") and normalized.endswith("/submit"):
         return frozenset({"borrower"})

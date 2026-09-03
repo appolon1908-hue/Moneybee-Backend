@@ -28,6 +28,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require authorized repository source before server contact
+        run: |
+          python ops/validate-source-authority.py \
+            --source-lock deploy/repository-source.lock.json \
+            --operation server-contact
       - name: Install strict SSH material
         env:
           SSH_PRIVATE_KEY: ${{ secrets.MONEYBEE_STAGING_SSH_PRIVATE_KEY }}

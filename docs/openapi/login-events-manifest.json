@@ -1,8 +1,0 @@
-{
-  "paths": {
-    "/api/v2/me/sessions": "46f9a39bc46b6b4b6a7b68a01a7a2d4d5a202ce480dd4657a8b14094313bbf57"
-  },
-  "schemas": {
-    "LoginEventRead": "e88b0bb7bd0fd61722be73249dcdc77dd076aa344e2e00bc7b9ffcda0c1669cf"
-  }
-}

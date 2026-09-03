@@ -11,13 +11,6 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "dev", "staging", "production"] = "local"
     database_url: str = "sqlite+aiosqlite:///./moneybee.db"
-    # Alembic only. Lets migrations run as a role with DDL rights
-    # (moneybee_migrator) while the running api/worker connect with
-    # database_url as a DML-only role (moneybee_app) that can never
-    # CREATE/ALTER/DROP anything - see deploy/postgres/init-app-roles.sh.
-    # Falls back to database_url so this stays optional everywhere except
-    # a hardened production deployment.
-    database_migration_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
     auto_create_schema: bool = True
     local_auth_bypass: bool = True
@@ -45,6 +38,8 @@ class Settings(BaseSettings):
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
     codestra_middleware_webhook_tolerance_seconds: int = 300
+    codestra_sdk_enabled: bool = False
+    codestra_sdk_capabilities_csv: str = ""
     provider_webhook_allowlist_csv: str = (
         "lender,docusign,sendgrid,twilio,odoo,n8n,experian"
     )
@@ -54,6 +49,8 @@ class Settings(BaseSettings):
     field_encryption_keys_json: str = "{}"
     field_encryption_active_key_version: str | None = None
     provider_timeout_seconds: float = 30.0
+    live_writes: bool = False
+    odoo_write: bool = False
 
     log_level: str = "INFO"
     rate_limit_enabled: bool = True
@@ -61,6 +58,7 @@ class Settings(BaseSettings):
     public_rate_limit_per_minute: int = 60
     webhook_rate_limit_per_minute: int = 120
     trust_forwarded_for: bool = False
+    trusted_proxy_cidrs_csv: str = ""
     api_v1_sunset_date: str = "2026-12-31"
 
     source_sha: str | None = None
@@ -84,18 +82,6 @@ class Settings(BaseSettings):
     plaid_country_codes_csv: str = "US"
     plaid_webhook_url: str | None = None
     plaid_redirect_uri: str | None = None
-
-    # Bank access tokens are never persisted in MoneyBee's own database -
-    # only an opaque reference into this external credential store (see
-    # app/banking.py and app/integrations/vault.py). Self-hosted Vault
-    # rather than a managed-cloud secrets service to match this project's
-    # actual deployment target (a single Hetzner host running Docker
-    # Compose, not any particular cloud vendor).
-    bank_credential_store_provider: Literal["disabled", "vault"] = "disabled"
-    vault_addr: str | None = None
-    vault_token: str | None = None
-    vault_mount: str = "secret"
-    vault_path_prefix: str = "moneybee/bank-credentials"
 
     crm_provider: Literal["disabled", "generic_http", "odoo"] = "disabled"
     crm_base_url: str | None = None
@@ -199,6 +185,16 @@ class Settings(BaseSettings):
         }
 
     @property
+    def trusted_proxy_cidrs(self) -> tuple[str, ...]:
+        return tuple(
+            item.strip() for item in self.trusted_proxy_cidrs_csv.split(",") if item.strip()
+        )
+
+    @property
+    def codestra_sdk_capabilities(self) -> frozenset[str]:
+        return self._csv_set(self.codestra_sdk_capabilities_csv)
+
+    @property
     def provider_webhook_allowlist(self) -> set[str]:
         return {
             item.strip().lower()
@@ -281,24 +277,23 @@ class Settings(BaseSettings):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
             if self.oidc_algorithms != ["RS256"]:
                 raise ValueError("Production OIDC tokens must use RS256")
+            if self.rate_limit_enabled and not self.redis_url.startswith(("redis://", "rediss://")):
+                raise ValueError("Distributed rate limiting requires REDIS_URL")
+            if self.trust_forwarded_for and not self.trusted_proxy_cidrs:
+                raise ValueError(
+                    "TRUST_FORWARDED_FOR requires at least one TRUSTED_PROXY_CIDRS_CSV entry"
+                )
             if self.bank_provider == "plaid" and not all(
                 [
                     self.plaid_client_id,
                     self.plaid_secret,
                     self.field_encryption_active_key_version,
                     self.field_encryption_keys,
-                    self.bank_credential_store_provider != "disabled",
                 ]
             ):
                 raise ValueError(
-                    "Plaid requires credentials, a configured field encryption key, "
-                    "and a live bank credential store - access tokens are never "
-                    "persisted directly"
+                    "Plaid requires credentials and a configured field encryption key"
                 )
-            if self.bank_credential_store_provider == "vault" and not all(
-                [self.vault_addr, self.vault_token]
-            ):
-                raise ValueError("Vault credential store configuration is incomplete")
             if self.field_encryption_active_key_version and (
                 self.field_encryption_active_key_version not in self.field_encryption_keys
             ):
@@ -315,24 +310,27 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Codestra middleware configuration is incomplete")
-            if self.crm_provider == "generic_http" and not all(
-                [self.crm_base_url, self.crm_api_key]
-            ):
-                raise ValueError("Generic HTTP CRM configuration is incomplete")
+            if self.codestra_sdk_enabled:
+                if self.middleware_provider != "codestra":
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires MIDDLEWARE_PROVIDER=codestra"
+                    )
+                if not self.codestra_sdk_capabilities:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires a nonempty capability allowlist"
+                    )
+                if not self.source_sha:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires immutable SOURCE_SHA provenance"
+                    )
             if self.crm_provider == "odoo" and not all(
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):
                 raise ValueError("Odoo configuration is incomplete")
-            if self.kyb_provider == "generic_http" and not all(
-                [self.kyb_base_url, self.kyb_api_key]
-            ):
-                raise ValueError("Generic HTTP KYB configuration is incomplete")
+            if self.crm_provider == "odoo" and not self.odoo_write:
+                raise ValueError("CRM_PROVIDER=odoo requires ODOO_WRITE=true")
             if self.kyb_provider == "middesk" and not self.middesk_api_key:
                 raise ValueError("Middesk configuration is incomplete")
-            if self.credit_provider == "generic_http" and not all(
-                [self.credit_base_url, self.credit_api_key]
-            ):
-                raise ValueError("Generic HTTP credit configuration is incomplete")
             if self.credit_provider == "experian" and not all(
                 [
                     self.experian_base_url,
@@ -345,20 +343,6 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Experian configuration is incomplete")
-            if self.lender_provider == "generic_http" and not all(
-                [self.lender_base_url, self.lender_api_key]
-            ):
-                raise ValueError("Generic HTTP lender configuration is incomplete")
-            if self.esign_provider == "docusign" and not all(
-                [
-                    self.docusign_rest_base_url,
-                    self.docusign_account_id,
-                    self.docusign_access_token,
-                    self.docusign_template_id,
-                    self.docusign_signer_role,
-                ]
-            ):
-                raise ValueError("DocuSign configuration is incomplete")
             if self.email_provider == "sendgrid" and not all(
                 [self.sendgrid_api_key, self.sendgrid_from_email]
             ):
@@ -383,6 +367,10 @@ class Settings(BaseSettings):
                 raise ValueError("S3 object storage configuration is incomplete")
             if self.malware_scan_provider == "clamav" and not self.clamav_host:
                 raise ValueError("ClamAV configuration is incomplete")
+            if self.app_env == "production" and self.object_storage_mode != "s3":
+                raise ValueError("Production requires private S3-compatible object storage")
+            if self.app_env == "production" and self.malware_scan_provider != "clamav":
+                raise ValueError("Production requires ClamAV document scanning")
             if self.payment_provider == "stripe" and not all(
                 [self.stripe_secret_key, self.stripe_webhook_secret]
             ):

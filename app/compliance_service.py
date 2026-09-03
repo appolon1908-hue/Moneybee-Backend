@@ -8,10 +8,11 @@ sending anything this produces to a real applicant or filing anything
 with the IRS.
 """
 
+import hashlib
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import identity_models, models
@@ -67,6 +68,14 @@ async def generate_adverse_action_notice(
         raise ValueError("Adverse-action notices are only generated for DECLINE decisions")
     if review.submission_id is None:
         raise ValueError("Underwriting review has no associated lender submission")
+
+    existing = await db.scalar(
+        select(AdverseActionNotice).where(
+            AdverseActionNotice.underwriting_review_id == review.id
+        )
+    )
+    if existing is not None:
+        return existing
 
     submission = await db.get(models.LenderSubmission, review.submission_id)
     if submission is None:
@@ -124,6 +133,87 @@ async def generate_adverse_action_notice(
 # --- Commercial financing disclosure -----------------------------------
 
 
+_PAYMENTS_PER_YEAR = {
+    "MONTHLY": Decimal(12),
+    "WEEKLY": Decimal(52),
+    "BIWEEKLY": Decimal(26),
+    "SEMIMONTHLY": Decimal(24),
+    "DAILY": Decimal(365),
+}
+_MONEY = Decimal("0.01")
+
+
+async def get_offer_disclosure(
+    db: AsyncSession, offer_id, *, lock: bool = False
+) -> CommercialFinancingDisclosure | None:
+    statement = select(CommercialFinancingDisclosure).where(
+        CommercialFinancingDisclosure.offer_id == offer_id
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return await db.scalar(statement)
+
+
+async def acknowledge_offer_disclosure(
+    db: AsyncSession, offer_id, *, actor: str
+) -> CommercialFinancingDisclosure | None:
+    disclosure = await get_offer_disclosure(db, offer_id, lock=True)
+    if disclosure is not None and disclosure.acknowledged_at is None:
+        disclosure.acknowledged_at = models.utcnow()
+        disclosure.acknowledged_by = actor
+        await db.flush()
+    return disclosure
+
+
+async def create_offer_with_disclosure(
+    db: AsyncSession,
+    values: dict,
+    *,
+    jurisdiction: str | None,
+) -> models.Offer:
+    """Persist an offer and its mandatory disclosure in one transaction."""
+    offer = models.Offer(**values)
+    db.add(offer)
+    await db.flush()
+    await generate_commercial_financing_disclosure(
+        db, offer, jurisdiction=jurisdiction
+    )
+    return offer
+
+
+def calculate_total_repayment(offer: models.Offer) -> Decimal:
+    """Return an authoritative or reproducibly calculated repayment total.
+
+    The schedule convention is 12 months, 52 weeks, 26 biweekly periods,
+    24 semimonthly periods, and 365 calendar days per year. A partial payment
+    period is not guessed: callers must provide ``total_repayment`` for terms
+    that do not produce an integral number of payments under that convention.
+    """
+    if offer.total_repayment is not None:
+        total = Decimal(str(offer.total_repayment))
+    else:
+        frequency = str(offer.payment_frequency).upper()
+        payments_per_year = _PAYMENTS_PER_YEAR.get(frequency)
+        if payments_per_year is None:
+            raise ValueError(f"Unsupported payment frequency: {offer.payment_frequency}")
+        payment = Decimal(str(offer.payment_amount))
+        if payment <= 0 or offer.term_months <= 0:
+            raise ValueError("Payment amount and term must be positive")
+        payment_count = Decimal(offer.term_months) * payments_per_year / Decimal(12)
+        if payment_count != payment_count.to_integral_value():
+            raise ValueError(
+                "Payment schedule has a partial period; provide total_repayment explicitly"
+            )
+        total = payment * payment_count
+    try:
+        total = total.quantize(_MONEY, rounding=ROUND_HALF_UP)
+    except InvalidOperation as exc:
+        raise ValueError("Total repayment cannot be represented as money") from exc
+    if total <= 0:
+        raise ValueError("Total repayment must be positive")
+    return total
+
+
 async def generate_commercial_financing_disclosure(
     db: AsyncSession,
     offer: models.Offer,
@@ -144,11 +234,7 @@ async def generate_commercial_financing_disclosure(
     even covers (thresholds and exemptions vary). Treat jurisdiction as
     informational until a lawyer maps it to a real per-state template."""
     amount_financed = Decimal(str(offer.amount))
-    total_repayment = (
-        Decimal(str(offer.total_repayment))
-        if offer.total_repayment is not None
-        else Decimal(str(offer.payment_amount)) * offer.term_months
-    )
+    total_repayment = calculate_total_repayment(offer)
     finance_charge = total_repayment - amount_financed
 
     if offer.apr is not None:
@@ -218,6 +304,16 @@ async def generate_commercial_financing_disclosure(
 _FORM_1099_NEC_THRESHOLD = Decimal("600")
 
 
+async def lock_commission_tax_year(db: AsyncSession, tax_year: int) -> None:
+    """Serialize every generator/filer touching a tax year in PostgreSQL."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"commission-tax-records:{tax_year}".encode()).digest()[:8],
+            "big",
+        ) & ((1 << 63) - 1)
+        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
+
 async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> list[CommissionTaxRecord]:
     """Aggregates CommissionSplit amounts per recipient for one tax year
     into the data a 1099-NEC (Box 1: Nonemployee compensation) would be
@@ -225,17 +321,9 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     Sec. 6041 as it applies to nonemployee compensation) - state filing
     thresholds can be lower and aren't accounted for.
 
-    Attribution caveat: there is no dedicated commission-receipt ledger
-    table in this schema (POST /admin/commissions/{id}/receipts just
-    increments Commission.received_amount and logs an AuditEvent) and no
-    split-level "paid" status or date - CommissionSplit.status is set to
-    "PENDING" on creation and nothing ever transitions it. This uses
-    CommissionSplit.created_at as the tax-year attribution date, which
-    approximates but does not guarantee "when the recipient was actually
-    paid." Wiring a real split-disbursement workflow (naturally, through
-    the payment adapters added alongside this) would let this generator
-    key off an actual payment date instead - worth doing before this
-    runs against real payout data.
+    Only split rows carrying durable payment evidence (status PAID,
+    paid_at, and a provider/accounting payment reference) contribute.
+    Merely allocating a split is not reportable compensation.
 
     Idempotent: re-running for a year replaces each recipient's totals
     rather than accumulating, since it always recomputes from
@@ -246,6 +334,8 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     update_recipient_tin(), are stored encrypted with app/encryption.py's
     versioned scheme and never returned in the clear by any endpoint
     built so far."""
+    await lock_commission_tax_year(db, tax_year)
+
     year_start = datetime(tax_year, 1, 1, tzinfo=UTC)
     year_end = datetime(tax_year + 1, 1, 1, tzinfo=UTC)
     rows = (
@@ -255,8 +345,11 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
                 models.CommissionSplit.recipient_reference,
                 models.CommissionSplit.amount,
             ).where(
-                models.CommissionSplit.created_at >= year_start,
-                models.CommissionSplit.created_at < year_end,
+                models.CommissionSplit.status == "PAID",
+                models.CommissionSplit.paid_at.is_not(None),
+                models.CommissionSplit.payment_reference.is_not(None),
+                models.CommissionSplit.paid_at >= year_start,
+                models.CommissionSplit.paid_at < year_end,
             )
         )
     ).all()
@@ -268,17 +361,32 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
         bucket["total"] += Decimal(str(receipt_amount))
         bucket["count"] += 1
 
+    existing_rows = list((await db.scalars(
+        select(CommissionTaxRecord)
+        .where(CommissionTaxRecord.tax_year == tax_year)
+        .with_for_update()
+    )).all())
+    existing_by_key = {
+        (row.recipient_type, row.recipient_reference): row for row in existing_rows
+    }
     results: list[CommissionTaxRecord] = []
-    for (recipient_type, recipient_reference), bucket in totals.items():
-        existing = await db.scalar(
-            select(CommissionTaxRecord).where(
-                CommissionTaxRecord.recipient_reference == recipient_reference,
-                CommissionTaxRecord.tax_year == tax_year,
-            )
-        )
+    for recipient_type, recipient_reference in sorted(set(totals) | set(existing_by_key)):
+        bucket = totals.get((recipient_type, recipient_reference), {"total": Decimal("0"), "count": 0})
+        existing = existing_by_key.get((recipient_type, recipient_reference))
         total_amount = bucket["total"]
         requires_1099 = total_amount >= _FORM_1099_NEC_THRESHOLD
         if existing is not None:
+            regenerated = (total_amount, bucket["count"], requires_1099)
+            persisted = (
+                Decimal(str(existing.total_amount)),
+                existing.commission_count,
+                existing.requires_1099,
+            )
+            if existing.filed_at is not None and regenerated != persisted:
+                raise ValueError(
+                    "Filed commission tax records are immutable; create a controlled "
+                    "amendment before regenerating this recipient and tax year"
+                )
             existing.recipient_type = recipient_type
             existing.total_amount = total_amount
             existing.commission_count = bucket["count"]
@@ -306,6 +414,10 @@ async def update_recipient_tin(
     recipient_name: str,
     tin: str,
 ) -> CommissionTaxRecord:
+    if record.filed_at is not None:
+        raise ValueError(
+            "Filed recipient identity is immutable; create a controlled amendment first"
+        )
     record.recipient_name = recipient_name
     record.tin_ciphertext = encrypt_secret(tin)
     await db.flush()

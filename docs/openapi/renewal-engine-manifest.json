@@ -1,8 +1,8 @@
 {
   "name": "renewal-engine",
   "paths": {
-    "/api/v2/admin/renewal-opportunities/{renewal_id}/status": "bf8f763085a2c3062200b7d1646b01dab2769968ed46739ded40726916769534",
-    "/api/v2/applications/{application_id}/renewal-opportunities": "3c595e118b075aa4e359ec1d49fcdd7933df3eeb18503b9280cfc4b5e95f686f"
+    "/api/v2/applications/{application_id}/renewal-opportunities": "3c595e118b075aa4e359ec1d49fcdd7933df3eeb18503b9280cfc4b5e95f686f",
+    "/api/v2/admin/renewal-opportunities/{renewal_id}/status": "bf8f763085a2c3062200b7d1646b01dab2769968ed46739ded40726916769534"
   },
   "schemas": {
     "RenewalStatusInput": "779d30d6cc663ba02dfc14c9197ac4552701826270fb1709e312db4dd369a387"

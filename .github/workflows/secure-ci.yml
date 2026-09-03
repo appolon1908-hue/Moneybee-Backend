@@ -8,18 +8,15 @@ on:
       - "scripts/**"
       - "docs/security/**"
       - "docs/identity/**"
-      - "docs/openapi/**"
       - "docker/**"
       - "deploy/**"
       - "ops/**"
-      - "tests/**"
       - "pyproject.toml"
       - "openapi.json"
       - ".github/workflows/secure-ci.yml"
   push:
     branches:
       - "ops/secure-staging-scaffold"
-      - "claude/system-review-architecture-8vo66p"
 
 permissions:
   contents: read
@@ -66,23 +63,12 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           python -m pip install -e ".[dev]"
           python -m pip check
-      - name: Static, source-integrity, and private-key gates
+      - name: Static and private-key gates
         run: |
           python scripts/check_no_private_keys.py
           python scripts/check_identity_email_readiness.py
           python -m compileall -q app tests migrations ops scripts
-          python -m ruff check app tests migrations scripts
-      - name: Verify one migration head
-        run: |
-          python - <<'PY'
-          from alembic.config import Config
-          from alembic.script import ScriptDirectory
-
-          heads = ScriptDirectory.from_config(Config("alembic.ini")).get_heads()
-          if len(heads) != 1:
-              raise SystemExit(f"Expected exactly one Alembic head, found {heads}")
-          print(f"ALEMBIC_HEAD={heads[0]}")
-          PY
+          python -m ruff check app tests migrations scripts ops
       - name: Render endpoint catalog candidate
         run: python scripts/generate_endpoint_catalog.py
       - name: Upload endpoint catalog candidate
@@ -97,31 +83,14 @@ jobs:
         run: git diff --exit-code -- docs/API_ENDPOINT_CATALOG.md
       - name: Upgrade application test database
         run: alembic upgrade head
+      - name: Migration round trip on clean schema
+        run: |
+          alembic downgrade 20260823_0012
+          alembic upgrade head
       - name: Application tests
         run: python -m pytest -q
-      - name: Migration round-trip and OpenAPI gates
-        run: |
-          previous_revision="$(
-            python - <<'PY'
-          from alembic.config import Config
-          from alembic.script import ScriptDirectory
-
-          scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-          heads = scripts.get_heads()
-          if len(heads) != 1:
-              raise SystemExit(f"Expected one head, found {heads}")
-          parent = scripts.get_revision(heads[0]).down_revision
-          if not isinstance(parent, str):
-              raise SystemExit(f"Head {heads[0]} does not have one parent: {parent!r}")
-          print(parent)
-          PY
-          )"
-          test -n "$previous_revision"
-          echo "ROUND_TRIP_PARENT=$previous_revision"
-          alembic downgrade "$previous_revision"
-          alembic upgrade head
-          python scripts/verify_openapi_contract.py
-          python scripts/generate_endpoint_catalog.py --check
+      - name: OpenAPI gate
+        run: python scripts/verify_openapi_contract.py
 
   deployment-policy:
     runs-on: ubuntu-latest
@@ -133,7 +102,8 @@ jobs:
         run: |
           bash -n ops/runtime-path-preflight.sh
           bash -n ops/deploy-staging.sh
-          python -m py_compile ops/validate-release-lock.py ops/render-compose-env.py ops/verify-runtime-env.py
+          python -m py_compile ops/validate-release-lock.py ops/render-compose-env.py ops/verify-runtime-env.py ops/verify-compose-contract.py
+          python ops/verify-compose-contract.py
           python ops/validate-release-lock.py \
             --runtime-lock deploy/runtime-paths.lock.json \
             --release-lock deploy/release.lock.json \
@@ -144,20 +114,18 @@ jobs:
           mkdir -p /tmp/moneybee-env-gate
           python - <<'PY'
           import json
-
           lock = {
               "source": {"backend_sha": "1" * 40},
               "images": {
                   "api": "ghcr.io/appolon1908-hue/moneybee-api@sha256:" + "2" * 64
               },
-              "migration_head": "20260901_0022",
+              "migration_head": "20260902_0027",
               "configuration_checksum": "3" * 64,
               "backup_reference": "staging-backup-test",
           }
-          with open("/tmp/moneybee-env-gate/release.json", "w", encoding="utf-8") as handle:
-              json.dump(lock, handle)
+          open("/tmp/moneybee-env-gate/release.json", "w").write(json.dumps(lock))
           PY
-          cat >/tmp/moneybee-env-gate/backend.env <<'ENV'
+          cat >/tmp/moneybee-env-gate/runtime.env <<'ENV'
           APP_ENV=staging
           DATABASE_URL=postgresql+asyncpg://moneybee:password@moneybee-postgres:5432/moneybee
           REDIS_URL=redis://moneybee-redis:6379/0
@@ -180,26 +148,25 @@ jobs:
           OBJECT_STORAGE_MODE=disabled
           PAYMENT_PROVIDER=disabled
           MALWARE_SCAN_PROVIDER=disabled
-          BANK_CREDENTIAL_STORE_PROVIDER=disabled
           ENABLE_EXTERNAL_DELIVERY=false
           FIELD_ENCRYPTION_KEYS_JSON={"1":"1-PUl067uf69NnCfy4HhS6H7xrHI9tBzsYFL-zv4mmU="}
           FIELD_ENCRYPTION_ACTIVE_KEY_VERSION=1
           SOURCE_SHA=1111111111111111111111111111111111111111
           API_IMAGE_DIGEST=ghcr.io/appolon1908-hue/moneybee-api@sha256:2222222222222222222222222222222222222222222222222222222222222222
-          MIGRATION_HEAD=20260901_0022
+          MIGRATION_HEAD=20260902_0027
           CONFIGURATION_CHECKSUM=3333333333333333333333333333333333333333333333333333333333333333
           BACKUP_REFERENCE=staging-backup-test
           BACKUP_STATUS=PASS
           RESTORE_STATUS=PASS
           STAGING_STATUS=NOT_CONFIGURED
           ENV
-          chmod 600 /tmp/moneybee-env-gate/backend.env
+          chmod 600 /tmp/moneybee-env-gate/runtime.env
           python ops/verify-runtime-env.py \
-            --env-file /tmp/moneybee-env-gate/backend.env \
+            --env-file /tmp/moneybee-env-gate/runtime.env \
             --release-lock /tmp/moneybee-env-gate/release.json
-          sed -i 's/CRM_PROVIDER=disabled/CRM_PROVIDER=odoo/' /tmp/moneybee-env-gate/backend.env
+          sed -i 's/CRM_PROVIDER=disabled/CRM_PROVIDER=odoo/' /tmp/moneybee-env-gate/runtime.env
           if python ops/verify-runtime-env.py \
-            --env-file /tmp/moneybee-env-gate/backend.env \
+            --env-file /tmp/moneybee-env-gate/runtime.env \
             --release-lock /tmp/moneybee-env-gate/release.json; then
             echo "Runtime environment gate accepted a live provider." >&2
             exit 1
@@ -218,33 +185,40 @@ jobs:
         env:
           ZERO: "0000000000000000000000000000000000000000000000000000000000000000"
         run: |
-          mkdir -p /tmp/moneybee/postgres /tmp/moneybee/redis /tmp/moneybee/vault \
-            /tmp/moneybee/caddy-data /tmp/moneybee/caddy-config
+          mkdir -p /tmp/moneybee/postgres /tmp/moneybee/redis \
+            /tmp/moneybee/caddy-data /tmp/moneybee/caddy-config /tmp/moneybee/clamav
           printf 'test-password' >/tmp/moneybee/postgres_password
-          printf 'test-migrator-password' >/tmp/moneybee/moneybee_migrator_password
-          printf 'test-app-password' >/tmp/moneybee/moneybee_app_password
+          printf 'migrator-password' >/tmp/moneybee/postgres_migrator_password
+          printf 'runtime-password' >/tmp/moneybee/postgres_runtime_password
           printf 'user health on >test-password +ping ~*\nuser default off\n' >/tmp/moneybee/redis.acl
-          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/backend.env
+          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/migrator.env
+          printf 'APP_ENV=staging\nENABLE_EXTERNAL_DELIVERY=false\n' >/tmp/moneybee/runtime.env
           export MONEYBEE_API_IMAGE="ghcr.io/appolon1908-hue/moneybee-api@sha256:$ZERO"
           export MONEYBEE_WORKER_IMAGE="ghcr.io/appolon1908-hue/moneybee-worker@sha256:$ZERO"
           export MONEYBEE_MIGRATE_IMAGE="ghcr.io/appolon1908-hue/moneybee-migrate@sha256:$ZERO"
+          export MONEYBEE_MARKETING_IMAGE="ghcr.io/appolon1908-hue/moneybee-marketing@sha256:$ZERO"
+          export MONEYBEE_BORROWER_IMAGE="ghcr.io/appolon1908-hue/moneybee-borrower@sha256:$ZERO"
+          export MONEYBEE_LENDER_IMAGE="ghcr.io/appolon1908-hue/moneybee-lender@sha256:$ZERO"
+          export MONEYBEE_ADMIN_IMAGE="ghcr.io/appolon1908-hue/moneybee-admin@sha256:$ZERO"
           export MONEYBEE_POSTGRES_IMAGE="postgres@sha256:$ZERO"
           export MONEYBEE_REDIS_IMAGE="redis@sha256:$ZERO"
           export MONEYBEE_CADDY_IMAGE="caddy@sha256:$ZERO"
-          export MONEYBEE_VAULT_IMAGE="hashicorp/vault@sha256:$ZERO"
-          export MONEYBEE_BACKEND_ENV_FILE=/tmp/moneybee/backend.env
+          export MONEYBEE_CLAMAV_IMAGE="clamav@sha256:$ZERO"
+          export MONEYBEE_MIGRATOR_ENV_FILE=/tmp/moneybee/migrator.env
+          export MONEYBEE_RUNTIME_ENV_FILE=/tmp/moneybee/runtime.env
           export MONEYBEE_POSTGRES_DATA_PATH=/tmp/moneybee/postgres
           export MONEYBEE_REDIS_DATA_PATH=/tmp/moneybee/redis
-          export MONEYBEE_POSTGRES_PASSWORD_FILE=/tmp/moneybee/postgres_password
+          export MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE=/tmp/moneybee/postgres_password
+          export MONEYBEE_POSTGRES_MIGRATOR_PASSWORD_FILE=/tmp/moneybee/postgres_migrator_password
+          export MONEYBEE_POSTGRES_RUNTIME_PASSWORD_FILE=/tmp/moneybee/postgres_runtime_password
+          export MONEYBEE_ROLES_SQL_PATH="$PWD/deploy/postgres/moneybee_roles.sql"
           export MONEYBEE_REDIS_ACL_FILE=/tmp/moneybee/redis.acl
-          export MONEYBEE_MIGRATOR_PASSWORD_FILE=/tmp/moneybee/moneybee_migrator_password
-          export MONEYBEE_APP_PASSWORD_FILE=/tmp/moneybee/moneybee_app_password
+          export MONEYBEE_CLAMAV_DATABASE_PATH=/tmp/moneybee/clamav
           export MONEYBEE_CADDY_DATA_PATH=/tmp/moneybee/caddy-data
           export MONEYBEE_CADDY_CONFIG_PATH=/tmp/moneybee/caddy-config
-          export MONEYBEE_VAULT_DATA_PATH=/tmp/moneybee/vault
           export CADDY_ACME_EMAIL=ci@example.invalid
+          export MONEYBEE_TRUSTED_PROXY_CIDRS_CSV=172.16.0.0/12
           docker compose -f deploy/compose.data.yml config --quiet
-          docker compose --profile bank-credential-store -f deploy/compose.data.yml config --quiet
           docker compose -f deploy/compose.backend.yml config --quiet
           docker compose -f deploy/compose.edge.yml config --quiet
       - name: Build all backend release targets

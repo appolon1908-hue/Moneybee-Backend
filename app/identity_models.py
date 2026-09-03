@@ -8,7 +8,6 @@ from sqlalchemy import (
     ForeignKey,
     String,
     UniqueConstraint,
-    Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,28 +33,6 @@ class User(Base, Record):
         DateTime(timezone=True), nullable=True
     )
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-
-
-class LoginEvent(Base, Record):
-    """One authenticated session bootstrap (GET /auth/context - the
-    endpoint a frontend calls once per session, right after it has a
-    token, not the current_principal dependency every request goes
-    through). Deduplicated in app/services.py so a page held open and
-    repeatedly re-polling /auth/context doesn't produce a new row per
-    call - this tracks distinct sign-ins, not request volume.
-
-    user_id is not a hard foreign key: current_principal can also resolve
-    a legacy-claims principal (local_identity_enforcement=False) whose
-    user_id isn't backed by a real User row, and this must not fail to
-    record a login over that."""
-
-    __tablename__ = "login_events"
-
-    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
-    issuer: Mapped[str] = mapped_column(String(500))
-    subject: Mapped[str] = mapped_column(String(255), index=True)
-    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class ExternalIdentity(Base, Record):

@@ -17,6 +17,11 @@ class AdverseActionNotice(Base, Record):
     the fact."""
 
     __tablename__ = "adverse_action_notices"
+    __table_args__ = (
+        UniqueConstraint(
+            "underwriting_review_id", name="uq_adverse_action_notice_review"
+        ),
+    )
 
     application_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("applications.id"), index=True
@@ -82,7 +87,8 @@ class CommissionTaxRecord(Base, Record):
     __tablename__ = "commission_tax_records"
     __table_args__ = (
         UniqueConstraint(
-            "recipient_reference", "tax_year", name="uq_commission_tax_record_recipient_year"
+            "recipient_type", "recipient_reference", "tax_year",
+            name="uq_commission_tax_record_type_recipient_year"
         ),
     )
 

@@ -123,6 +123,10 @@ def _create_and_accept_offer(
             "total_repayment": 60000,
         },
     ).json()["id"]
+    acknowledged = client.post(
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
+    assert acknowledged.status_code == 200
     accepted = client.post(
         f"/api/v2/offers/{offer_id}/accept",
         headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -144,6 +148,12 @@ async def test_contract_is_created_in_draft_when_conditions_satisfied():
         assert contract.status_code == 200
         assert contract.json()["status"] == "DRAFT"
         assert contract.json()["application_id"] == application_id
+
+        late_condition = client.post(
+            f"/api/v2/lender/submissions/{submission_id}/conditions",
+            json={"description": "This condition is too late."},
+        )
+        assert late_condition.status_code == 409
 
 
 async def test_contract_void_is_idempotent():
@@ -202,6 +212,34 @@ async def test_contract_void_is_idempotent():
         assert invalid.json()["code"] == "INVALID_CONTRACT_TRANSITION"
 
 
+async def test_sent_contract_is_voided_at_provider_before_local_transition(monkeypatch):
+    calls = []
+
+    class FakeESign:
+        async def void_envelope(self, **kwargs):
+            calls.append(kwargs)
+            return {"status": "voided"}
+
+    monkeypatch.setattr("app.admin_routes.esign_adapter", lambda: FakeESign())
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        _create_and_accept_offer(client, application_id, submission_id, lender_id, program_id)
+        contract_id = client.get(f"/api/v2/applications/{application_id}/contract").json()["id"]
+        async with SessionLocal() as db:
+            contract = await db.get(models.Contract, uuid.UUID(contract_id))
+            contract.status = "SENT"
+            contract.external_envelope_id = "provider-envelope-void"
+            await db.commit()
+        response = client.post(
+            f"/api/v2/admin/contracts/{contract_id}/void",
+            json={"reason": "Offer superseded."},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "VOIDED"
+        assert calls == [{"envelope_id": "provider-envelope-void", "reason": "Offer superseded."}]
+
+
 async def test_send_pending_contract_envelope_leaves_draft_when_provider_disabled():
     with TestClient(app) as client:
         application_id, submission_id, lender_id, program_id = (
@@ -232,6 +270,42 @@ async def test_send_pending_contract_envelope_leaves_draft_when_provider_disable
         # esign_provider defaults to "disabled" in tests -> ProviderError ->
         # left as DRAFT for the next attempt, never silently marked sent.
         assert contract.status == "DRAFT"
+        attempted = await db.scalar(
+            select(models.Contract)
+            .where(models.Contract.provider_attempt_count > 0)
+            .order_by(models.Contract.provider_attempt_count.desc())
+        )
+        assert attempted is not None
+        assert attempted.provider_last_error is not None
+        assert attempted.provider_next_attempt_at is not None
+
+
+async def test_send_envelope_without_provider_identifier_never_marks_contract_sent(monkeypatch):
+    class MissingIdentifierESign:
+        async def send_envelope(self, **kwargs):
+            return {"status": "sent"}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = _prepare_matched_submission(client)
+        _create_and_accept_offer(client, application_id, submission_id, lender_id, program_id)
+        contract_id = client.get(f"/api/v2/applications/{application_id}/contract").json()["id"]
+
+    async with SessionLocal() as db:
+        drafts = list((await db.scalars(select(models.Contract).where(models.Contract.status == "DRAFT"))).all())
+        for draft in drafts:
+            if draft.id != uuid.UUID(contract_id):
+                draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: MissingIdentifierESign())
+    assert await worker.send_pending_contract_envelope() is None
+    async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        assert contract.status == "DRAFT"
+        assert contract.external_envelope_id is None
+        assert contract.provider_attempt_count == 1
+        assert "identifier" in contract.provider_last_error
 
 
 async def test_process_pending_docusign_event_signs_contract_and_advances_funding():
@@ -256,7 +330,13 @@ async def test_process_pending_docusign_event_signs_contract_and_advances_fundin
                 provider="docusign",
                 event_id=uuid.uuid4().hex,
                 event_type="envelope-completed",
-                payload={"envelopeId": envelope_id, "status": "completed"},
+                payload={
+                    "event": "envelope-completed",
+                    "data": {
+                        "envelopeId": envelope_id,
+                        "envelopeSummary": {"status": "completed"},
+                    },
+                },
                 payload_hash=uuid.uuid4().hex,
                 signature_valid=True,
                 status="RECEIVED",
@@ -278,3 +358,180 @@ async def test_process_pending_docusign_event_signs_contract_and_advances_fundin
             )
         )
         assert funding.status == "CONTRACT_SIGNED"
+
+
+async def test_unmatched_docusign_callback_remains_retryable():
+    message_id = uuid.uuid4()
+    async with SessionLocal() as db:
+        db.add(IntegrationInboxMessage(
+            id=message_id,
+            provider="docusign",
+            event_id=uuid.uuid4().hex,
+            event_type="envelope-completed",
+            payload={"event": "envelope-completed", "data": {"envelopeId": uuid.uuid4().hex, "envelopeSummary": {"status": "completed"}}},
+            payload_hash=uuid.uuid4().hex,
+            signature_valid=True,
+            status="RECEIVED",
+        ))
+        await db.commit()
+    await worker.process_pending_docusign_event()
+    async with SessionLocal() as db:
+        message = await db.get(IntegrationInboxMessage, message_id)
+        assert message.status == "RECEIVED"
+        assert message.attempts == 1
+        assert message.next_attempt_at is not None
+        assert message.processed_at is None
+
+async def test_decline_funding_voids_draft_contract_before_worker_send(monkeypatch):
+    calls: list[dict] = []
+
+    class UnexpectedESign:
+        async def send_envelope(self, **kwargs):
+            calls.append(kwargs)
+            return {"envelopeId": "must-not-be-sent"}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        async with SessionLocal() as db:
+            funding = await db.scalar(
+                select(models.Funding).where(
+                    models.Funding.application_id == uuid.UUID(application_id)
+                )
+            )
+            assert funding is not None
+            funding_id = str(funding.id)
+
+        response = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/decline",
+            json={"reason": "Application no longer qualifies."},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "DECLINED"
+
+    async with SessionLocal() as db:
+        contract = await db.scalar(
+            select(models.Contract).where(
+                models.Contract.application_id == uuid.UUID(application_id)
+            )
+        )
+        application = await db.get(models.Application, uuid.UUID(application_id))
+        assert contract is not None
+        assert contract.status == "VOIDED"
+        assert application is not None
+        assert application.status == models.ApplicationStatus.DECLINED
+        for draft in (
+            await db.scalars(
+                select(models.Contract).where(models.Contract.status == "DRAFT")
+            )
+        ).all():
+            draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: UnexpectedESign())
+    assert await worker.send_pending_contract_envelope() is None
+    assert calls == []
+
+
+async def test_successful_envelope_send_normalizes_id_and_advances_application(monkeypatch):
+    class SuccessfulESign:
+        async def send_envelope(self, **kwargs):
+            return {"envelopeId": "  provider-envelope-normalized  "}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        contract_id = client.get(
+            f"/api/v2/applications/{application_id}/contract"
+        ).json()["id"]
+
+    async with SessionLocal() as db:
+        for draft in (
+            await db.scalars(
+                select(models.Contract).where(models.Contract.status == "DRAFT")
+            )
+        ).all():
+            if draft.id != uuid.UUID(contract_id):
+                draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: SuccessfulESign())
+    assert await worker.send_pending_contract_envelope() == contract_id
+
+    async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        application = await db.get(models.Application, uuid.UUID(application_id))
+        history = list(
+            (
+                await db.scalars(
+                    select(models.ApplicationStatusHistory)
+                    .where(
+                        models.ApplicationStatusHistory.application_id
+                        == uuid.UUID(application_id)
+                    )
+                    .order_by(models.ApplicationStatusHistory.created_at)
+                )
+            ).all()
+        )
+        assert contract is not None
+        assert contract.status == "SENT"
+        assert contract.external_envelope_id == "provider-envelope-normalized"
+        assert application is not None
+        assert application.status == models.ApplicationStatus.CONTRACT_SENT
+        assert [row.to_status for row in history][-2:] == [
+            models.ApplicationStatus.CONTRACT_READY.value,
+            models.ApplicationStatus.CONTRACT_SENT.value,
+        ]
+
+
+async def test_blank_envelope_identifier_never_marks_contract_sent(monkeypatch):
+    class BlankIdentifierESign:
+        async def send_envelope(self, **kwargs):
+            return {"envelopeId": "   "}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        contract_id = client.get(
+            f"/api/v2/applications/{application_id}/contract"
+        ).json()["id"]
+
+    async with SessionLocal() as db:
+        for draft in (
+            await db.scalars(
+                select(models.Contract).where(models.Contract.status == "DRAFT")
+            )
+        ).all():
+            if draft.id != uuid.UUID(contract_id):
+                draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: BlankIdentifierESign())
+    assert await worker.send_pending_contract_envelope() is None
+
+    async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        application = await db.get(models.Application, uuid.UUID(application_id))
+        assert contract is not None
+        assert contract.status == "DRAFT"
+        assert contract.external_envelope_id is None
+        assert contract.provider_attempt_count == 1
+        assert "identifier" in contract.provider_last_error
+        assert application is not None
+        assert application.status == models.ApplicationStatus.CONDITIONS_COMPLETE

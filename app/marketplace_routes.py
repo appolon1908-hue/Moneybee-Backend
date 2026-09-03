@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas, services
 from app.auth import Principal, current_principal, require_permission
-from app.compliance_service import generate_commercial_financing_disclosure
+from app.compliance_service import create_offer_with_disclosure
 from app.db import get_db
 
 
@@ -65,8 +65,6 @@ async def lender_offer(
                 "message": "The lender organization does not own this resource.",
             },
         )
-    item = models.Offer(**payload.model_dump())
-    db.add(item)
     application = await db.get(models.Application, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
@@ -76,6 +74,9 @@ async def lender_offer(
         models.ApplicationStatus.OFFERS_AVAILABLE,
         user,
         reason="Lender created offer",
+    )
+    item = await create_offer_with_disclosure(
+        db, payload.model_dump(), jurisdiction=application.state
     )
     await db.commit()
     await db.refresh(item)
@@ -207,6 +208,25 @@ async def create_condition(
     user: Annotated[Principal, Depends(require_permission("lender.condition.create"))],
 ):
     submission = await authorized_submission(submission_id, db, user)
+    application = await db.scalar(
+        select(models.Application)
+        .where(models.Application.id == submission.application_id)
+        .with_for_update()
+    )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    funding = await db.scalar(
+        select(models.Funding)
+        .join(models.Offer, models.Offer.id == models.Funding.offer_id)
+        .where(
+            models.Funding.application_id == submission.application_id,
+            models.Offer.lender_id == submission.lender_id,
+            models.Offer.program_id == submission.program_id,
+        )
+        .with_for_update()
+    )
+    if funding is not None and funding.status != "CONDITIONS_PENDING":
+        raise HTTPException(status_code=409, detail="Conditions cannot be added after funding advancement")
     item = models.UnderwritingCondition(
         submission_id=submission.id,
         application_id=submission.application_id,
@@ -214,9 +234,6 @@ async def create_condition(
         status="BORROWER_ACTION_REQUIRED",
     )
     submission.status = "CONDITIONS"
-    application = await db.get(models.Application, submission.application_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found")
     if application.status in {
         models.ApplicationStatus.SUBMITTED_TO_LENDERS,
         models.ApplicationStatus.UNDERWRITING,
@@ -263,7 +280,8 @@ async def create_submission_offer(
         raise HTTPException(status_code=422, detail="Application ID mismatch")
     if payload.lender_id != submission.lender_id:
         raise HTTPException(status_code=422, detail="Lender ID mismatch")
-    item = models.Offer(**payload.model_dump())
+    if payload.program_id != submission.program_id:
+        raise HTTPException(status_code=422, detail="Program ID mismatch")
     submission.status = "OFFERED"
     application = await db.get(models.Application, submission.application_id)
     if application is None:
@@ -275,10 +293,8 @@ async def create_submission_offer(
         user,
         reason="Lender created offer from submission",
     )
-    db.add(item)
-    await db.flush()
-    await generate_commercial_financing_disclosure(
-        db, item, jurisdiction=application.state
+    item = await create_offer_with_disclosure(
+        db, payload.model_dump(), jurisdiction=application.state
     )
     db.add(
         models.OutboxEvent(
@@ -303,7 +319,11 @@ async def submit_condition(
     db: Db,
     user: User,
 ):
-    item = await db.get(models.UnderwritingCondition, condition_id)
+    item = await db.scalar(
+        select(models.UnderwritingCondition)
+        .where(models.UnderwritingCondition.id == condition_id)
+        .with_for_update()
+    )
     if item is None:
         raise HTTPException(status_code=404, detail="Condition not found")
     await services.get_authorized_application(db, item.application_id, user, write=True)
@@ -335,7 +355,11 @@ async def decide_condition(
     db: AsyncSession,
     user: Principal,
 ) -> models.UnderwritingCondition:
-    item = await db.get(models.UnderwritingCondition, condition_id)
+    item = await db.scalar(
+        select(models.UnderwritingCondition)
+        .where(models.UnderwritingCondition.id == condition_id)
+        .with_for_update()
+    )
     if item is None:
         raise HTTPException(status_code=404, detail="Condition not found")
     submission = await authorized_submission(item.submission_id, db, user)

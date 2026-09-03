@@ -1,4 +1,5 @@
 import os
+import asyncio
 import uuid
 
 os.environ.setdefault("APP_ENV", "test")
@@ -6,9 +7,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+import pytest
+from sqlalchemy import func, select
 
 from app import models
+from app.config import settings
 from app.db import SessionLocal
 from app.main import app
 
@@ -94,9 +97,13 @@ def _accept_an_offer_and_build_funding(client: TestClient) -> str:
         },
     ).json()["id"]
     client.post(f"/api/v2/applications/{application_id}/match")
-    submission_id = client.post(
-        f"/api/v2/admin/applications/{application_id}/prepare-matched-submissions"
-    ).json()[0]["id"]
+    submission_id = next(
+        item
+        for item in client.post(
+            f"/api/v2/admin/applications/{application_id}/prepare-matched-submissions"
+        ).json()
+        if item["program_id"] == program_id
+    )["id"]
     offer_id = client.post(
         f"/api/v2/lender/submissions/{submission_id}/offers",
         json={
@@ -113,6 +120,10 @@ def _accept_an_offer_and_build_funding(client: TestClient) -> str:
             "total_repayment": 60000,
         },
     ).json()["id"]
+    acknowledged = client.post(
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
+    assert acknowledged.status_code == 200
     accepted = client.post(
         f"/api/v2/offers/{offer_id}/accept",
         headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -191,3 +202,43 @@ async def test_commission_adjustment_is_idempotent_and_detects_payload_conflicts
                 ).all()
             )
         assert count == 2
+
+
+async def test_postgres_concurrent_adjustment_replay_returns_one_result():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL adjustment row-lock evidence")
+    with TestClient(app) as client:
+        funding_id = _accept_an_offer_and_build_funding(client)
+        commission_id = await _create_commission(funding_id)
+        key = uuid.uuid4().hex
+        payload = {
+            "adjustment_type": "CORRECTION",
+            "amount": "25.00",
+            "reason": "Concurrent idempotency regression.",
+        }
+
+        async def adjust():
+            return await asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/adjustments",
+                json=payload,
+                headers={"Idempotency-Key": key},
+            )
+
+        first, second = await asyncio.gather(adjust(), adjust())
+        assert first.status_code == second.status_code == 201
+        assert first.json()["id"] == second.json()["id"]
+        async with SessionLocal() as db:
+            adjustment_count = await db.scalar(
+                select(func.count(models.CommissionAdjustment.id)).where(
+                    models.CommissionAdjustment.commission_id == uuid.UUID(commission_id)
+                )
+            )
+            audit_count = await db.scalar(
+                select(func.count(models.AuditEvent.id)).where(
+                    models.AuditEvent.action == "COMMISSION_ADJUSTMENT_RECORDED",
+                    models.AuditEvent.resource_id == commission_id,
+                )
+            )
+            assert adjustment_count == 1
+            assert audit_count == 1

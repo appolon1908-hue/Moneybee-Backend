@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas, services
 from app.auth import Principal
+from app.compliance_service import generate_adverse_action_notice
 
 
 POLICY_VERSION = 2
@@ -259,74 +260,17 @@ async def evaluate_fraud(
     return assessment
 
 
-async def run_business_verification(
-    db: AsyncSession,
-    application: models.Application,
-) -> models.Verification:
-    """Triggers the configured KYB provider's business-verification check
-    and persists the result. This is what
-    app/domain_logic.py's create_requirement_snapshot's BUSINESS_VERIFICATION
-    requirement (gated behind the kyb.live_verification capability) has
-    always queried for - nothing ever wrote a Verification row until this.
-
-    Owners are included in the same payload/call the provider adapters
-    already support (MiddeskAdapter folds beneficial-owner identity
-    checks into its single /v1/businesses submission), rather than a
-    separate identity-verification call - that's how the one concrete
-    adapter this repo has actually models the relationship between a
-    business check and its owners' identity checks.
-    """
-    from app.integrations.registry import kyb_adapter
-
-    business = await db.scalar(
-        select(models.Business).where(models.Business.application_id == application.id)
-    )
-    if business is None:
-        raise HTTPException(status_code=409, detail="Business profile is not complete")
-    owners = list(
-        (
-            await db.scalars(
-                select(models.Owner).where(models.Owner.application_id == application.id)
-            )
-        ).all()
-    )
-    payload = {
-        "application_id": str(application.id),
-        "business_name": business.legal_name,
-        "address": business.address,
-        "website": business.website,
-        "owners": [
-            {"first_name": o.first_name, "last_name": o.last_name, "title": o.title}
-            for o in owners
-        ],
-    }
-    result = await kyb_adapter().verify_business(payload)
-    existing = await db.scalar(
-        select(models.Verification).where(
-            models.Verification.application_id == application.id,
-            models.Verification.verification_type == "BUSINESS",
-        )
-    )
-    if existing is None:
-        existing = models.Verification(
-            application_id=application.id,
-            verification_type="BUSINESS",
-        )
-        db.add(existing)
-    existing.provider = result.get("provider", "unknown")
-    existing.provider_reference = result.get("provider_reference")
-    existing.status = result.get("status", "PENDING")
-    existing.normalized_result = result.get("normalized_result", {})
-    await db.flush()
-    return existing
-
-
 async def create_underwriting_review(
     db: AsyncSession,
     application: models.Application,
     payload: schemas.UnderwritingReviewInput,
     principal: Principal,
 ) -> models.UnderwritingReview:
+    if payload.decision == "DECLINE" and payload.submission_id is not None and not payload.reason_codes:
+        raise HTTPException(
+            status_code=422,
+            detail="A lender decline requires at least one specific reason code",
+        )
     if payload.submission_id is not None:
         submission = await db.get(models.LenderSubmission, payload.submission_id)
         if submission is None or submission.application_id != application.id:
@@ -362,6 +306,8 @@ async def create_underwriting_review(
     )
     db.add(review)
     await db.flush()
+    if payload.decision == "DECLINE" and payload.submission_id is not None:
+        await generate_adverse_action_notice(db, review)
     db.add(
         models.AuditEvent(
             actor_id=principal.subject,

@@ -248,6 +248,17 @@ def test_borrower_application_sections_and_submission_flow():
             == "UCC-1 blanket lien on business assets."
         )
 
+        unacknowledged = client.post(
+            f"/api/v2/offers/{offer_id}/accept",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert unacknowledged.status_code == 409
+        assert "must be acknowledged" in unacknowledged.json()["detail"]
+        acknowledged = client.post(
+            f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+        )
+        assert acknowledged.status_code == 200
+
         accept_key = uuid.uuid4().hex
         accepted_response = client.post(
             f"/api/v2/offers/{offer_id}/accept",

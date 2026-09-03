@@ -18,7 +18,11 @@ from app.compliance_schemas import (
     CommercialFinancingDisclosurePage,
     ComplianceOverviewRead,
 )
-from app.compliance_service import generate_commission_tax_records, update_recipient_tin
+from app.compliance_service import (
+    generate_commission_tax_records,
+    lock_commission_tax_year,
+    update_recipient_tin,
+)
 from app.db import get_db
 from app.schemas import CommercialFinancingDisclosureRead
 
@@ -432,7 +436,24 @@ async def generate_tax_records(
             )
         return existing.response_body
 
-    records = await generate_commission_tax_records(db, tax_year)
+    try:
+        records = await generate_commission_tax_records(db, tax_year)
+    except ValueError as exc:
+        _problem("FILED_TAX_RECORD_IMMUTABLE", str(exc), status_code=409)
+    existing = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            _problem(
+                "IDEMPOTENCY_CONFLICT",
+                "The idempotency key was already used for a different tax year.",
+            )
+        return existing.response_body
     response = [_tax_record_read(record) for record in records]
     db.add(
         models.AuditEvent(
@@ -472,6 +493,14 @@ async def set_tax_record_tin(
         Depends(require_permission("commission.receipt.record")),
     ],
 ):
+    tax_year = await db.scalar(
+        select(compliance_models.CommissionTaxRecord.tax_year).where(
+            compliance_models.CommissionTaxRecord.id == record_id
+        )
+    )
+    if tax_year is None:
+        raise HTTPException(status_code=404, detail="Commission tax record not found")
+    await lock_commission_tax_year(db, tax_year)
     record = await db.scalar(
         select(compliance_models.CommissionTaxRecord)
         .where(compliance_models.CommissionTaxRecord.id == record_id)
@@ -479,12 +508,15 @@ async def set_tax_record_tin(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Commission tax record not found")
-    await update_recipient_tin(
-        db,
-        record,
-        recipient_name=payload.recipient_name,
-        tin=payload.tin,
-    )
+    try:
+        await update_recipient_tin(
+            db,
+            record,
+            recipient_name=payload.recipient_name,
+            tin=payload.tin,
+        )
+    except ValueError as exc:
+        _problem("FILED_RECIPIENT_IDENTITY_IMMUTABLE", str(exc), status_code=409)
     db.add(
         models.AuditEvent(
             actor_id=user.subject,
@@ -538,6 +570,14 @@ async def record_tax_filing(
             )
         return existing.response_body
 
+    tax_year = await db.scalar(
+        select(compliance_models.CommissionTaxRecord.tax_year).where(
+            compliance_models.CommissionTaxRecord.id == record_id
+        )
+    )
+    if tax_year is None:
+        raise HTTPException(status_code=404, detail="Commission tax record not found")
+    await lock_commission_tax_year(db, tax_year)
     record = await db.scalar(
         select(compliance_models.CommissionTaxRecord)
         .where(compliance_models.CommissionTaxRecord.id == record_id)
@@ -545,6 +585,31 @@ async def record_tax_filing(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Commission tax record not found")
+    # The row lock serializes concurrent calls. Re-read the idempotency
+    # identity after acquiring it because another transaction may have
+    # committed the same key while this request was waiting.
+    existing = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            _problem(
+                "IDEMPOTENCY_CONFLICT",
+                "The idempotency key was already used with different filing evidence.",
+            )
+        return existing.response_body
+    if record.requires_1099 and (
+        not (record.recipient_name or "").strip() or not record.tin_ciphertext
+    ):
+        _problem(
+            "TAX_RECIPIENT_IDENTITY_REQUIRED",
+            "Recipient name and encrypted TIN are required before filing.",
+            status_code=409,
+        )
     if (
         record.filed_at is not None
         and record.filing_reference != payload.filing_reference

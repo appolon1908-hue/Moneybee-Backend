@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,15 +49,7 @@ async def auth_me(user: User):
     response_model=PortalContext,
     tags=["identity", "portal"],
 )
-async def auth_context(db: Db, user: User, request: Request):
-    await services.record_login_event(
-        db,
-        user_id=user.user_id,
-        issuer=user.issuer,
-        subject=user.subject,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
+async def auth_context(db: Db, user: User):
     organizations: list[identity_models.Organization] = []
     if user.organization_ids:
         organizations = list(

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import uuid
 
 os.environ.setdefault("APP_ENV", "test")
@@ -6,9 +7,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import func, select
 
 from app import models, worker
 from app.db import SessionLocal
+from app.config import settings
 from app.integration_models import IntegrationInboxMessage
 from app.main import app
 
@@ -118,6 +122,10 @@ async def _reach_funded_commission(client: TestClient) -> str:
             "total_repayment": 60000,
         },
     ).json()["id"]
+    acknowledged = client.post(
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
+    assert acknowledged.status_code == 200
     accepted = client.post(
         f"/api/v2/offers/{offer_id}/accept",
         headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -208,6 +216,16 @@ async def test_commission_receipts_update_status_and_stay_idempotent():
         assert final.json()["received_amount"] == "4000.00"
         assert final.json()["status"] == "RECEIVED"
 
+        over = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/receipts",
+            json={"amount": "0.01", "reference": "ACH-OVER"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert over.status_code == 422
+        current = client.get("/api/v2/admin/commissions").json()
+        stored = next(item for item in current if item["id"] == commission_id)
+        assert stored["received_amount"] == "4000.00"
+
 
 async def test_commission_splits_are_created_and_capped_at_net_expected():
     with TestClient(app) as client:
@@ -267,3 +285,191 @@ async def test_commission_splits_are_created_and_capped_at_net_expected():
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert overflow.status_code == 422
+
+
+async def test_commission_split_payment_evidence_is_audited_and_idempotent():
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+        created = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits",
+            json={
+                "recipient_type": "BROKER",
+                "recipient_reference": "broker-paid-evidence",
+                "amount": "600.00",
+            },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert created.status_code == 201
+        split_id = created.json()["id"]
+        key = uuid.uuid4().hex
+        payload = {
+            "paid_at": "2026-08-31T12:00:00Z",
+            "payment_reference": "accounting-proof-2026-0001",
+        }
+        paid = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+            json=payload,
+            headers={"Idempotency-Key": key},
+        )
+        replay = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+            json=payload,
+            headers={"Idempotency-Key": key},
+        )
+        assert paid.status_code == replay.status_code == 200
+        assert paid.json() == replay.json()
+        assert paid.json()["status"] == "PAID"
+
+        conflict = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+            json={**payload, "payment_reference": "different-proof"},
+            headers={"Idempotency-Key": key},
+        )
+        assert conflict.status_code == 409
+
+    async with SessionLocal() as db:
+        stored_split = await db.get(models.CommissionSplit, uuid.UUID(split_id))
+        assert stored_split.payment_reference == payload["payment_reference"]
+        assert stored_split.paid_at is not None
+        audit_count = await db.scalar(
+            select(func.count(models.AuditEvent.id)).where(
+                models.AuditEvent.action == "COMMISSION_SPLIT_PAYMENT_RECORDED",
+                models.AuditEvent.resource_id == split_id,
+            )
+        )
+        idempotency_count = await db.scalar(
+            select(func.count(models.IdempotencyRecord.id)).where(
+                models.IdempotencyRecord.key == key,
+            )
+        )
+        assert audit_count == idempotency_count == 1
+
+
+async def test_postgres_concurrent_receipts_are_serialized_without_lost_updates():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL row-lock evidence")
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+        keys = (uuid.uuid4().hex, uuid.uuid4().hex)
+
+        async def receipt(amount: str, key: str):
+            return await asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/receipts",
+                json={"amount": amount, "reference": key},
+                headers={"Idempotency-Key": key},
+            )
+
+        first, second = await asyncio.gather(receipt("1000.00", keys[0]), receipt("1500.00", keys[1]))
+        assert first.status_code == second.status_code == 200
+        current = client.get("/api/v2/admin/commissions").json()
+        commission = next(item for item in current if item["id"] == commission_id)
+        assert commission["received_amount"] == "2500.00"
+        assert commission["status"] == "PARTIALLY_RECEIVED"
+        async with SessionLocal() as db:
+            audit_count = await db.scalar(
+                select(func.count(models.AuditEvent.id)).where(
+                    models.AuditEvent.action == "COMMISSION_RECEIPT_RECORDED",
+                    models.AuditEvent.resource_id == commission_id,
+                )
+            )
+            assert audit_count == 2
+
+
+async def test_postgres_concurrent_splits_cannot_exceed_parent_capacity():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL row-lock evidence")
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+
+        async def split(amount: str, recipient: str):
+            return await asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/splits",
+                json={
+                    "recipient_type": "BROKER",
+                    "recipient_reference": recipient,
+                    "amount": amount,
+                },
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            )
+
+        results = await asyncio.gather(split("2500.00", "concurrent-a"), split("2500.00", "concurrent-b"))
+        assert sorted(result.status_code for result in results) == [201, 422]
+        stored = client.get(f"/api/v2/admin/commissions/{commission_id}/splits").json()
+        assert sum(float(item["amount"]) for item in stored) == 2500.00
+
+
+async def test_adjustment_reconciles_status_and_cannot_invalidate_committed_aggregates():
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+        received = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/receipts",
+            json={"amount": "4000.00", "reference": "fully-paid"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert received.status_code == 200
+
+        increase = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/adjustments",
+            json={"adjustment_type": "CORRECTION", "amount": "100.00", "reason": "Approved correction"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert increase.status_code == 201
+        current = next(
+            item for item in client.get("/api/v2/admin/commissions").json()
+            if item["id"] == commission_id
+        )
+        assert current["status"] == "PARTIALLY_RECEIVED"
+
+        invalid = client.post(
+            f"/api/v2/admin/commissions/{commission_id}/adjustments",
+            json={"adjustment_type": "CORRECTION", "amount": "-101.00", "reason": "Invalid reduction"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert invalid.status_code == 422
+
+
+async def test_postgres_concurrent_adjustment_and_receipt_preserve_net_invariant():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL row-lock evidence")
+    with TestClient(app) as client:
+        commission_id = await _reach_funded_commission(client)
+
+        receipt, adjustment = await asyncio.gather(
+            asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/receipts",
+                json={"amount": "3500.00", "reference": "concurrent-adjustment"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ),
+            asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/commissions/{commission_id}/adjustments",
+                json={"adjustment_type": "CORRECTION", "amount": "-1000.00", "reason": "Concurrent correction"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ),
+        )
+        assert sorted((receipt.status_code, adjustment.status_code)) in ([200, 422], [201, 422])
+        current = next(
+            item for item in client.get("/api/v2/admin/commissions").json()
+            if item["id"] == commission_id
+        )
+        async with SessionLocal() as db:
+            commission = await db.get(models.Commission, uuid.UUID(commission_id))
+            net = await db.scalar(
+                select(
+                    models.Commission.expected_amount
+                    + func.coalesce(func.sum(models.CommissionAdjustment.amount), 0)
+                )
+                .select_from(models.Commission)
+                .outerjoin(
+                    models.CommissionAdjustment,
+                    models.CommissionAdjustment.commission_id == models.Commission.id,
+                )
+                .where(models.Commission.id == uuid.UUID(commission_id))
+                .group_by(models.Commission.expected_amount)
+            )
+            assert commission is not None
+            assert commission.received_amount <= net
+            assert current["received_amount"] == str(commission.received_amount)

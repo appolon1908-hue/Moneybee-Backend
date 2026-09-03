@@ -3,19 +3,15 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import compliance_models, domain_logic, models, schemas, services
+from app import compliance_models, compliance_service, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
-from app.compliance_service import (
-    generate_commission_tax_records,
-    update_recipient_tin,
-)
+from app.contract_void_service import ensure_provider_void_confirmed
 from app.db import get_db
-from app.integrations.base import ProviderError
-from app.integrations.registry import provider_statuses
+from app.integrations.registry import esign_adapter, provider_statuses
 
 
 router = APIRouter()
@@ -133,15 +129,28 @@ async def admin_fundings(
     )
 
 
-async def _load_funding_or_404(db: AsyncSession, funding_id: uuid.UUID) -> models.Funding:
-    funding = await db.get(models.Funding, funding_id)
+async def _load_funding_or_404(
+    db: AsyncSession,
+    funding_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+) -> models.Funding:
+    query = select(models.Funding).where(models.Funding.id == funding_id)
+    if for_update:
+        query = query.with_for_update()
+    funding = await db.scalar(query)
     if funding is None:
         raise HTTPException(status_code=404, detail="Funding not found")
     return funding
 
 
-async def _load_contract_or_404(db: AsyncSession, contract_id: uuid.UUID) -> models.Contract:
-    contract = await db.get(models.Contract, contract_id)
+async def _load_contract_or_404(
+    db: AsyncSession, contract_id: uuid.UUID, *, for_update: bool = False
+) -> models.Contract:
+    query = select(models.Contract).where(models.Contract.id == contract_id)
+    if for_update:
+        query = query.with_for_update()
+    contract = await db.scalar(query)
     if contract is None:
         raise HTTPException(status_code=404, detail="Contract not found")
     return contract
@@ -186,7 +195,7 @@ async def approve_funding(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/approve"
     request_hash = _request_hash({})
     replay = await _funding_idempotency_replay(
@@ -199,7 +208,7 @@ async def approve_funding(
     if replay:
         return await _load_funding_or_404(db, funding_id)
 
-    services.transition_funding(db, funding, "APPROVED_FOR_FUNDING", user)
+    await services.transition_funding(db, funding, "APPROVED_FOR_FUNDING", user)
     await db.flush()
     db.add(
         models.IdempotencyRecord(
@@ -230,7 +239,7 @@ async def funding_funds_sent(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/funds-sent"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -253,7 +262,7 @@ async def funding_funds_sent(
             },
         )
 
-    services.transition_funding(db, funding, "FUNDS_SENT", user)
+    await services.transition_funding(db, funding, "FUNDS_SENT", user)
     funding.provider_reference = payload.provider_reference
     funding.funds_sent_at = models.utcnow()
     await db.flush()
@@ -286,7 +295,7 @@ async def confirm_funding(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/confirm"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -309,7 +318,7 @@ async def confirm_funding(
             },
         )
 
-    services.transition_funding(db, funding, "FUNDED", user)
+    await services.transition_funding(db, funding, "FUNDED", user)
     funding.funded_amount = payload.funded_amount
     funding.funding_confirmed_at = models.utcnow()
     expected_amount = payload.commission_expected_amount
@@ -354,7 +363,7 @@ async def decline_funding(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    funding = await _load_funding_or_404(db, funding_id)
+    funding = await _load_funding_or_404(db, funding_id, for_update=True)
     route = f"/admin/fundings/{funding_id}/decline"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -367,7 +376,31 @@ async def decline_funding(
     if replay:
         return await _load_funding_or_404(db, funding_id)
 
-    services.transition_funding(db, funding, "DECLINED", user, reason=payload.reason)
+    contract = await db.scalar(
+        select(models.Contract)
+        .where(models.Contract.application_id == funding.application_id)
+        .order_by(models.Contract.created_at.desc())
+        .with_for_update()
+        .limit(1)
+    )
+    if contract is not None:
+        if contract.status == "SENT":
+            if not contract.external_envelope_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "CONTRACT_VOID_RECONCILIATION_REQUIRED"},
+                )
+            await ensure_provider_void_confirmed(
+                db, contract, reason=payload.reason, adapter=esign_adapter()
+            )
+            services.transition_contract(
+                db, contract, "VOIDED", user, reason=payload.reason
+            )
+        elif contract.status == "DRAFT":
+            services.transition_contract(
+                db, contract, "VOIDED", user, reason=payload.reason
+            )
+    await services.transition_funding(db, funding, "DECLINED", user, reason=payload.reason)
     await db.flush()
     db.add(
         models.IdempotencyRecord(
@@ -398,7 +431,7 @@ async def void_contract(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    contract = await _load_contract_or_404(db, contract_id)
+    contract = await _load_contract_or_404(db, contract_id, for_update=True)
     route = f"/admin/contracts/{contract_id}/void"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -411,6 +444,13 @@ async def void_contract(
     if replay:
         return await _load_contract_or_404(db, contract_id)
 
+    if contract.status == "SENT" and contract.external_envelope_id:
+        await ensure_provider_void_confirmed(
+            db,
+            contract,
+            reason=payload.reason,
+            adapter=esign_adapter(),
+        )
     services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
     await db.flush()
     db.add(
@@ -467,9 +507,12 @@ async def admin_renewals(
 
 
 async def _load_renewal_or_404(
-    db: AsyncSession, renewal_id: uuid.UUID
+    db: AsyncSession, renewal_id: uuid.UUID, *, for_update: bool = False
 ) -> models.RenewalOpportunity:
-    renewal = await db.get(models.RenewalOpportunity, renewal_id)
+    query = select(models.RenewalOpportunity).where(models.RenewalOpportunity.id == renewal_id)
+    if for_update:
+        query = query.with_for_update()
+    renewal = await db.scalar(query)
     if renewal is None:
         raise HTTPException(status_code=404, detail="Renewal opportunity not found")
     return renewal
@@ -489,7 +532,7 @@ async def update_renewal_status(
         str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
     ],
 ):
-    renewal = await _load_renewal_or_404(db, renewal_id)
+    renewal = await _load_renewal_or_404(db, renewal_id, for_update=True)
     route = f"/admin/renewal-opportunities/{renewal_id}/status"
     request_hash = _request_hash(payload.model_dump(mode="json"))
     replay = await _funding_idempotency_replay(
@@ -664,7 +707,7 @@ async def run_fraud_assessment(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("fraud.run"))],
 ):
-    application = await services.get_authorized_application(db, application_id, user)
+    application = await services.get_authorized_application(db, application_id, user, write=True)
     assessment = await domain_logic.evaluate_fraud(db, application)
     db.add(
         models.AuditEvent(
@@ -682,69 +725,6 @@ async def run_fraud_assessment(
     await db.commit()
     await db.refresh(assessment)
     return assessment
-
-
-@router.post(
-    "/admin/applications/{application_id}/business-verifications",
-    response_model=schemas.VerificationRead,
-    status_code=status.HTTP_201_CREATED,
-    tags=["admin", "verification"],
-)
-async def run_business_verification(
-    application_id: uuid.UUID,
-    db: Db,
-    user: Annotated[Principal, Depends(require_permission("kyb.run"))],
-):
-    await services.require_capability(db, "kyb.live_verification")
-    application = await services.get_authorized_application(db, application_id, user)
-    try:
-        verification = await domain_logic.run_business_verification(db, application)
-    except ProviderError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "PROVIDER_REQUEST_FAILED",
-                "provider": exc.provider,
-                "message": "The configured KYB provider could not complete the request.",
-            },
-        ) from exc
-    db.add(
-        models.AuditEvent(
-            actor_id=user.subject,
-            action="BUSINESS_VERIFICATION_RUN",
-            resource_type="application",
-            resource_id=str(application.id),
-            details={
-                "verification_id": str(verification.id),
-                "status": verification.status,
-            },
-        )
-    )
-    await db.commit()
-    await db.refresh(verification)
-    return verification
-
-
-@router.get(
-    "/admin/applications/{application_id}/verifications",
-    response_model=list[schemas.VerificationRead],
-    tags=["admin", "verification"],
-)
-async def application_verifications(
-    application_id: uuid.UUID,
-    db: Db,
-    user: Annotated[Principal, Depends(require_permission("application.read"))],
-):
-    await services.get_authorized_application(db, application_id, user)
-    return list(
-        (
-            await db.scalars(
-                select(models.Verification)
-                .where(models.Verification.application_id == application_id)
-                .order_by(models.Verification.created_at)
-            )
-        ).all()
-    )
 
 
 @router.get(
@@ -778,9 +758,44 @@ async def create_underwriting_review(
     payload: schemas.UnderwritingReviewInput,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("underwriting.review"))],
+    request: Request,
 ):
-    application = await services.get_authorized_application(db, application_id, user)
+    idempotency_key = request.headers.get("Idempotency-Key")
+    if idempotency_key is not None and not 8 <= len(idempotency_key) <= 160:
+        raise HTTPException(status_code=422, detail="Invalid Idempotency-Key length")
+    application = await services.get_authorized_application(
+        db, application_id, user, write=True, lock_for_update=True
+    )
+    route = f"/admin/applications/{application_id}/underwriting/reviews"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    if idempotency_key is not None:
+        replay = await _funding_idempotency_replay(
+            db,
+            route=route,
+            actor_id=user.subject,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            review = await db.get(
+                models.UnderwritingReview,
+                uuid.UUID(replay.response_body["review_id"]),
+            )
+            if review is None:
+                raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+            return review
     review = await domain_logic.create_underwriting_review(db, application, payload, user)
+    if idempotency_key is not None:
+        db.add(
+            models.IdempotencyRecord(
+                key=idempotency_key,
+                actor_id=user.subject,
+                route=route,
+                request_hash=request_hash,
+                response_status=201,
+                response_body={"review_id": str(review.id)},
+            )
+        )
     await db.commit()
     await db.refresh(review)
     return review
@@ -852,9 +867,6 @@ async def create_commission_adjustment(
             status_code=422,
             detail="Adjustment amount must be non-zero",
         )
-    if await db.get(models.Commission, commission_id) is None:
-        raise HTTPException(status_code=404, detail="Commission not found")
-
     route = f"/admin/commissions/{commission_id}/adjustments"
     request_hash = hashlib.sha256(
         json.dumps(
@@ -863,6 +875,7 @@ async def create_commission_adjustment(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+    commission = await _load_commission_or_404(db, commission_id)
     replay = await db.scalar(
         select(models.IdempotencyRecord).where(
             models.IdempotencyRecord.actor_id == user.subject,
@@ -880,6 +893,20 @@ async def create_commission_adjustment(
             raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
         return replay_adjustment
 
+    current_net = await _net_expected_amount(db, commission)
+    adjusted_net = current_net + payload.amount
+    split_total = await db.scalar(
+        select(func.coalesce(func.sum(models.CommissionSplit.amount), 0)).where(
+            models.CommissionSplit.commission_id == commission_id
+        )
+    )
+    if adjusted_net <= 0:
+        raise HTTPException(status_code=422, detail="Adjustment would make net commission non-positive")
+    if adjusted_net < commission.received_amount:
+        raise HTTPException(status_code=422, detail="Adjustment would make receipts exceed net commission")
+    if adjusted_net < split_total:
+        raise HTTPException(status_code=422, detail="Adjustment would make splits exceed net commission")
+
     adjustment = models.CommissionAdjustment(
         commission_id=commission_id,
         adjustment_type=payload.adjustment_type,
@@ -888,6 +915,12 @@ async def create_commission_adjustment(
         created_by=user.subject,
     )
     db.add(adjustment)
+    if commission.received_amount >= adjusted_net:
+        commission.status = "RECEIVED"
+    elif commission.received_amount > 0:
+        commission.status = "PARTIALLY_RECEIVED"
+    else:
+        commission.status = "EXPECTED"
     db.add(
         models.AuditEvent(
             actor_id=user.subject,
@@ -917,7 +950,11 @@ async def create_commission_adjustment(
 
 
 async def _load_commission_or_404(db: AsyncSession, commission_id: uuid.UUID) -> models.Commission:
-    commission = await db.get(models.Commission, commission_id)
+    commission = await db.scalar(
+        select(models.Commission)
+        .where(models.Commission.id == commission_id)
+        .with_for_update()
+    )
     if commission is None:
         raise HTTPException(status_code=404, detail="Commission not found")
     return commission
@@ -959,8 +996,13 @@ async def record_commission_receipt(
     if replay:
         return await _load_commission_or_404(db, commission_id)
 
-    commission.received_amount = commission.received_amount + payload.amount
     net_expected = await _net_expected_amount(db, commission)
+    if commission.received_amount + payload.amount > net_expected:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Receipt would exceed the commission's net expected amount ({net_expected}).",
+        )
+    commission.received_amount = commission.received_amount + payload.amount
     if commission.received_amount >= net_expected:
         commission.status = "RECEIVED"
     elif commission.received_amount > 0:
@@ -1074,6 +1116,83 @@ async def create_commission_split(
             route=route,
             request_hash=request_hash,
             response_status=201,
+            response_body={"split_id": str(split.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(split)
+    return split
+
+
+@router.post(
+    "/admin/commissions/{commission_id}/splits/{split_id}/mark-paid",
+    response_model=schemas.CommissionSplitRead,
+    tags=["admin", "funding"],
+)
+async def mark_commission_split_paid(
+    commission_id: uuid.UUID,
+    split_id: uuid.UUID,
+    payload: schemas.CommissionSplitPaymentInput,
+    db: Db,
+    user: Annotated[Principal, Depends(require_permission("commission.split.manage"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
+):
+    """Record externally verified payout evidence; this never initiates a payout."""
+    await _load_commission_or_404(db, commission_id)
+    route = f"/admin/commissions/{commission_id}/splits/{split_id}/mark-paid"
+    request_hash = _request_hash(payload.model_dump(mode="json"))
+    replay = await _funding_idempotency_replay(
+        db,
+        route=route,
+        actor_id=user.subject,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        replay_split = await db.get(models.CommissionSplit, split_id)
+        if replay_split is None or replay_split.commission_id != commission_id:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_split
+
+    split = await db.scalar(
+        select(models.CommissionSplit)
+        .where(
+            models.CommissionSplit.id == split_id,
+            models.CommissionSplit.commission_id == commission_id,
+        )
+        .with_for_update()
+    )
+    if split is None:
+        raise HTTPException(status_code=404, detail="Commission split not found")
+    if split.status != "PENDING":
+        raise HTTPException(status_code=409, detail="Commission split is not pending")
+
+    split.status = "PAID"
+    split.paid_at = payload.paid_at
+    split.payment_reference = payload.payment_reference
+    db.add(
+        models.AuditEvent(
+            actor_id=user.subject,
+            action="COMMISSION_SPLIT_PAYMENT_RECORDED",
+            resource_type="commission_split",
+            resource_id=str(split.id),
+            details={
+                "commission_id": str(commission_id),
+                "paid_at": payload.paid_at.isoformat(),
+                "payment_reference": payload.payment_reference,
+            },
+        )
+    )
+    await db.flush()
+    db.add(
+        models.IdempotencyRecord(
+            key=idempotency_key,
+            actor_id=user.subject,
+            route=route,
+            request_hash=request_hash,
+            response_status=200,
             response_body={"split_id": str(split.id)},
         )
     )
@@ -1246,27 +1365,20 @@ async def provider_adapters(
     user: Annotated[Principal, Depends(require_permission("capability.read"))],
 ):
     capabilities = await services.effective_capabilities(db)
+    capability_by_provider = {
+        "middleware": "crm.write", "crm": "crm.write", "bank": "bank.live_connection",
+        "kyb": "kyb.live_verification", "credit": "credit.live_pull",
+        "lender": "lenders.live_submission", "esign": "esign.live_send",
+        "email": "communications.live_email", "sms": "communications.live_sms",
+    }
     return [
         schemas.ProviderAdapterStatus(
             provider_type=row.provider_type,
             provider=row.provider,
             selected=row.selected,
-            configured=(
-                row.configured
-                and capabilities.get(
-                    {
-                        "middleware": "crm.write",
-                        "crm": "crm.write",
-                        "bank": "bank.live_connection",
-                        "kyb": "kyb.live_verification",
-                        "credit": "credit.live_pull",
-                        "lender": "lenders.live_submission",
-                        "esign": "esign.live_send",
-                        "email": "communications.live_email",
-                        "sms": "communications.live_sms",
-                    }.get(row.provider_type, ""),
-                    False,
-                )
+            configured=row.configured and (
+                capability_by_provider.get(row.provider_type) is None
+                or capabilities.get(capability_by_provider[row.provider_type], False)
             ),
         )
         for row in provider_statuses()
@@ -1304,11 +1416,7 @@ async def get_commercial_financing_disclosure(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.read"))],
 ):
-    disclosure = await db.scalar(
-        select(compliance_models.CommercialFinancingDisclosure).where(
-            compliance_models.CommercialFinancingDisclosure.offer_id == offer_id
-        )
-    )
+    disclosure = await compliance_service.get_offer_disclosure(db, offer_id)
     if disclosure is None:
         raise HTTPException(status_code=404, detail="Disclosure not found")
     return disclosure
@@ -1323,23 +1431,20 @@ async def acknowledge_commercial_financing_disclosure(
     offer_id: uuid.UUID,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("application.edit"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
-    disclosure = await db.scalar(
-        select(compliance_models.CommercialFinancingDisclosure).where(
-            compliance_models.CommercialFinancingDisclosure.offer_id == offer_id
-        )
+    from app.compliance_routes import _acknowledge_disclosure, _disclosure_for_offer
+
+    disclosure = await _disclosure_for_offer(db, offer_id, lock=True)
+    return await _acknowledge_disclosure(
+        db=db,
+        disclosure=disclosure,
+        user=user,
+        idempotency_key=idempotency_key,
+        route=f"/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
     )
-    if disclosure is None:
-        raise HTTPException(status_code=404, detail="Disclosure not found")
-    if disclosure.acknowledged_at is None:
-        disclosure.acknowledged_at = models.utcnow()
-        disclosure.acknowledged_by = user.subject
-        await db.commit()
-        # Not db.refresh(disclosure): SQLite drops tzinfo on a DateTime
-        # round-trip, so re-reading acknowledged_at here would serialize
-        # it without "Z" - inconsistent with how every other read of this
-        # same field represents it.
-    return disclosure
 
 
 @router.post(
@@ -1351,12 +1456,13 @@ async def generate_commission_tax_records_endpoint(
     tax_year: int,
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=8, max_length=160)
+    ],
 ):
-    records = await generate_commission_tax_records(db, tax_year)
-    await db.commit()
-    for record in records:
-        await db.refresh(record)
-    return records
+    from app.compliance_routes import generate_tax_records
+
+    return await generate_tax_records(tax_year, db, user, idempotency_key)
 
 
 @router.get(
@@ -1392,12 +1498,6 @@ async def set_commission_tax_record_tin(
     db: Db,
     user: Annotated[Principal, Depends(require_permission("commission.receipt.record"))],
 ):
-    record = await db.get(compliance_models.CommissionTaxRecord, record_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Commission tax record not found")
-    await update_recipient_tin(
-        db, record, recipient_name=payload.recipient_name, tin=payload.tin
-    )
-    await db.commit()
-    await db.refresh(record)
-    return record
+    from app.compliance_routes import set_tax_record_tin
+
+    return await set_tax_record_tin(record_id, payload, db, user)

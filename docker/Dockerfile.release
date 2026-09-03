@@ -8,6 +8,10 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
 WORKDIR /build
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml README.md ./
 COPY app ./app
 RUN python -m pip wheel --wheel-dir /wheels .
@@ -20,12 +24,24 @@ ENV PATH=/opt/venv/bin:$PATH \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv \
     && addgroup --system moneybee \
     && adduser --system --ingroup moneybee --home /nonexistent --no-create-home moneybee
 
 COPY --from=wheel /wheels /wheels
-RUN /opt/venv/bin/python -m pip install --no-cache-dir /wheels/*.whl \
+# The wheel stage has already resolved and built the complete transitive
+# dependency set, including the exact Git-pinned Codestra SDK. Install only
+# those local artifacts without re-resolving the backend wheel's direct URL
+# metadata; then prove the resulting environment is internally consistent.
+RUN /opt/venv/bin/python -m pip install \
+        --no-cache-dir \
+        --no-index \
+        --no-deps \
+        /wheels/*.whl \
+    && /opt/venv/bin/python -m pip check \
     && rm -rf /wheels
 
 COPY alembic.ini ./alembic.ini
@@ -35,7 +51,7 @@ USER moneybee
 
 FROM runtime AS api
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]
 
 FROM runtime AS worker
 CMD ["python", "-m", "app.worker"]

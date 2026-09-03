@@ -1,4 +1,5 @@
 import os
+import asyncio
 import uuid
 
 os.environ.setdefault("APP_ENV", "test")
@@ -6,8 +7,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
 os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 
 from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import func, select
 
 from app import models
+from app.config import settings
 from app.db import SessionLocal
 from app.main import app
 
@@ -126,6 +130,10 @@ def _create_and_accept_offer(
             "total_repayment": 60000,
         },
     ).json()["id"]
+    acknowledged = client.post(
+        f"/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge"
+    )
+    assert acknowledged.status_code == 200
     accepted = client.post(
         f"/api/v2/offers/{offer_id}/accept",
         headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -248,6 +256,29 @@ async def test_funding_full_transition_sequence_and_commission_creation():
         assert confirmed.json()["funded_amount"] == "50000.00"
         assert confirmed.json()["funding_confirmed_at"] is not None
 
+        application_id = confirmed.json()["application_id"]
+        application = client.get(f"/api/v2/applications/{application_id}")
+        assert application.status_code == 200
+        assert application.json()["status"] == "FUNDED"
+        assert client.get("/api/v2/admin/dashboard").json()["funded"] >= 1
+
+        async with SessionLocal() as db:
+            history = list(
+                (
+                    await db.scalars(
+                        select(models.ApplicationStatusHistory)
+                        .where(
+                            models.ApplicationStatusHistory.application_id
+                            == uuid.UUID(application_id)
+                        )
+                        .order_by(models.ApplicationStatusHistory.created_at)
+                    )
+                ).all()
+            )
+            assert history[-3].to_status == "APPROVED_FOR_FUNDING"
+            assert history[-2].to_status == "FUNDS_SENT"
+            assert history[-1].to_status == "FUNDED"
+
         # Confirming created exactly one Commission at 8% of funded_amount.
         commissions = client.get("/api/v2/admin/commissions").json()
         commission = next(
@@ -343,3 +374,85 @@ async def test_funding_can_be_declined_with_a_reason():
         )
         assert declined.status_code == 200
         assert declined.json()["status"] == "DECLINED"
+
+
+async def test_declining_funding_voids_an_active_provider_envelope_first(monkeypatch):
+    calls = []
+
+    class FakeESign:
+        async def void_envelope(self, **kwargs):
+            calls.append(kwargs)
+            return {"status": "voided"}
+
+    monkeypatch.setattr("app.admin_routes.esign_adapter", lambda: FakeESign())
+    with TestClient(app) as client:
+        funding_id = _accept_an_offer_and_build_funding(client)
+        async with SessionLocal() as db:
+            funding = await db.get(models.Funding, uuid.UUID(funding_id))
+            contract = await db.scalar(
+                select(models.Contract).where(
+                    models.Contract.application_id == funding.application_id
+                )
+            )
+            contract.status = "SENT"
+            contract.external_envelope_id = "active-envelope-before-decline"
+            await db.commit()
+            contract_id = contract.id
+
+        response = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/decline",
+            json={"reason": "Applicant withdrew."},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.status_code == 200
+        assert calls == [
+            {
+                "envelope_id": "active-envelope-before-decline",
+                "reason": "Applicant withdrew.",
+            }
+        ]
+        async with SessionLocal() as db:
+            assert (await db.get(models.Contract, contract_id)).status == "VOIDED"
+
+
+async def test_postgres_concurrent_confirm_and_decline_are_serialized():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL funding row-lock evidence")
+    with TestClient(app) as client:
+        funding_id = _accept_an_offer_and_build_funding(client)
+        await _set_funding_status(funding_id, "FUNDS_SENT")
+
+        confirm, decline = await asyncio.gather(
+            asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/fundings/{funding_id}/confirm",
+                json={"funded_amount": "50000.00", "commission_rate_bps": 800},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ),
+            asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/fundings/{funding_id}/decline",
+                json={"reason": "Concurrent terminal decision test."},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ),
+        )
+        assert sorted((confirm.status_code, decline.status_code)) == [200, 409]
+
+        async with SessionLocal() as db:
+            funding = await db.get(models.Funding, uuid.UUID(funding_id))
+            commission_count = await db.scalar(
+                select(func.count(models.Commission.id)).where(
+                    models.Commission.funding_id == uuid.UUID(funding_id)
+                )
+            )
+            audit_count = await db.scalar(
+                select(func.count(models.AuditEvent.id)).where(
+                    models.AuditEvent.resource_type == "funding",
+                    models.AuditEvent.resource_id == funding_id,
+                    models.AuditEvent.action.in_(("FUNDING_FUNDED", "FUNDING_DECLINED")),
+                )
+            )
+            assert funding is not None
+            assert funding.status in {"FUNDED", "DECLINED"}
+            assert commission_count == (1 if funding.status == "FUNDED" else 0)
+            assert audit_count == 1

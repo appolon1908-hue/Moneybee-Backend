@@ -19,7 +19,6 @@ from app.admin_routes import router as admin_router
 from app.applications_routes import router as applications_router
 from app.banking_routes import router as banking_router
 from app.borrower_legacy_routes import router as borrower_legacy_router
-from app.compliance_routes import router as compliance_router
 from app.config import settings
 from app.db import SessionLocal, engine, initialize_local_schema
 from app.financial_routes import router as financial_router
@@ -29,7 +28,7 @@ from app.marketplace_routes import router as marketplace_router
 from app.payment_routes import router as payment_router
 from app.portal import router as portal_router
 from app.public_intake_routes import router as public_intake_router
-from app.rate_limit import InMemoryRateLimitMiddleware
+from app.rate_limit import DistributedRateLimitMiddleware, RedisRateLimitBackend
 
 
 @asynccontextmanager
@@ -65,29 +64,64 @@ app.add_middleware(
         "X-Organization-ID",
     ],
 )
-app.include_router(applications_router, prefix="/api/v2")
-app.include_router(marketplace_router, prefix="/api/v2")
-app.include_router(admin_router, prefix="/api/v2")
-app.include_router(compliance_router, prefix="/api/v2")
-app.include_router(borrower_legacy_router, prefix="/api/v2")
-app.include_router(banking_router, prefix="/api/v2")
-app.include_router(integration_router, prefix="/api/v2")
-app.include_router(portal_router, prefix="/api/v2")
-app.include_router(public_intake_router, prefix="/api/v2")
-app.include_router(financial_router, prefix="/api/v2")
-app.include_router(payment_router, prefix="/api/v2")
-app.include_router(applications_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(marketplace_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(admin_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(compliance_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(borrower_legacy_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(banking_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(integration_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(portal_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(public_intake_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(financial_router, prefix="/api/v1", include_in_schema=False)
-app.include_router(payment_router, prefix="/api/v1", include_in_schema=False)
-app.add_middleware(InMemoryRateLimitMiddleware)
+API_ROUTERS = (
+    applications_router,
+    marketplace_router,
+    admin_router,
+    borrower_legacy_router,
+    banking_router,
+    integration_router,
+    portal_router,
+    public_intake_router,
+    financial_router,
+    payment_router,
+)
+
+# V1 is a complete compatibility alias of the canonical V2 contract. Keeping a
+# single registry prevents version drift and avoids duplicating business logic.
+for version, include_in_schema in (("v2", True), ("v1", False)):
+    for api_router in API_ROUTERS:
+        app.include_router(
+            api_router,
+            prefix=f"/api/{version}",
+            include_in_schema=include_in_schema,
+        )
+app.add_middleware(DistributedRateLimitMiddleware)
+
+
+@app.middleware("http")
+async def live_write_gate(request: Request, call_next):
+    get_side_effect = (
+        request.method == "GET"
+        and (
+            request.url.path in {
+                "/api/v1/me/notification-preferences",
+                "/api/v2/me/notification-preferences",
+            }
+            or (
+                request.url.path.startswith(("/api/v1/borrower/conversations/", "/api/v2/borrower/conversations/"))
+                and request.url.path.endswith("/messages")
+            )
+        )
+    )
+    if (
+        settings.app_env in {"staging", "production"}
+        and not settings.live_writes
+        and (request.method in {"POST", "PUT", "PATCH", "DELETE"} or get_side_effect)
+    ):
+        return JSONResponse(
+            status_code=503,
+            media_type="application/problem+json",
+            content={
+                "type": "https://api.moneybeeloan.com/problems/live-writes-disabled",
+                "title": "Writes temporarily disabled",
+                "status": 503,
+                "detail": "MoneyBee write operations are disabled by the deployment safety gate.",
+                "instance": request.url.path,
+            },
+            headers={"Retry-After": "30"},
+        )
+    return await call_next(request)
 
 
 def _api_v1_sunset_http_date() -> str:
@@ -101,6 +135,8 @@ def _api_v1_sunset_http_date() -> str:
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     correlation_id = request.headers.get("X-Correlation-ID", request_id)
+    request.state.request_id = request_id
+    request.state.correlation_id = correlation_id
     bind_request_id(request_id)
     timer = Timer()
     response = await call_next(request)
@@ -188,7 +224,7 @@ async def http_exception_problem(request: Request, exc: StarletteHTTPException):
             "status": exc.status_code,
             "detail": message or "The request could not be completed.",
             "instance": request.url.path,
-            "request_id": request.headers.get("X-Request-ID"),
+            "request_id": getattr(request.state, "request_id", None),
             "code": code,
             **({"context": context} if context else {}),
         },
@@ -214,14 +250,14 @@ async def validation_problem(request: Request, exc: RequestValidationError):
                 exc.errors(),
                 custom_encoder={ValueError: str, Exception: str},
             ),
-            "request_id": request.headers.get("X-Request-ID"),
+            "request_id": getattr(request.state, "request_id", None),
         },
     )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_problem(request: Request, exc: Exception):
-    request_id = request.headers.get("X-Request-ID")
+    request_id = getattr(request.state, "request_id", None)
     request_logger().exception(
         "request.unhandled_exception",
         extra={
@@ -316,6 +352,16 @@ async def ready():
             healthy = False
     else:
         checks["migrations"] = "skipped (auto_create_schema)"
+
+    if settings.rate_limit_enabled and settings.app_env != "test":
+        try:
+            await RedisRateLimitBackend().redis.ping()
+            checks["redis_rate_limit"] = "ok"
+        except Exception:
+            checks["redis_rate_limit"] = "unreachable"
+            healthy = False
+    else:
+        checks["redis_rate_limit"] = "not_required"
 
     status_code = 200 if healthy else 503
     return JSONResponse(

@@ -48,7 +48,6 @@ LEGACY_ROLE_PERMISSIONS = {
         "underwriting.review",
         "matching.run",
         "fraud.run",
-        "kyb.run",
     },
     "LENDER_ADMIN": {
         "lender.application.read",
@@ -72,7 +71,6 @@ LEGACY_ROLE_PERMISSIONS = {
         "complaint.create.own",
         "credit.authorize.own",
         "offer.accept.own",
-        "offer.decline.own",
     },
 }
 

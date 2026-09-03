@@ -11,6 +11,7 @@
     "images",
     "urls",
     "caddy_acme_email",
+    "trusted_proxy_cidrs_csv",
     "runtime_paths_evidence_sha256",
     "configuration_checksum",
     "capabilities",
@@ -90,7 +91,8 @@
         "string",
         "null"
       ]
-    }
+    },
+    "trusted_proxy_cidrs_csv": {"type": ["string", "null"]}
   },
   "additionalProperties": false
 }

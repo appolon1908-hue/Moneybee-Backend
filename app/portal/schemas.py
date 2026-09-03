@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -227,24 +226,9 @@ class LenderProgramUpdate(BaseModel):
     version: int = Field(ge=1)
     name: str | None = Field(default=None, min_length=2, max_length=200)
     product_type: str | None = Field(default=None, min_length=2, max_length=80)
-    min_amount: Decimal | None = Field(
-        default=None,
-        gt=0,
-        max_digits=18,
-        decimal_places=2,
-    )
-    max_amount: Decimal | None = Field(
-        default=None,
-        gt=0,
-        max_digits=18,
-        decimal_places=2,
-    )
-    minimum_monthly_revenue: Decimal | None = Field(
-        default=None,
-        ge=0,
-        max_digits=18,
-        decimal_places=2,
-    )
+    min_amount: float | None = Field(default=None, gt=0)
+    max_amount: float | None = Field(default=None, gt=0)
+    minimum_monthly_revenue: float | None = Field(default=None, ge=0)
     minimum_time_in_business_months: int | None = Field(default=None, ge=0)
     states: list[str] | None = None
     excluded_industries: list[str] | None = None
@@ -299,7 +283,7 @@ class BankTransactionRead(BaseModel):
     authorized_at: datetime | None
     name: str
     merchant_name: str | None
-    amount: Decimal
+    amount: float
     currency: str | None
     pending: bool
     removed: bool

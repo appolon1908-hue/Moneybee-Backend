@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import banking, models, schemas, services
@@ -196,6 +197,14 @@ async def plaid_webhook(
         )
     )
     if existing is not None:
+        if existing.payload_hash != payload_hash:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "WEBHOOK_EVENT_ID_CONFLICT",
+                    "message": "The Plaid webhook ID was reused with different content.",
+                },
+            )
         return {"received": True, "duplicate": True}
 
     receipt = models.WebhookReceipt(
@@ -210,7 +219,25 @@ async def plaid_webhook(
         status="RECEIVED",
     )
     db.add(receipt)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        duplicate = await db.scalar(
+            select(models.WebhookReceipt).where(
+                models.WebhookReceipt.provider == "plaid",
+                models.WebhookReceipt.provider_event_id == provider_event_id,
+            )
+        )
+        if duplicate is not None and duplicate.payload_hash == payload_hash:
+            return {"received": True, "duplicate": True}
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "WEBHOOK_EVENT_ID_CONFLICT",
+                "message": "The Plaid webhook could not be stored safely.",
+            },
+        ) from exc
     db.add(
         models.OutboxEvent(
             event_type="PlaidWebhookReceived",

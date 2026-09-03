@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import identity_models, models, schemas
+from app import models, schemas
 from app.auth import Principal
 from app.config import settings
 
@@ -109,18 +109,21 @@ APPLICATION_TRANSITIONS: dict[
             models.ApplicationStatus.CONDITIONS_PENDING,
             models.ApplicationStatus.CONTRACT_READY,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONDITIONS_COMPLETE: frozenset(
         {
             models.ApplicationStatus.CONTRACT_READY,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONTRACT_READY: frozenset(
         {
             models.ApplicationStatus.CONTRACT_SENT,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONTRACT_SENT: frozenset(
@@ -128,24 +131,28 @@ APPLICATION_TRANSITIONS: dict[
             models.ApplicationStatus.CONTRACT_SIGNED,
             models.ApplicationStatus.EXPIRED,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.CONTRACT_SIGNED: frozenset(
         {
             models.ApplicationStatus.APPROVED_FOR_FUNDING,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.APPROVED_FOR_FUNDING: frozenset(
         {
             models.ApplicationStatus.FUNDS_SENT,
             models.ApplicationStatus.CANCELLED,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.FUNDS_SENT: frozenset(
         {
             models.ApplicationStatus.FUNDED,
             models.ApplicationStatus.COMPLIANCE_REVIEW,
+            models.ApplicationStatus.DECLINED,
         }
     ),
     models.ApplicationStatus.FUNDED: frozenset(
@@ -276,193 +283,6 @@ async def create_lead(
             return replay
         raise
     return response
-
-
-async def update_lead(
-    db: AsyncSession,
-    lead_id: uuid.UUID,
-    payload: schemas.PrequalificationUpdateInput,
-    *,
-    request_id: str,
-) -> models.Lead:
-    lead = await db.get(models.Lead, lead_id)
-    if lead is None:
-        raise HTTPException(status_code=404, detail="Prequalification not found")
-    if lead.status != models.LeadStatus.NEW:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "PREQUALIFICATION_ALREADY_CONVERTED",
-                "message": "This prequalification has already progressed to an application "
-                "and can no longer be edited directly.",
-            },
-        )
-    changes = payload.model_dump(exclude_unset=True)
-    for field, value in changes.items():
-        if field == "email":
-            value = str(value).lower()
-        elif field in {"business_name", "first_name", "last_name", "postal_code"}:
-            value = value.strip()
-        setattr(lead, field, value)
-    if changes:
-        db.add(
-            models.AuditEvent(
-                actor_id="public",
-                action="LEAD_UPDATED",
-                resource_type="lead",
-                resource_id=str(lead.id),
-                request_id=request_id,
-                details={"fields": sorted(changes)},
-            )
-        )
-        await db.commit()
-        await db.refresh(lead)
-    return lead
-
-
-_PRODUCT_CATALOG_DESCRIPTIONS: dict[str, tuple[str, str]] = {
-    "WORKING_CAPITAL": (
-        "Working Capital",
-        "Short-term funding for day-to-day operating expenses, inventory, and cash flow gaps.",
-    ),
-    "EQUIPMENT_FINANCING": (
-        "Equipment Financing",
-        "Financing to purchase or lease business equipment, secured by the equipment itself.",
-    ),
-    "LINE_OF_CREDIT": (
-        "Line of Credit",
-        "A revolving credit line you draw against as needed and repay over time.",
-    ),
-    "TERM_LOAN": (
-        "Term Loan",
-        "A lump-sum loan repaid on a fixed schedule over a set term.",
-    ),
-    "SBA_LOAN": (
-        "SBA Loan",
-        "Government-backed financing with longer terms and lower rates for qualifying businesses.",
-    ),
-    "INVOICE_FACTORING": (
-        "Invoice Factoring",
-        "Advance funding against outstanding invoices, repaid as customers pay.",
-    ),
-    "MERCHANT_CASH_ADVANCE": (
-        "Merchant Cash Advance",
-        "An advance repaid as a percentage of future card or receivables sales.",
-    ),
-    "COMMERCIAL_REAL_ESTATE": (
-        "Commercial Real Estate",
-        "Financing to purchase, refinance, or improve owner-occupied commercial property.",
-    ),
-}
-
-
-def _humanize_product_type(product_type: str) -> str:
-    return product_type.replace("_", " ").title()
-
-
-async def products_catalog(db: AsyncSession) -> list[schemas.ProductRead]:
-    rows = (
-        await db.execute(
-            select(
-                models.LenderProgram.product_type,
-                func.min(models.LenderProgram.min_amount),
-                func.max(models.LenderProgram.max_amount),
-                func.count(func.distinct(models.LenderProgram.lender_id)),
-            )
-            .where(models.LenderProgram.active.is_(True))
-            .group_by(models.LenderProgram.product_type)
-        )
-    ).all()
-    products = []
-    for product_type, min_amount, max_amount, lender_count in rows:
-        display_name, description = _PRODUCT_CATALOG_DESCRIPTIONS.get(
-            product_type,
-            (_humanize_product_type(product_type), "Business financing tailored to your needs."),
-        )
-        products.append(
-            schemas.ProductRead(
-                product_type=product_type,
-                display_name=display_name,
-                description=description,
-                min_amount=min_amount,
-                max_amount=max_amount,
-                lender_count=lender_count,
-            )
-        )
-    return sorted(products, key=lambda item: item.display_name)
-
-
-async def list_application_consents(
-    db: AsyncSession, application: models.Application
-) -> list[models.Consent]:
-    return list(
-        (
-            await db.scalars(
-                select(models.Consent)
-                .where(
-                    or_(
-                        models.Consent.application_id == application.id,
-                        models.Consent.lead_id == application.lead_id,
-                    )
-                )
-                .order_by(models.Consent.created_at)
-            )
-        ).all()
-    )
-
-
-async def record_login_event(
-    db: AsyncSession,
-    *,
-    user_id: uuid.UUID,
-    issuer: str,
-    subject: str,
-    ip_address: str | None,
-    user_agent: str | None,
-) -> None:
-    """Records one distinct sign-in. Deduplicated against the same
-    (issuer, subject) within a 12-hour window so a session repeatedly
-    calling GET /auth/context (once per page load, not once per API call)
-    doesn't produce a login event per call - this tracks sign-ins, not
-    request volume."""
-    window_start = datetime.now(UTC) - timedelta(hours=12)
-    recent = await db.scalar(
-        select(identity_models.LoginEvent).where(
-            identity_models.LoginEvent.issuer == issuer,
-            identity_models.LoginEvent.subject == subject,
-            identity_models.LoginEvent.created_at >= window_start,
-        )
-    )
-    if recent is not None:
-        return
-    db.add(
-        identity_models.LoginEvent(
-            user_id=user_id,
-            issuer=issuer,
-            subject=subject,
-            ip_address=ip_address,
-            user_agent=user_agent,
-        )
-    )
-    await db.commit()
-
-
-async def list_login_events(
-    db: AsyncSession, principal: Principal, *, limit: int = 20
-) -> list[identity_models.LoginEvent]:
-    return list(
-        (
-            await db.scalars(
-                select(identity_models.LoginEvent)
-                .where(
-                    identity_models.LoginEvent.issuer == principal.issuer,
-                    identity_models.LoginEvent.subject == principal.subject,
-                )
-                .order_by(identity_models.LoginEvent.created_at.desc())
-                .limit(limit)
-            )
-        ).all()
-    )
 
 
 def score(application: models.Application, program: models.LenderProgram):
@@ -608,8 +428,12 @@ async def get_authorized_application(
     principal: Principal,
     *,
     write: bool = False,
+    lock_for_update: bool = False,
 ) -> models.Application:
-    application = await db.get(models.Application, application_id)
+    statement = select(models.Application).where(models.Application.id == application_id)
+    if lock_for_update:
+        statement = statement.with_for_update()
+    application = await db.scalar(statement)
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
     authorize_application(application, principal, write=write)
@@ -729,7 +553,7 @@ FUNDING_TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 
-def transition_funding(
+async def transition_funding(
     db: AsyncSession,
     funding: models.Funding,
     to_status: str,
@@ -751,6 +575,43 @@ def transition_funding(
             },
         )
     funding.status = to_status
+    application = await db.scalar(
+        select(models.Application)
+        .where(models.Application.id == funding.application_id)
+        .with_for_update()
+    )
+    if application is None:
+        raise HTTPException(status_code=409, detail={"code": "FUNDING_APPLICATION_MISSING"})
+    target = {
+        "CONDITIONS_SATISFIED": models.ApplicationStatus.CONDITIONS_COMPLETE,
+        "CONTRACT_SIGNED": models.ApplicationStatus.CONTRACT_SIGNED,
+        "APPROVED_FOR_FUNDING": models.ApplicationStatus.APPROVED_FOR_FUNDING,
+        "FUNDS_SENT": models.ApplicationStatus.FUNDS_SENT,
+        "FUNDED": models.ApplicationStatus.FUNDED,
+        "DECLINED": models.ApplicationStatus.DECLINED,
+        "CANCELLED": models.ApplicationStatus.CANCELLED,
+    }[to_status]
+    if application.status != target:
+        lifecycle = [
+            models.ApplicationStatus.OFFER_ACCEPTED,
+            models.ApplicationStatus.CONDITIONS_PENDING,
+            models.ApplicationStatus.CONDITIONS_COMPLETE,
+            models.ApplicationStatus.CONTRACT_READY,
+            models.ApplicationStatus.CONTRACT_SENT,
+            models.ApplicationStatus.CONTRACT_SIGNED,
+            models.ApplicationStatus.APPROVED_FOR_FUNDING,
+            models.ApplicationStatus.FUNDS_SENT,
+            models.ApplicationStatus.FUNDED,
+        ]
+        if target in {models.ApplicationStatus.DECLINED, models.ApplicationStatus.CANCELLED}:
+            transition_application(db, application, target, principal, reason)
+        else:
+            current_index = lifecycle.index(application.status)
+            target_index = lifecycle.index(target)
+            if target_index < current_index:
+                raise HTTPException(status_code=409, detail={"code": "APPLICATION_AHEAD_OF_FUNDING"})
+            for next_status in lifecycle[current_index + 1 : target_index + 1]:
+                transition_application(db, application, next_status, principal, reason)
     db.add(
         models.AuditEvent(
             actor_id=principal.subject,
@@ -828,6 +689,7 @@ async def advance_funding_if_conditions_satisfied(
             models.Offer.lender_id == submission.lender_id,
             models.Offer.program_id == submission.program_id,
         )
+        .with_for_update()
     )
     if funding is None or funding.status != "CONDITIONS_PENDING":
         return
@@ -839,9 +701,12 @@ async def advance_funding_if_conditions_satisfied(
         )
     ).all()
     if all(item.status in {"SATISFIED", "WAIVED"} for item in conditions):
-        transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
-        db.add(
-            models.Contract(
+        await transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+        existing_contract = await db.scalar(
+            select(models.Contract).where(models.Contract.offer_id == funding.offer_id)
+        )
+        if existing_contract is None:
+            db.add(models.Contract(
                 application_id=funding.application_id,
                 offer_id=funding.offer_id,
                 # No real contract-template catalog/versioning exists yet -
@@ -849,8 +714,25 @@ async def advance_funding_if_conditions_satisfied(
                 # decision, not a stand-in for actual legal content.
                 template_version="v1",
                 status="DRAFT",
-            )
-        )
+            ))
+
+
+async def advance_submissionless_funding(
+    db: AsyncSession, funding_id: uuid.UUID, principal: Principal
+) -> None:
+    funding = await db.scalar(
+        select(models.Funding).where(models.Funding.id == funding_id).with_for_update()
+    )
+    if funding is None or funding.status != "CONDITIONS_PENDING":
+        return
+    await transition_funding(db, funding, "CONDITIONS_SATISFIED", principal)
+    if await db.scalar(select(models.Contract.id).where(models.Contract.offer_id == funding.offer_id)) is None:
+        db.add(models.Contract(
+            application_id=funding.application_id,
+            offer_id=funding.offer_id,
+            template_version="v1",
+            status="DRAFT",
+        ))
 
 
 # Named, isolated default per docs/codex/CONTRACTS_FUNDING_COMMISSION_RENEWAL_SPEC_DRAFT.md's
@@ -941,7 +823,8 @@ async def evaluate_renewal_eligibility(db: AsyncSession) -> list[uuid.UUID]:
         opportunity = models.RenewalOpportunity(
             original_funding_id=funding.id,
             application_id=funding.application_id,
-            eligible_from=funding.funding_confirmed_at,
+            eligible_from=funding.funding_confirmed_at
+            + timedelta(days=RENEWAL_ELIGIBILITY_DAYS),
             eligibility_status="ELIGIBLE",
             estimated_amount=funding.funded_amount,
             status="PENDING",

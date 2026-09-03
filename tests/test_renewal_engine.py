@@ -87,6 +87,8 @@ async def test_evaluate_renewal_eligibility_creates_opportunity_past_the_window(
             assert opportunity.eligibility_status == "ELIGIBLE"
             assert opportunity.status == "PENDING"
             assert opportunity.estimated_amount == 50000
+            funding = await db.get(models.Funding, uuid.UUID(funding_id))
+            assert opportunity.eligible_from == funding.funding_confirmed_at + timedelta(days=90)
 
         # Running it again must not create a second opportunity for the same funding.
         second_pass = await worker.evaluate_pending_renewals()

@@ -17,19 +17,12 @@ from app.integrations.providers import (
     TwilioSMSAdapter,
 )
 from app.integrations.storage import S3ObjectStorageAdapter
-from app.integrations.vault import VaultCredentialStore
 
 
 def bank_adapter() -> PlaidAdapter:
     if settings.bank_provider == "plaid":
         return PlaidAdapter()
     raise ProviderError("bank", "Bank provider is disabled")
-
-
-def credential_store() -> VaultCredentialStore:
-    if settings.bank_credential_store_provider == "vault":
-        return VaultCredentialStore()
-    raise ProviderError("credential_store", "Bank credential store is disabled")
 
 
 def middleware_adapter() -> CodestraProvider:
@@ -128,7 +121,6 @@ def provider_statuses() -> list[ProviderHealth]:
                 and settings.plaid_secret
                 and settings.field_encryption_active_key_version
                 and settings.field_encryption_keys
-                and settings.bank_credential_store_provider != "disabled"
             ),
         ),
         ProviderHealth(
@@ -254,15 +246,5 @@ def provider_statuses() -> list[ProviderHealth]:
             settings.malware_scan_provider,
             settings.malware_scan_provider != "disabled",
             bool(settings.malware_scan_provider == "clamav" and settings.clamav_host),
-        ),
-        ProviderHealth(
-            "credential_store",
-            settings.bank_credential_store_provider,
-            settings.bank_credential_store_provider != "disabled",
-            bool(
-                settings.bank_credential_store_provider == "vault"
-                and settings.vault_addr
-                and settings.vault_token
-            ),
         ),
     ]

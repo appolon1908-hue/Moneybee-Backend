@@ -639,6 +639,12 @@ async def lender_decision(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=160)],
 ):
     require_any_permission(user, "lender.decision.create", "underwriting.review")
+    if payload.decision == "DECLINE" and not payload.reason_codes:
+        problem(
+            "DECLINE_REASON_REQUIRED",
+            "A lender decline requires at least one specific reason code.",
+            422,
+        )
     submission = await _authorized_submission(db, submission_id, user, lock=True)
     if submission.version != payload.expected_version:
         problem(

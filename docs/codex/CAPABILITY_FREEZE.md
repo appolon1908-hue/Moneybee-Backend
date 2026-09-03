@@ -2,10 +2,6 @@
 
 These capabilities must remain disabled during the complete implementation program:
 
-bank.live_connection = false
-
-kyb.live_verification = false
-
 credit.live_pull = false
 
 lenders.live_submission = false
@@ -19,8 +15,6 @@ payments = false
 payouts = false
 
 documents.malware_scan_certified = false
-
-bank.credential_store_certified = false
 
 ## Rules
 

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import domain_logic, models, schemas, services
+from app import compliance_models, compliance_service, domain_logic, models, schemas, services
 from app.auth import Principal, current_principal, require_permission
 from app.commands import AcceptOfferCommand, command_context, parse_expected_version
 from app.config import settings
@@ -17,6 +17,51 @@ from app.db import get_db
 router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_db)]
 User = Annotated[Principal, Depends(current_principal)]
+
+
+async def _authorized_offer(db: AsyncSession, offer_id: uuid.UUID, user: Principal, *, write=False):
+    offer = await db.get(models.Offer, offer_id)
+    if offer is None:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    application = await services.get_authorized_application(
+        db, offer.application_id, user, write=write
+    )
+    return offer, application
+
+
+@router.get(
+    "/offers/{offer_id}/commercial-financing-disclosure",
+    response_model=schemas.CommercialFinancingDisclosureRead,
+    tags=["offers", "compliance"],
+)
+async def borrower_offer_disclosure(offer_id: uuid.UUID, db: Db, user: User):
+    await _authorized_offer(db, offer_id, user)
+    disclosure = await compliance_service.get_offer_disclosure(db, offer_id)
+    if disclosure is None:
+        raise HTTPException(status_code=404, detail="Disclosure not found")
+    return disclosure
+
+
+@router.post(
+    "/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
+    response_model=schemas.CommercialFinancingDisclosureRead,
+    tags=["offers", "compliance"],
+)
+async def borrower_acknowledge_offer_disclosure(offer_id: uuid.UUID, db: Db, user: User):
+    # Keep this compatibility operation on the same audited/idempotent domain
+    # command as the canonical borrower compliance route.  The legacy shape
+    # predates the header, so its stable offer-scoped key is server-derived.
+    from app.compliance_routes import _acknowledge_disclosure, _disclosure_for_offer
+
+    await _authorized_offer(db, offer_id, user, write=True)
+    disclosure = await _disclosure_for_offer(db, offer_id, lock=True)
+    return await _acknowledge_disclosure(
+        db=db,
+        disclosure=disclosure,
+        user=user,
+        idempotency_key=f"offer-disclosure-ack:{offer_id}",
+        route=f"/offers/{offer_id}/commercial-financing-disclosure/acknowledge",
+    )
 
 
 @router.post(
@@ -37,34 +82,6 @@ async def prequalify(
         idempotency_key or str(uuid.uuid4()),
         request.headers.get("X-Request-ID", str(uuid.uuid4())),
     )
-
-
-@router.patch(
-    "/public/prequalifications/{lead_id}",
-    response_model=schemas.LeadRead,
-    tags=["public"],
-)
-async def update_prequalification(
-    lead_id: uuid.UUID,
-    payload: schemas.PrequalificationUpdateInput,
-    request: Request,
-    db: Db,
-):
-    return await services.update_lead(
-        db,
-        lead_id,
-        payload,
-        request_id=request.headers.get("X-Request-ID", str(uuid.uuid4())),
-    )
-
-
-@router.get(
-    "/public/products",
-    response_model=list[schemas.ProductRead],
-    tags=["public"],
-)
-async def public_products(db: Db):
-    return await services.products_catalog(db)
 
 
 @router.get(
@@ -98,20 +115,6 @@ async def me(user: User):
 @router.get("/me/capabilities", tags=["identity"])
 async def my_capabilities(db: Db, user: User):
     return await services.effective_capabilities(db)
-
-
-@router.get("/me/permissions", tags=["identity"])
-async def my_permissions(user: User):
-    return {"permissions": sorted(user.permissions)}
-
-
-@router.get(
-    "/me/sessions",
-    response_model=list[schemas.LoginEventRead],
-    tags=["identity"],
-)
-async def my_sessions(db: Db, user: User):
-    return await services.list_login_events(db, user)
 
 
 @router.post("/applications", response_model=schemas.ApplicationRead, tags=["applications"])
@@ -244,16 +247,6 @@ async def offers(application_id: uuid.UUID, db: Db, user: User):
     )
 
 
-@router.get(
-    "/applications/{application_id}/consents",
-    response_model=list[schemas.ConsentRead],
-    tags=["applications"],
-)
-async def application_consents(application_id: uuid.UUID, db: Db, user: User):
-    application = await services.get_authorized_application(db, application_id, user)
-    return await services.list_application_consents(db, application)
-
-
 @router.post(
     "/offers/{offer_id}/accept",
     response_model=schemas.OfferRead,
@@ -316,6 +309,20 @@ async def accept_offer(
     if application is None:
         raise HTTPException(status_code=404, detail="Application not found")
     services.authorize_application(application, user, write=True)
+    replay = await db.scalar(
+        select(models.IdempotencyRecord).where(
+            models.IdempotencyRecord.actor_id == user.subject,
+            models.IdempotencyRecord.route == route,
+            models.IdempotencyRecord.key == idempotency_key,
+        )
+    )
+    if replay:
+        if replay.request_hash != request_hash:
+            raise HTTPException(status_code=409, detail="Idempotency key payload conflict")
+        replay_offer = await db.get(models.Offer, uuid.UUID(replay.response_body["offer_id"]))
+        if replay_offer is None:
+            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
+        return replay_offer
     if (
         command.expected_application_version is not None
         and command.expected_application_version != application.version
@@ -341,6 +348,16 @@ async def accept_offer(
             offer.version += 1
             await db.commit()
             raise HTTPException(status_code=409, detail="Offer has expired")
+    disclosure = await db.scalar(
+        select(compliance_models.CommercialFinancingDisclosure)
+        .where(compliance_models.CommercialFinancingDisclosure.offer_id == offer.id)
+        .with_for_update()
+    )
+    if disclosure is None or disclosure.acknowledged_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Commercial financing disclosure must be acknowledged before acceptance",
+        )
     existing_funding = await db.scalar(
         select(models.Funding).where(models.Funding.application_id == application.id)
     )
@@ -355,14 +372,13 @@ async def accept_offer(
         user,
         reason="Borrower accepted offer",
     )
-    db.add(
-        models.Funding(
+    funding = models.Funding(
             application_id=application.id,
             offer_id=offer.id,
             status="CONDITIONS_PENDING",
             approved_amount=offer.amount,
         )
-    )
+    db.add(funding)
     await db.flush()
     submission_id_for_offer = await db.scalar(
         select(models.LenderSubmission.id).where(
@@ -375,6 +391,8 @@ async def accept_offer(
         await services.advance_funding_if_conditions_satisfied(
             db, submission_id_for_offer, user
         )
+    else:
+        await services.advance_submissionless_funding(db, funding.id, user)
     db.add(
         models.OutboxEvent(
             event_type="offer.accepted.v1",
@@ -400,90 +418,6 @@ async def accept_offer(
             request_hash=request_hash,
             response_status=200,
             response_body={"offer_id": str(offer.id), "status": "ACCEPTED"},
-        )
-    )
-    await db.commit()
-    await db.refresh(offer)
-    return offer
-
-
-@router.post(
-    "/offers/{offer_id}/decline",
-    response_model=schemas.OfferRead,
-    tags=["offers"],
-)
-async def decline_offer(
-    offer_id: uuid.UUID,
-    db: Db,
-    user: User,
-    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=160)],
-):
-    route = f"/offers/{offer_id}/decline"
-    request_hash = hashlib.sha256(str(offer_id).encode()).hexdigest()
-    replay = await db.scalar(
-        select(models.IdempotencyRecord).where(
-            models.IdempotencyRecord.actor_id == user.subject,
-            models.IdempotencyRecord.route == route,
-            models.IdempotencyRecord.key == idempotency_key,
-        )
-    )
-    if replay:
-        if replay.request_hash != request_hash:
-            raise HTTPException(status_code=409, detail="Idempotency key payload conflict")
-        replay_offer = await db.get(models.Offer, uuid.UUID(replay.response_body["offer_id"]))
-        if replay_offer is None:
-            raise HTTPException(status_code=409, detail="Stored replay target is unavailable")
-        return replay_offer
-
-    offer = await db.scalar(
-        select(models.Offer).where(models.Offer.id == offer_id).with_for_update()
-    )
-    if not offer:
-        raise HTTPException(status_code=404, detail="Offer not found")
-    application = await db.scalar(
-        select(models.Application)
-        .where(models.Application.id == offer.application_id)
-        .with_for_update()
-    )
-    if application is None:
-        raise HTTPException(status_code=404, detail="Application not found")
-    services.authorize_application(application, user, write=True)
-    if "*" not in user.permissions and "offer.decline.own" not in user.permissions:
-        raise HTTPException(status_code=403, detail="Permission denied")
-    if offer.status != "AVAILABLE":
-        raise HTTPException(status_code=409, detail="Offer is not available")
-    offer.status = "DECLINED"
-    offer.version += 1
-    db.add(
-        models.AuditEvent(
-            actor_id=user.subject,
-            action="OFFER_DECLINED",
-            resource_type="offer",
-            resource_id=str(offer.id),
-            details={"application_id": str(application.id)},
-        )
-    )
-    db.add(
-        models.OutboxEvent(
-            event_type="offer.declined.v1",
-            aggregate_type="application",
-            aggregate_id=application.id,
-            aggregate_version=application.version,
-            payload={
-                "offer_id": str(offer.id),
-                "lender_id": str(offer.lender_id),
-            },
-            idempotency_key=f"OfferDeclined:{offer.id}:{offer.version}",
-        )
-    )
-    db.add(
-        models.IdempotencyRecord(
-            key=idempotency_key,
-            actor_id=user.subject,
-            route=route,
-            request_hash=request_hash,
-            response_status=200,
-            response_body={"offer_id": str(offer.id), "status": "DECLINED"},
         )
     )
     await db.commit()

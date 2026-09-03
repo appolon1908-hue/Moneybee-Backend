@@ -1,5 +1,8 @@
+import asyncio
 import os
 import uuid
+
+import pytest
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test-moneybee.db")
@@ -8,8 +11,9 @@ os.environ.setdefault("LOCAL_AUTH_BYPASS", "true")
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app import compliance_models, identity_models
+from app import compliance_models, identity_models, models
 from app.db import SessionLocal
+from app.config import settings
 from app.main import app
 
 
@@ -142,6 +146,129 @@ async def test_lender_decline_generates_an_adverse_action_notice():
             )
             assert stored is not None
             assert stored.lender_id == uuid.UUID(lender_id)
+
+
+async def test_admin_decline_with_submission_is_atomic_and_idempotent():
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id = _prepare_matched_submission(client)
+        async with SessionLocal() as db:
+            db.add(identity_models.Organization(
+                id=uuid.UUID(lender_id), name="Admin Decision Lender", organization_type="LENDER"
+            ))
+            await db.commit()
+        key = uuid.uuid4().hex
+        payload = {
+            "submission_id": submission_id,
+            "decision": "DECLINE",
+            "reason_codes": ["INSUFFICIENT_CASH_FLOW"],
+        }
+        first = client.post(
+            f"/api/v2/admin/applications/{application_id}/underwriting/reviews",
+            json=payload,
+            headers={"Idempotency-Key": key},
+        )
+        replay = client.post(
+            f"/api/v2/admin/applications/{application_id}/underwriting/reviews",
+            json=payload,
+            headers={"Idempotency-Key": key},
+        )
+        assert first.status_code == replay.status_code == 201
+        assert first.json()["id"] == replay.json()["id"]
+        notices = client.get(
+            f"/api/v2/admin/applications/{application_id}/adverse-action-notices"
+        ).json()
+        assert len(notices) == 1
+        assert notices[0]["underwriting_review_id"] == first.json()["id"]
+
+
+async def test_postgres_concurrent_admin_decisions_are_serialized():
+    if not settings.database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL application row-lock evidence")
+    with TestClient(app) as client:
+        application_id, submission_id, _ = _prepare_matched_submission(client)
+
+        async def decide(decision: str):
+            payload = {"decision": decision, "reason_codes": []}
+            if decision == "DECLINE":
+                payload.update({
+                    "submission_id": submission_id,
+                    "reason_codes": ["CONCURRENT_FIXTURE_DECLINE"],
+                })
+            return await asyncio.to_thread(
+                client.post,
+                f"/api/v2/admin/applications/{application_id}/underwriting/reviews",
+                json=payload,
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            )
+
+        approve, decline = await asyncio.gather(decide("APPROVE"), decide("DECLINE"))
+        assert sorted((approve.status_code, decline.status_code)) == [201, 409]
+        async with SessionLocal() as db:
+            application = await db.get(models.Application, uuid.UUID(application_id))
+            reviews = list((await db.scalars(
+                select(models.UnderwritingReview).where(
+                    models.UnderwritingReview.application_id == uuid.UUID(application_id)
+                )
+            )).all())
+            notices = list((await db.scalars(
+                select(compliance_models.AdverseActionNotice).where(
+                    compliance_models.AdverseActionNotice.application_id == uuid.UUID(application_id)
+                )
+            )).all())
+            assert application is not None
+            assert len(reviews) == 1
+            assert len(notices) == (1 if application.status == "DECLINED" else 0)
+
+
+async def test_admin_lender_decline_requires_specific_notice_reasons():
+    with TestClient(app) as client:
+        application_id, submission_id, _ = _prepare_matched_submission(client)
+        response = client.post(
+            f"/api/v2/admin/applications/{application_id}/underwriting/reviews",
+            json={"submission_id": submission_id, "decision": "DECLINE", "reason_codes": []},
+        )
+        assert response.status_code == 422
+        notices = client.get(
+            f"/api/v2/admin/applications/{application_id}/adverse-action-notices"
+        ).json()
+        assert notices == []
+
+
+async def test_admin_decline_rolls_back_when_notice_generation_fails(monkeypatch):
+    with TestClient(app) as client:
+        application_id, submission_id, _ = _prepare_matched_submission(client)
+
+        async def fail_notice(*args, **kwargs):
+            raise RuntimeError("fixture notice failure")
+
+        monkeypatch.setattr("app.domain_logic.generate_adverse_action_notice", fail_notice)
+        with pytest.raises(RuntimeError, match="fixture notice failure"):
+            client.post(
+                f"/api/v2/admin/applications/{application_id}/underwriting/reviews",
+                json={
+                    "submission_id": submission_id,
+                    "decision": "DECLINE",
+                    "reason_codes": ["FIXTURE_REASON"],
+                },
+            )
+        async with SessionLocal() as db:
+            reviews = (
+                await db.scalars(
+                    select(models.UnderwritingReview).where(
+                        models.UnderwritingReview.application_id == uuid.UUID(application_id)
+                    )
+                )
+            ).all()
+            notices = (
+                await db.scalars(
+                    select(compliance_models.AdverseActionNotice).where(
+                        compliance_models.AdverseActionNotice.application_id
+                        == uuid.UUID(application_id)
+                    )
+                )
+            ).all()
+            assert reviews == []
+            assert notices == []
 
 
 async def test_approve_decision_does_not_generate_a_notice():

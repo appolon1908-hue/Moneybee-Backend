@@ -43,48 +43,40 @@ def main() -> int:
         "postgres": "MONEYBEE_POSTGRES_IMAGE",
         "redis": "MONEYBEE_REDIS_IMAGE",
         "caddy": "MONEYBEE_CADDY_IMAGE",
+        "clamav": "MONEYBEE_CLAMAV_IMAGE",
     }.items():
         emit(env_name, images[key])
 
-    # Optional: services behind a not-yet-certified capability
-    # (bank-credential-store's Vault) that most deployments never start.
-    # Unlike the images above, these are only rendered when the release
-    # lock actually names one - compose.data.yml's vault service still
-    # requires MONEYBEE_VAULT_IMAGE at its own `:?` marker, so a deployment
-    # that wants the bank-credential-store profile sets it directly rather
-    # than through this script.
-    for key, env_name in {"vault": "MONEYBEE_VAULT_IMAGE"}.items():
-        if images.get(key):
-            emit(env_name, images[key])
-
     for key, env_name in {
-        "backend_env_file": "MONEYBEE_BACKEND_ENV_FILE",
+        "migrator_env_file": "MONEYBEE_MIGRATOR_ENV_FILE",
+        "runtime_env_file": "MONEYBEE_RUNTIME_ENV_FILE",
         "postgres_data_path": "MONEYBEE_POSTGRES_DATA_PATH",
         "redis_data_path": "MONEYBEE_REDIS_DATA_PATH",
-        "postgres_password_file": "MONEYBEE_POSTGRES_PASSWORD_FILE",
+        "postgres_admin_password_file": "MONEYBEE_POSTGRES_ADMIN_PASSWORD_FILE",
+        "postgres_migrator_password_file": "MONEYBEE_POSTGRES_MIGRATOR_PASSWORD_FILE",
+        "postgres_runtime_password_file": "MONEYBEE_POSTGRES_RUNTIME_PASSWORD_FILE",
+        "roles_sql_path": "MONEYBEE_ROLES_SQL_PATH",
         "redis_acl_file": "MONEYBEE_REDIS_ACL_FILE",
+        "clamav_database_path": "MONEYBEE_CLAMAV_DATABASE_PATH",
         "caddy_data_path": "MONEYBEE_CADDY_DATA_PATH",
         "caddy_config_path": "MONEYBEE_CADDY_CONFIG_PATH",
-        "moneybee_migrator_password_file": "MONEYBEE_MIGRATOR_PASSWORD_FILE",
-        "moneybee_app_password_file": "MONEYBEE_APP_PASSWORD_FILE",
     }.items():
         if runtime["data_mode"] == "external" and key in {
             "postgres_data_path",
             "redis_data_path",
-            "postgres_password_file",
+            "postgres_admin_password_file",
+            "postgres_migrator_password_file",
+            "postgres_runtime_password_file",
+            "roles_sql_path",
             "redis_acl_file",
-            "moneybee_migrator_password_file",
-            "moneybee_app_password_file",
         }:
             continue
         emit(env_name, paths[key])
 
-    if paths.get("vault_data_path"):
-        emit("MONEYBEE_VAULT_DATA_PATH", paths["vault_data_path"])
-
     emit("MONEYBEE_INTERNAL_NETWORK", networks["internal"])
     emit("MONEYBEE_EDGE_NETWORK", networks["edge"])
     emit("CADDY_ACME_EMAIL", release["caddy_acme_email"])
+    emit("MONEYBEE_TRUSTED_PROXY_CIDRS_CSV", release["trusted_proxy_cidrs_csv"])
     for key, env_name in {
         "marketing": "MONEYBEE_MARKETING_HOST",
         "borrower": "MONEYBEE_BORROWER_HOST",
