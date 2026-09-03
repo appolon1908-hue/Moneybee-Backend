@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "status": "PUBLISHED_ATTESTED_VERIFIED",
+  "repository": "appolon1908-hue/Moneybee-Backend",
+  "source_sha": "a087b3b6761f614d834405fe286bb7c95b525167",
+  "release_branch": "release/staging",
+  "workflow_run_id": 33777229407,
+  "workflow_run_attempt": 1,
+  "artifact_id": 9902168768,
+  "artifact_digest": "sha256:7583eb8068709a90e78c9345c9fc71e454121f2290e29d3b8f4f877c447b312a",
+  "created_at": "2026-09-03T16:15:12.946663+00:00",
+  "images": {
+    "api": "ghcr.io/appolon1908-hue/moneybee-api@sha256:0e13eee8bdd54fc15c26a23a22dfe84755845cf65260815261668404f5451db5",
+    "worker": "ghcr.io/appolon1908-hue/moneybee-worker@sha256:31d15c3f10af3824cd77323f6e30db33625d34b81810e3d269d5bbb55b7ecce3",
+    "migrate": "ghcr.io/appolon1908-hue/moneybee-migrate@sha256:c7e172b2ad29ba51f2c09f240ee03cf88b31f8bc3fe5432bdc6527078eda47b4"
+  },
+  "sboms": {
+    "api": {
+      "sha256": "eac7f8b556a31562d30bf2624613f956a46d3e5170f8121f52aa99c498bcbd7d",
+      "attestation_id": 45041134,
+      "attestation_url": "https://github.com/appolon1908-hue/Moneybee-Backend/attestations/45041134"
+    },
+    "worker": {
+      "sha256": "0553240451a3c642284ca68594b9c8662ae3543fd5dd12fbe19e5a7d12feec02",
+      "attestation_id": 45041160,
+      "attestation_url": "https://github.com/appolon1908-hue/Moneybee-Backend/attestations/45041160"
+    },
+    "migrate": {
+      "sha256": "93fcbad711c5d62df2fe4756a504fa6c4b4045de1f29985f83f63f7e115a1d5c",
+      "attestation_id": 45041176,
+      "attestation_url": "https://github.com/appolon1908-hue/Moneybee-Backend/attestations/45041176"
+    }
+  },
+  "provenance": {
+    "api": {
+      "attestation_id": 45041070,
+      "attestation_url": "https://github.com/appolon1908-hue/Moneybee-Backend/attestations/45041070"
+    },
+    "worker": {
+      "attestation_id": 45041091,
+      "attestation_url": "https://github.com/appolon1908-hue/Moneybee-Backend/attestations/45041091"
+    },
+    "migrate": {
+      "attestation_id": 45041109,
+      "attestation_url": "https://github.com/appolon1908-hue/Moneybee-Backend/attestations/45041109"
+    }
+  },
+  "signature": {
+    "mechanism": "sigstore-oidc-github-artifact-attestation",
+    "provenance_verified": true,
+    "sbom_attestations_verified": true
+  },
+  "configuration": {
+    "aggregate_sha256": "adf562c4fd99aefb9b67113de7cf4e113cc210b039435baba11eac1ea25ce573",
+    "per_file_checksums_artifact_path": "configuration-files.sha256"
+  },
+  "production_authorized": false,
+  "server_contact_authorized": false,
+  "external_effects_enabled": false
+}
