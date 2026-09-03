@@ -1,0 +1,189 @@
+name: update-and-merge-pr45-after-moneybee-source
+
+on:
+  push:
+    branches:
+      - ops/moneybee-repository-to-production-mission-20260902
+    paths:
+      - .github/workflows/update-and-merge-pr45-after-moneybee-source.yml
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  update-and-merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MISSION_PR: "45"
+      REVIEWER: kazan555
+    steps:
+      - name: Wait for backend and frontend protected merges
+        id: sources
+        run: |
+          set -euo pipefail
+          backend_sha=""
+          frontend_sha=""
+          for attempt in $(seq 1 260); do
+            backend="$(gh api repos/appolon1908-hue/Moneybee-Backend/pulls/42)"
+            frontend="$(gh api repos/appolon1908-hue/Moneybee-frontend-/pulls/27)"
+            if test "$(jq -r '.merged' <<<"$backend")" = "true" \
+              && test "$(jq -r '.merged' <<<"$frontend")" = "true"; then
+              backend_sha="$(jq -r '.merge_commit_sha' <<<"$backend")"
+              frontend_sha="$(jq -r '.merge_commit_sha' <<<"$frontend")"
+              break
+            fi
+            sleep 15
+          done
+          test "${#backend_sha}" -eq 40
+          test "${#frontend_sha}" -eq 40
+          echo "backend_sha=${backend_sha}" >> "$GITHUB_OUTPUT"
+          echo "frontend_sha=${frontend_sha}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ops/moneybee-repository-to-production-mission-20260902
+          fetch-depth: 0
+      - name: Reconcile mission branch with protected source and record exact SHAs
+        env:
+          BACKEND_SHA: ${{ steps.sources.outputs.backend_sha }}
+          FRONTEND_SHA: ${{ steps.sources.outputs.frontend_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git rm .github/workflows/update-and-merge-pr45-after-moneybee-source.yml
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+
+          backend = os.environ["BACKEND_SHA"]
+          frontend = os.environ["FRONTEND_SHA"]
+          replacements = {
+              "bb5e00016be80c036500fb8cb382b3c47fd88c9b": backend,
+              "b8682c4542738caae9f58c00f628a7f74dccfb10": backend,
+              "8c7d5143cdbbc70df728c1659a99569b13dec5fa": backend,
+              "7058cd7c49b59931bc8c462e721511fd0b77f012": frontend,
+          }
+          changed = []
+          roots = [Path("docs/codex"), Path("deploy")]
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  try:
+                      text = path.read_text(encoding="utf-8")
+                  except UnicodeDecodeError:
+                      continue
+                  updated = text
+                  for old, new in replacements.items():
+                      updated = updated.replace(old, new)
+                  if updated != text:
+                      path.write_text(updated, encoding="utf-8")
+                      changed.append(str(path))
+
+          plan_path = Path("deploy/production-orchestration.plan.json")
+          if plan_path.exists():
+              plan = json.loads(plan_path.read_text(encoding="utf-8"))
+              state = plan.setdefault("starting_state", {})
+              state["backend_candidate_sha"] = backend
+              state["frontend_candidate_sha"] = frontend
+              state["frontend_last_backend_contract_sha"] = backend
+              plan["status"] = "SOURCE_PROTECTED_MERGES_COMPLETE_RELEASE_EVIDENCE_PENDING"
+              plan_path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+
+          evidence = Path("docs/codex/production-orchestration/PROTECTED_MERGE_EVIDENCE.md")
+          evidence.parent.mkdir(parents=True, exist_ok=True)
+          evidence.write_text(
+              "# MoneyBee protected source merge evidence\n\n"
+              f"- Backend PR #42 protected merge SHA: `{backend}`\n"
+              f"- Frontend PR #27 protected merge SHA: `{frontend}`\n"
+              f"- Frontend contract authority: `{backend}`\n\n"
+              "The immutable release, SBOM/provenance, configuration checksum, "
+              "rollback digest, backup/restore, installation, canary, and production "
+              "certification phases remain pending. External effects remain disabled.\n",
+              encoding="utf-8",
+          )
+          print("UPDATED_MISSION_FILES=" + ",".join(changed))
+          PY
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path("deploy").rglob("*.json"):
+              json.loads(path.read_text(encoding="utf-8"))
+          print("MISSION_JSON_VALIDATION=PASS")
+          PY
+          git diff --check
+          git add -A
+          git diff --cached --check
+          git commit -m "docs(release): record protected MoneyBee source merges"
+          git push origin HEAD:ops/moneybee-repository-to-production-mission-20260902
+      - name: Update PR evidence and request fresh review
+        env:
+          BACKEND_SHA: ${{ steps.sources.outputs.backend_sha }}
+          FRONTEND_SHA: ${{ steps.sources.outputs.frontend_sha }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          body="MoneyBee source authority has been refreshed on mission PR #45.
+
+- Backend protected merge SHA: \`${BACKEND_SHA}\`
+- Frontend protected merge SHA: \`${FRONTEND_SHA}\`
+- Mission branch exact head: \`${head_sha}\`
+- Frontend contract authority: \`${BACKEND_SHA}\`
+
+The immutable artifact, provenance, rollback, backup/restore, installation, canary, and production-certification phases remain pending and fail closed. External effects remain disabled. No server or SSH change occurred in this update."
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${MISSION_PR}/comments" -f body="$body"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/pulls/${MISSION_PR}/requested_reviewers" -f "reviewers[]=${REVIEWER}" || true
+      - name: Wait for protected PR45 gates and merge
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          last_status="not evaluated"
+          for attempt in $(seq 1 200); do
+            pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${MISSION_PR}")"
+            if test "$(jq -r '.merged' <<<"$pr")" = "true"; then
+              exit 0
+            fi
+            head_sha="$(jq -r '.head.sha' <<<"$pr")"
+            draft="$(jq -r '.draft' <<<"$pr")"
+            mergeable_state="$(jq -r '.mergeable_state // "unknown"' <<<"$pr")"
+            review_data="$(gh api graphql \
+              -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewDecision reviewThreads(first:100){nodes{isResolved}}}}}' \
+              -F owner="$owner" -F repo="$repo" -F number="${MISSION_PR}")"
+            decision="$(jq -r '.data.repository.pullRequest.reviewDecision // "NONE"' <<<"$review_data")"
+            unresolved="$(jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' <<<"$review_data")"
+            checks="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${head_sha}/check-runs?per_page=100")"
+            pending="$(jq '[.check_runs[] | select(.status != "completed")] | length' <<<"$checks")"
+            failed="$(jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length' <<<"$checks")"
+            last_status="head=${head_sha} draft=${draft} mergeable_state=${mergeable_state} review=${decision} unresolved=${unresolved} pending_checks=${pending} failed_checks=${failed}"
+            echo "$last_status"
+            if test "$draft" = "false" \
+              && test "$decision" = "APPROVED" \
+              && test "$unresolved" = "0" \
+              && test "$pending" = "0" \
+              && test "$failed" = "0" \
+              && { test "$mergeable_state" = "clean" || test "$mergeable_state" = "has_hooks"; }; then
+              result="$(gh api --method PUT \
+                "repos/${GITHUB_REPOSITORY}/pulls/${MISSION_PR}/merge" \
+                -f sha="$head_sha" \
+                -f merge_method=squash \
+                -f commit_title='docs(codex): publish divided MoneyBee repository-to-production orchestration (#45)' \
+                -f commit_message='Protected merge after source-SHA reconciliation, exact-head checks, resolved review threads, and independent approval.')"
+              test "$(jq -r '.merged' <<<"$result")" = "true"
+              echo "MISSION_PROTECTED_MERGE_SHA=$(jq -r '.sha' <<<"$result")"
+              exit 0
+            fi
+            sleep 15
+          done
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${MISSION_PR}/comments" -f body="Mission PR #45 remains protected-gate blocked. Last observed status: \`${last_status}\`. No protection, production, or SSH boundary was bypassed."
+          exit 1
