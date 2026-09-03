@@ -672,14 +672,40 @@ async def complete_document_upload_session(
         problem("DOCUMENT_HASH_MISMATCH", "The uploaded document checksum does not match.", 409)
     adapter = S3ObjectStorageAdapter()
     try:
+        versioning_enabled = await adapter.bucket_versioning_enabled()
+    except ProviderError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "DOCUMENT_STORAGE_VERSION_UNAVAILABLE",
+                "message": "Object-storage versioning could not be verified.",
+            },
+        ) from exc
+    if not versioning_enabled:
+        problem(
+            "DOCUMENT_STORAGE_VERSION_UNAVAILABLE",
+            "The object-storage bucket must have versioning enabled.",
+            409,
+        )
+    try:
         metadata = await adapter.head_private(object_key=item.storage_key)
     except ProviderError as exc:
         raise HTTPException(
             status_code=409,
-            detail={"code": "DOCUMENT_UPLOAD_NOT_FOUND", "message": "The uploaded object could not be verified."},
+            detail={
+                "code": "DOCUMENT_UPLOAD_NOT_FOUND",
+                "message": "The uploaded object could not be verified.",
+            },
         ) from exc
     if int(metadata.get("ContentLength") or -1) != item.size_bytes:
         problem("DOCUMENT_SIZE_MISMATCH", "The stored document size does not match.", 409)
+    version_id = str(metadata.get("VersionId") or "").strip()
+    if not version_id or version_id.lower() == "null":
+        problem(
+            "DOCUMENT_STORAGE_VERSION_UNAVAILABLE",
+            "The uploaded object is not protected by immutable storage versioning.",
+            409,
+        )
     document = models.Document(
         application_id=item.application_id,
         document_type=item.document_type,
@@ -687,13 +713,14 @@ async def complete_document_upload_session(
         mime_type=item.mime_type,
         size_bytes=item.size_bytes,
         storage_key=item.storage_key,
+        storage_version_id=version_id,
         sha256=supplied_hash,
         status="QUARANTINED",
         uploaded_by=user.subject,
     )
     item.status = "UPLOADED"
     item.completed_at = datetime.now(UTC)
-    item.provider_reference = str(metadata.get("VersionId") or metadata.get("ETag") or "")[:255] or None
+    item.provider_reference = version_id[:255]
     db.add(document)
     await db.flush()
     db.add(
@@ -738,6 +765,7 @@ async def borrower_document_download(document_id: uuid.UUID, db: Db, user: User)
         url = await S3ObjectStorageAdapter().presigned_download(
             object_key=document.storage_key,
             expires_seconds=300,
+            version_id=document.storage_version_id,
         )
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail="Document storage is unavailable") from exc

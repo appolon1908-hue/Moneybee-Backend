@@ -17,6 +17,7 @@ from app.auth import Principal
 from app.compliance_routes import record_tax_filing
 from app.compliance_schemas import CommissionTaxRecordFilingInput
 from app.db import SessionLocal, engine
+from app.encryption import encrypt_secret
 from app.main import app
 
 
@@ -144,6 +145,7 @@ async def test_concurrent_tax_filing_same_key_replays_instead_of_raising_integri
             recipient_type="BROKER",
             recipient_reference=f"broker-{uuid.uuid4().hex}",
             recipient_name="Race Test Broker",
+            tin_ciphertext=encrypt_secret("12-3456789"),
             tax_year=2030,
             total_amount=Decimal("900.00"),
             commission_count=2,

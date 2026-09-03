@@ -18,7 +18,11 @@ from app.compliance_schemas import (
     CommercialFinancingDisclosurePage,
     ComplianceOverviewRead,
 )
-from app.compliance_service import generate_commission_tax_records, update_recipient_tin
+from app.compliance_service import (
+    generate_commission_tax_records,
+    lock_commission_tax_year,
+    update_recipient_tin,
+)
 from app.db import get_db
 from app.schemas import CommercialFinancingDisclosureRead
 
@@ -489,6 +493,14 @@ async def set_tax_record_tin(
         Depends(require_permission("commission.receipt.record")),
     ],
 ):
+    tax_year = await db.scalar(
+        select(compliance_models.CommissionTaxRecord.tax_year).where(
+            compliance_models.CommissionTaxRecord.id == record_id
+        )
+    )
+    if tax_year is None:
+        raise HTTPException(status_code=404, detail="Commission tax record not found")
+    await lock_commission_tax_year(db, tax_year)
     record = await db.scalar(
         select(compliance_models.CommissionTaxRecord)
         .where(compliance_models.CommissionTaxRecord.id == record_id)
@@ -558,6 +570,14 @@ async def record_tax_filing(
             )
         return existing.response_body
 
+    tax_year = await db.scalar(
+        select(compliance_models.CommissionTaxRecord.tax_year).where(
+            compliance_models.CommissionTaxRecord.id == record_id
+        )
+    )
+    if tax_year is None:
+        raise HTTPException(status_code=404, detail="Commission tax record not found")
+    await lock_commission_tax_year(db, tax_year)
     record = await db.scalar(
         select(compliance_models.CommissionTaxRecord)
         .where(compliance_models.CommissionTaxRecord.id == record_id)
@@ -582,6 +602,14 @@ async def record_tax_filing(
                 "The idempotency key was already used with different filing evidence.",
             )
         return existing.response_body
+    if record.requires_1099 and (
+        not (record.recipient_name or "").strip() or not record.tin_ciphertext
+    ):
+        _problem(
+            "TAX_RECIPIENT_IDENTITY_REQUIRED",
+            "Recipient name and encrypted TIN are required before filing.",
+            status_code=409,
+        )
     if (
         record.filed_at is not None
         and record.filing_reference != payload.filing_reference
