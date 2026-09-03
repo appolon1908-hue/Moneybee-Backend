@@ -6,6 +6,7 @@ on:
       - "app/**"
       - "migrations/**"
       - "scripts/**"
+      - "docs/codex/**"
       - "docs/security/**"
       - "docs/identity/**"
       - "docker/**"
