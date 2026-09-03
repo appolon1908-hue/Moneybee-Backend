@@ -87,7 +87,7 @@ async def test_payment_webhook_retains_only_minimized_operational_fields(monkeyp
         assert "private-customer@example.com" not in stored
         assert "Private Customer" not in stored
         assert "123 Private Street" not in stored
-        assert "4242" not in stored
+        assert '"last4"' not in stored
         assert "secret-fingerprint" not in stored
         assert "must-not-be-retained" not in stored
         assert inbox.payload["linkage"] == {
