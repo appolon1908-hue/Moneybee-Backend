@@ -178,7 +178,7 @@ class ObjectStorageAdapter(Protocol):
     ) -> dict:
         ...
 
-    async def get_private(self, *, object_key: str) -> bytes:
+    async def get_private(self, *, object_key: str, version_id: str | None = None) -> bytes:
         ...
 
     async def delete_private(self, *, object_key: str) -> None:
@@ -189,6 +189,7 @@ class ObjectStorageAdapter(Protocol):
         *,
         object_key: str,
         expires_seconds: int,
+        version_id: str | None = None,
     ) -> str:
         ...
 

@@ -304,6 +304,16 @@ async def generate_commercial_financing_disclosure(
 _FORM_1099_NEC_THRESHOLD = Decimal("600")
 
 
+async def lock_commission_tax_year(db: AsyncSession, tax_year: int) -> None:
+    """Serialize every generator/filer touching a tax year in PostgreSQL."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"commission-tax-records:{tax_year}".encode()).digest()[:8],
+            "big",
+        ) & ((1 << 63) - 1)
+        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
+
 async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> list[CommissionTaxRecord]:
     """Aggregates CommissionSplit amounts per recipient for one tax year
     into the data a 1099-NEC (Box 1: Nonemployee compensation) would be
@@ -324,14 +334,7 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
     update_recipient_tin(), are stored encrypted with app/encryption.py's
     versioned scheme and never returned in the clear by any endpoint
     built so far."""
-    if db.bind is not None and db.bind.dialect.name == "postgresql":
-        # Serialize generation independently of HTTP idempotency keys so two
-        # valid operator commands cannot race the recipient/year unique key.
-        lock_key = int.from_bytes(
-            hashlib.sha256(f"commission-tax-records:{tax_year}".encode()).digest()[:8],
-            "big",
-        ) & ((1 << 63) - 1)
-        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+    await lock_commission_tax_year(db, tax_year)
 
     year_start = datetime(tax_year, 1, 1, tzinfo=UTC)
     year_end = datetime(tax_year + 1, 1, 1, tzinfo=UTC)
@@ -359,7 +362,9 @@ async def generate_commission_tax_records(db: AsyncSession, tax_year: int) -> li
         bucket["count"] += 1
 
     existing_rows = list((await db.scalars(
-        select(CommissionTaxRecord).where(CommissionTaxRecord.tax_year == tax_year)
+        select(CommissionTaxRecord)
+        .where(CommissionTaxRecord.tax_year == tax_year)
+        .with_for_update()
     )).all())
     existing_by_key = {
         (row.recipient_type, row.recipient_reference): row for row in existing_rows
