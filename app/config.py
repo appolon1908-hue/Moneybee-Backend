@@ -38,18 +38,28 @@ class Settings(BaseSettings):
     codestra_middleware_scope: str | None = None
     codestra_middleware_webhook_secret: str | None = None
     codestra_middleware_webhook_tolerance_seconds: int = 300
+    codestra_sdk_enabled: bool = False
+    codestra_sdk_capabilities_csv: str = ""
     provider_webhook_allowlist_csv: str = (
         "lender,docusign,sendgrid,twilio,odoo,n8n,experian"
     )
     provider_webhook_secrets_json: str = "{}"
     provider_webhook_tolerance_seconds: int = 300
+
+    field_encryption_keys_json: str = "{}"
+    field_encryption_active_key_version: str | None = None
+    provider_timeout_seconds: float = 30.0
+    live_writes: bool = False
+    odoo_write: bool = False
+
+    log_level: str = "INFO"
     rate_limit_enabled: bool = True
     rate_limit_window_seconds: int = 60
-    public_rate_limit_per_minute: int = 120
-    webhook_rate_limit_per_minute: int = 240
-
-    field_encryption_key: str | None = None
-    provider_timeout_seconds: float = 30.0
+    public_rate_limit_per_minute: int = 60
+    webhook_rate_limit_per_minute: int = 120
+    trust_forwarded_for: bool = False
+    trusted_proxy_cidrs_csv: str = ""
+    api_v1_sunset_date: str = "2026-12-31"
 
     source_sha: str | None = None
     api_image_digest: str | None = None
@@ -144,6 +154,20 @@ class Settings(BaseSettings):
     object_storage_access_key: str | None = None
     object_storage_secret_key: str | None = None
 
+    malware_scan_provider: Literal["disabled", "clamav"] = "disabled"
+    clamav_host: str | None = None
+    clamav_port: int = 3310
+    clamav_timeout_seconds: float = 30.0
+
+    payment_provider: Literal["disabled", "stripe", "paypal"] = "disabled"
+    stripe_api_base_url: str = "https://api.stripe.com"
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    paypal_api_base_url: str = "https://api-m.sandbox.paypal.com"
+    paypal_client_id: str | None = None
+    paypal_client_secret: str | None = None
+    paypal_webhook_id: str | None = None
+
     @staticmethod
     def _csv_set(value: str) -> frozenset[str]:
         return frozenset(item.strip() for item in value.split(",") if item.strip())
@@ -159,6 +183,16 @@ class Settings(BaseSettings):
             "lender": self._csv_set(self.lender_oidc_client_ids_csv),
             "admin": self._csv_set(self.admin_oidc_client_ids_csv),
         }
+
+    @property
+    def trusted_proxy_cidrs(self) -> tuple[str, ...]:
+        return tuple(
+            item.strip() for item in self.trusted_proxy_cidrs_csv.split(",") if item.strip()
+        )
+
+    @property
+    def codestra_sdk_capabilities(self) -> frozenset[str]:
+        return self._csv_set(self.codestra_sdk_capabilities_csv)
 
     @property
     def provider_webhook_allowlist(self) -> set[str]:
@@ -180,6 +214,19 @@ class Settings(BaseSettings):
         ):
             raise ValueError("PROVIDER_WEBHOOK_SECRETS_JSON must be a string map")
         return {key.lower(): secret for key, secret in value.items() if secret}
+
+    @property
+    def field_encryption_keys(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.field_encryption_keys_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be valid JSON") from exc
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(secret, str)
+            for key, secret in value.items()
+        ):
+            raise ValueError("FIELD_ENCRYPTION_KEYS_JSON must be a string map")
+        return {key: secret for key, secret in value.items() if secret}
 
     @property
     def oidc_algorithms(self) -> list[str]:
@@ -230,15 +277,29 @@ class Settings(BaseSettings):
                 raise ValueError("Canonical issuer must use auth.codestra.co")
             if self.oidc_algorithms != ["RS256"]:
                 raise ValueError("Production OIDC tokens must use RS256")
+            if self.rate_limit_enabled and not self.redis_url.startswith(("redis://", "rediss://")):
+                raise ValueError("Distributed rate limiting requires REDIS_URL")
+            if self.trust_forwarded_for and not self.trusted_proxy_cidrs:
+                raise ValueError(
+                    "TRUST_FORWARDED_FOR requires at least one TRUSTED_PROXY_CIDRS_CSV entry"
+                )
             if self.bank_provider == "plaid" and not all(
                 [
                     self.plaid_client_id,
                     self.plaid_secret,
-                    self.field_encryption_key,
+                    self.field_encryption_active_key_version,
+                    self.field_encryption_keys,
                 ]
             ):
                 raise ValueError(
-                    "Plaid requires credentials and FIELD_ENCRYPTION_KEY"
+                    "Plaid requires credentials and a configured field encryption key"
+                )
+            if self.field_encryption_active_key_version and (
+                self.field_encryption_active_key_version not in self.field_encryption_keys
+            ):
+                raise ValueError(
+                    "FIELD_ENCRYPTION_ACTIVE_KEY_VERSION must name a key present in "
+                    "FIELD_ENCRYPTION_KEYS_JSON"
                 )
             if self.middleware_provider == "codestra" and not all(
                 [
@@ -249,10 +310,25 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("Codestra middleware configuration is incomplete")
+            if self.codestra_sdk_enabled:
+                if self.middleware_provider != "codestra":
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires MIDDLEWARE_PROVIDER=codestra"
+                    )
+                if not self.codestra_sdk_capabilities:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires a nonempty capability allowlist"
+                    )
+                if not self.source_sha:
+                    raise ValueError(
+                        "CODESTRA_SDK_ENABLED requires immutable SOURCE_SHA provenance"
+                    )
             if self.crm_provider == "odoo" and not all(
                 [self.odoo_base_url, self.odoo_database, self.odoo_api_key]
             ):
                 raise ValueError("Odoo configuration is incomplete")
+            if self.crm_provider == "odoo" and not self.odoo_write:
+                raise ValueError("CRM_PROVIDER=odoo requires ODOO_WRITE=true")
             if self.kyb_provider == "middesk" and not self.middesk_api_key:
                 raise ValueError("Middesk configuration is incomplete")
             if self.credit_provider == "experian" and not all(
@@ -289,6 +365,24 @@ class Settings(BaseSettings):
                 ]
             ):
                 raise ValueError("S3 object storage configuration is incomplete")
+            if self.malware_scan_provider == "clamav" and not self.clamav_host:
+                raise ValueError("ClamAV configuration is incomplete")
+            if self.app_env == "production" and self.object_storage_mode != "s3":
+                raise ValueError("Production requires private S3-compatible object storage")
+            if self.app_env == "production" and self.malware_scan_provider != "clamav":
+                raise ValueError("Production requires ClamAV document scanning")
+            if self.payment_provider == "stripe" and not all(
+                [self.stripe_secret_key, self.stripe_webhook_secret]
+            ):
+                raise ValueError("Stripe configuration is incomplete")
+            if self.payment_provider == "paypal" and not all(
+                [
+                    self.paypal_client_id,
+                    self.paypal_client_secret,
+                    self.paypal_webhook_id,
+                ]
+            ):
+                raise ValueError("PayPal configuration is incomplete")
         return self
 
 

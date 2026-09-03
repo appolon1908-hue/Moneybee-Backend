@@ -1,0 +1,18 @@
+{
+  "paths": {
+    "/api/v2/admin/applications/{application_id}/adverse-action-notices": "621d4310f32a425f996d929d633c615a8f76c9663023762bb36f19e7b56bc9fe",
+    "/api/v2/admin/commission-tax-records": "680842d045e2d05912966f227789c7f24098d2f712b28331990ea2b749805dc0",
+    "/api/v2/admin/commission-tax-records/generate": "ff50f838454165b1f83d3ff56bc15bb63db88f260973e6b5e2c7b443434cbffd",
+    "/api/v2/admin/commission-tax-records/{record_id}/tin": "5e10feb71d775f109b55a845006db2f5f700e5f11f75665cd01ff5a0ebd0c93d",
+    "/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure": "1efc08b4dcc96d8f2246d37609eaeb1df7163f8aad3865bfe767fd205569ef39",
+    "/api/v2/admin/offers/{offer_id}/commercial-financing-disclosure/acknowledge": "a14644fbd0ff47b9be038c122538c7fea7c6b088d2fbe625c8b46e12c52353d9",
+    "/api/v2/offers/{offer_id}/commercial-financing-disclosure": "6e0ca6fbdf296645b0ca672a51727f00923d587d653d339edc895a80d1711615",
+    "/api/v2/offers/{offer_id}/commercial-financing-disclosure/acknowledge": "099aa7ad425ceb6efb6bd459113fc43587bc8da7e61f096a7b5172150fd39a7d"
+  },
+  "schemas": {
+    "AdverseActionNoticeRead": "752753fa14bec0718fdc48606a8ea6d834a60f235fd8d42dec84003bac8849a8",
+    "CommercialFinancingDisclosureRead": "537d86c3dfed78a80d3f3feefd11b52a974e97994035f86970af4ea392f32456",
+    "CommissionTaxRecordRead": "02478d23a11bed930b271eb030ae48532ef0fd3a5c388b04cbdb0b7a99343628",
+    "CommissionTaxRecordTinInput": "0df6f57381a1f11f15bea77201b743c1f20a38528b668ead8b13e5447f656989"
+  }
+}

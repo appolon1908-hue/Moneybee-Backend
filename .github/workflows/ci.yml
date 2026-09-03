@@ -12,21 +12,25 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install ".[dev]"
-      - run: ruff check app tests
+      - run: python -m ruff check app tests migrations scripts ops
       - run: pytest -q
       - name: Smoke-test critical API surfaces
         run: python scripts/smoke_api.py
       - name: Verify OpenAPI contract and additive manifests
-        run: python scripts/verify_openapi_contract.py
+        run: |
+          python scripts/verify_openapi_contract.py
+          python scripts/generate_endpoint_catalog.py --check
+          python scripts/check_no_private_keys.py
+          python scripts/check_identity_email_readiness.py
       - name: Upload reviewed OpenAPI sources
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: moneybee-openapi
           path: |
@@ -40,9 +44,15 @@ jobs:
           DATABASE_URL: sqlite+aiosqlite:///./migration-test.db
         run: |
           alembic upgrade head
+          alembic downgrade 20260901_0022
+          python - <<'PY'
+          import sqlite3
+          columns = {row[1] for row in sqlite3.connect("migration-test.db").execute("PRAGMA table_info(bank_provider_states)")}
+          assert "credential_reference" in columns
+          PY
           alembic downgrade base
           alembic upgrade head
-      - run: python -m compileall -q app migrations
+      - run: python -m compileall -q app tests migrations scripts ops
       - run: docker build -t moneybee-backend:test .
 
   postgres-identity-tenancy:
@@ -52,16 +62,25 @@ jobs:
       AUTO_CREATE_SCHEMA: "false"
       LOCAL_AUTH_BYPASS: "false"
       LOCAL_IDENTITY_ENFORCEMENT: "true"
-      DATABASE_URL: postgresql+asyncpg://moneybee:moneybee_test@localhost:5432/moneybee_test
+      DATABASE_URL: postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start runner PostgreSQL
         run: |
           sudo systemctl start postgresql.service
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER moneybee WITH PASSWORD 'moneybee_test'"
-          sudo -u postgres createdb --owner=moneybee moneybee_test
-          pg_isready --host=localhost --port=5432 --username=moneybee
-      - uses: actions/setup-python@v7
+          sudo -u postgres createdb moneybee
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee -c \
+            'CREATE ROLE moneybee_legacy NOLOGIN; CREATE TABLE public.legacy_owned(id integer); ALTER TABLE public.legacy_owned OWNER TO moneybee_legacy;'
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee \
+            -v migrator_password=migrator_test -v runtime_password=runtime_test \
+            -f deploy/postgres/moneybee_roles.sql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee \
+            -v migrator_password=migrator_test -v runtime_password=runtime_test \
+            -f deploy/postgres/moneybee_roles.sql
+          PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee \
+            -v ON_ERROR_STOP=1 -c 'ALTER TABLE public.legacy_owned ADD COLUMN migrated boolean DEFAULT false; DROP TABLE public.legacy_owned'
+          pg_isready --host=localhost --port=5432 --username=moneybee_migrator
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -71,29 +90,118 @@ jobs:
         run: |
           alembic upgrade 20260823_0011
           alembic upgrade 20260823_0012
+      - name: Verify published public-intake revision identity
+        run: |
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_published_0015
+          export DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_published_0015'
+          alembic upgrade 20260826_0015
+          PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_published_0015 \
+            -v ON_ERROR_STOP=1 -Atc "select to_regclass('public.public_intakes') is not null" | grep -qx t
+          PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_published_0015 \
+            -v ON_ERROR_STOP=1 -Atc "select to_regclass('public.journal_entries') is null" | grep -qx t
+          alembic upgrade head
+          alembic check
       - name: Upgrade to the current ORM schema
-        run: alembic upgrade head
-      - name: Test identity, tenancy and verified account registration
         run: |
-          pytest -q \
-            tests/test_auth_identity.py \
-            tests/test_identity_tenancy_postgres.py \
-            tests/test_account_registration.py
-      - name: Test portal boundaries and finance ledger on PostgreSQL
-        env:
-          LOCAL_AUTH_BYPASS: "true"
+          alembic upgrade head
+          alembic check
+      - name: Verify split-payment evidence blocks unsafe downgrade
         run: |
-          pytest -q \
-            tests/test_portal_token_boundaries.py \
-            tests/test_financial_ledger.py
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO commission_splits
+            (id, created_at, updated_at, commission_id, recipient_type,
+             recipient_reference, amount, status, paid_at, payment_reference)
+          VALUES
+            ('00000000-0000-0000-0000-000000000029', now(), now(),
+             '00000000-0000-0000-0000-000000000030', 'BROKER',
+             'downgrade-fixture', 100.00, 'PAID', now(), 'fixture-payment');
+          SET session_replication_role = origin;
+          SQL
+          if alembic downgrade 20260901_0026; then
+            echo 'Downgrade discarded commission split payment evidence' >&2
+            exit 1
+          fi
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee -c \
+            "DELETE FROM commission_splits WHERE id='00000000-0000-0000-0000-000000000029'"
+      - name: Verify migration 0023 legacy fail-closed and compatibility paths
+        run: |
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_legacy
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_compatible
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_populated
+          for database in moneybee_legacy moneybee_compatible; do
+            DATABASE_URL="postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/$database" alembic upgrade 20260901_0022
+            sudo -u postgres psql -v ON_ERROR_STOP=1 -d "$database" -c \
+              'ALTER TABLE bank_provider_states RENAME COLUMN credential_reference TO access_token_ciphertext; ALTER TABLE bank_provider_states ALTER COLUMN access_token_ciphertext TYPE text;'
+          done
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_legacy <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO bank_provider_states
+            (id, created_at, updated_at, connection_id, provider, access_token_ciphertext, metadata_payload)
+          VALUES
+            ('00000000-0000-0000-0000-000000000023', now(), now(), '00000000-0000-0000-0000-000000000024', 'fixture', 'legacy-fixture', '{}');
+          SET session_replication_role = origin;
+          SQL
+          if DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_legacy' alembic upgrade head; then
+            echo 'Migration accepted unresolved legacy credential rows' >&2
+            exit 1
+          fi
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic upgrade head
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_compatible <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO bank_provider_states
+            (id, created_at, updated_at, connection_id, provider, credential_reference, metadata_payload)
+          VALUES
+            ('00000000-0000-0000-0000-000000000025', now(), now(), '00000000-0000-0000-0000-000000000026', 'fixture', 'secret://verified/fixture', '{}');
+          SET session_replication_role = origin;
+          SQL
+          if DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic downgrade 20260901_0022; then
+            echo 'Downgrade stranded an external credential reference' >&2
+            exit 1
+          fi
+          before="$(PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_compatible -Atc "select column_name from information_schema.columns where table_name='bank_provider_states' order by ordinal_position")"
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_compatible' alembic upgrade head
+          after="$(PGPASSWORD=migrator_test psql -h localhost -U moneybee_migrator -d moneybee_compatible -Atc "select column_name from information_schema.columns where table_name='bank_provider_states' order by ordinal_position")"
+          test "$before" = "$after"
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' alembic upgrade 20260901_0022
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_populated -c \
+            'ALTER TABLE bank_provider_states RENAME COLUMN credential_reference TO access_token_ciphertext; ALTER TABLE bank_provider_states ALTER COLUMN access_token_ciphertext TYPE text;'
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' alembic upgrade 20260901_0022a
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d moneybee_populated <<'SQL'
+          SET session_replication_role = replica;
+          INSERT INTO bank_provider_states
+            (id, created_at, updated_at, connection_id, provider, access_token_ciphertext, metadata_payload)
+          VALUES
+            ('00000000-0000-0000-0000-000000000027', now(), now(), '00000000-0000-0000-0000-000000000028', 'fixture', 'legacy-fixture', '{}');
+          SET session_replication_role = origin;
+          SQL
+          printf '{"00000000-0000-0000-0000-000000000027":"secret://ci/verified-fixture"}\n' >/tmp/moneybee-credential-map.json
+          python ops/stage-bank-credential-references.py \
+            --database-url 'postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' \
+            --mapping /tmp/moneybee-credential-map.json
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_populated' alembic upgrade head
       - name: Test identity downgrade and current forward-fix path
         run: |
           alembic downgrade 20260823_0011
           alembic upgrade head
+      - name: Test complete application under least-privilege runtime identity
+        env:
+          LOCAL_AUTH_BYPASS: "true"
+          DATABASE_URL: postgresql+asyncpg://moneybee_runtime:runtime_test@localhost:5432/moneybee
+        run: pytest -q
+      - name: Assert runtime cannot perform DDL or administrative operations
+        env:
+          PGPASSWORD: runtime_test
+        run: |
+          ! psql -h localhost -U moneybee_runtime -d moneybee -c 'CREATE TABLE runtime_must_not_create(id integer)'
+          ! psql -h localhost -U moneybee_runtime -d moneybee -c 'TRUNCATE capability_flags'
+          ! psql -h localhost -U moneybee_runtime -d moneybee -c 'GRANT moneybee_runtime TO moneybee_migrator'
+          test "$(psql -h localhost -U moneybee_runtime -d moneybee -Atc "select rolsuper or rolcreatedb or rolcreaterole or rolreplication or rolbypassrls from pg_roles where rolname=current_user")" = "f"
       - name: Test empty database to head
         run: |
-          alembic downgrade base
-          alembic upgrade head
+          sudo -u postgres createdb --owner=moneybee_migrator moneybee_empty
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_empty' alembic upgrade head
+          DATABASE_URL='postgresql+asyncpg://moneybee_migrator:migrator_test@localhost:5432/moneybee_empty' alembic check
 
   containers:
     needs: [verify, postgres-identity-tenancy]
@@ -104,10 +212,10 @@ jobs:
       matrix:
         role: [api, worker, migrate]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build backend ${{ matrix.role }} image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v7.0.0
         with:
           context: .
           target: ${{ matrix.role }}
@@ -129,3 +237,15 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
+      - name: Generate release SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: moneybee-${{ matrix.role }}:ci
+          format: cyclonedx-json
+          output-file: moneybee-${{ matrix.role }}.sbom.cdx.json
+          upload-artifact: false
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: moneybee-${{ matrix.role }}-sbom
+          path: moneybee-${{ matrix.role }}.sbom.cdx.json

@@ -1,0 +1,15 @@
+{
+  "name": "contract-read-completion",
+  "paths": {
+    "/api/v2/applications/{application_id}/status": "8acefc9ed3cdfe7ee1a7348552a532c6121a2542bcfa4e56a3fb345d16195813",
+    "/api/v2/me/permissions": "a5854c25549d50ac889bea36deb7f8e76b200a8cc6c0e843468184f338196be2",
+    "/api/v2/offers/{offer_id}": "c0ccff83618ce42422c4549dfaa74f0623c066208624ff1ae772cf3316b170ab",
+    "/api/v2/public/products": "517097f6f434fa9760ec2530b9cf880afef1effa81f68a36736796d41144004d"
+  },
+  "schemas": {
+    "ApplicationStatusRead": "5e41af2c965c8939d2bfa97a9ca25020681f0d53abf4811fd46bcb84d33714be",
+    "EffectivePermissionsRead": "6abec9e5add6001a371cc3f56b34c3595da24485b5de2203e5d83225f8fd0613",
+    "PublicProductRead": "9213026c50f0d75acb3407be19c49961f1b5c5cbf4b4918b766311ca36986a7e"
+  },
+  "version": 1
+}

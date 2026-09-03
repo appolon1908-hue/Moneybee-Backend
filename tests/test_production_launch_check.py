@@ -33,7 +33,10 @@ def _marketing_fixture(tmp_path: Path, checker) -> Path:
 
     _write(marketing_root / "src" / "landingPages.ts", landing_pages)
     _write(marketing_root / "src" / "resourcePages.ts", policy_pages)
-    _write(marketing_root / "src" / "seo.ts", 'const structuredDataType = "application/ld+json";\n')
+    _write(
+        marketing_root / "src" / "seo.ts",
+        'const structuredDataType = "application/ld+json";\n',
+    )
     _write(
         marketing_root / "src" / "components" / "CookieConsent.vue",
         "<template><aside>Cookie preferences</aside></template>\n",
@@ -58,7 +61,9 @@ def _marketing_fixture(tmp_path: Path, checker) -> Path:
     return marketing_root
 
 
-def test_launch_check_separates_repo_ready_from_external_blockers(tmp_path, monkeypatch):
+def test_launch_check_separates_repo_ready_from_external_blockers(
+    tmp_path, monkeypatch
+):
     checker = load_checker()
     marketing_root = _marketing_fixture(tmp_path, checker)
     monkeypatch.delenv("GOOGLE_ADSENSE_PUBLISHER_ID", raising=False)

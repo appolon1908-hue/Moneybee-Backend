@@ -88,6 +88,10 @@ class CodestraProvider:
         self._expires_at = time.time() + int(result.get("expires_in", 300))
         return self._access_token
 
+    async def access_token(self) -> str:
+        """Return the cached service token for approved server-side SDK clients."""
+        return await self._token()
+
     async def publish(
         self,
         *,
