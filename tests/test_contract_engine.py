@@ -381,3 +381,157 @@ async def test_unmatched_docusign_callback_remains_retryable():
         assert message.attempts == 1
         assert message.next_attempt_at is not None
         assert message.processed_at is None
+
+async def test_decline_funding_voids_draft_contract_before_worker_send(monkeypatch):
+    calls: list[dict] = []
+
+    class UnexpectedESign:
+        async def send_envelope(self, **kwargs):
+            calls.append(kwargs)
+            return {"envelopeId": "must-not-be-sent"}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        async with SessionLocal() as db:
+            funding = await db.scalar(
+                select(models.Funding).where(
+                    models.Funding.application_id == uuid.UUID(application_id)
+                )
+            )
+            assert funding is not None
+            funding_id = str(funding.id)
+
+        response = client.post(
+            f"/api/v2/admin/fundings/{funding_id}/decline",
+            json={"reason": "Application no longer qualifies."},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "DECLINED"
+
+    async with SessionLocal() as db:
+        contract = await db.scalar(
+            select(models.Contract).where(
+                models.Contract.application_id == uuid.UUID(application_id)
+            )
+        )
+        application = await db.get(models.Application, uuid.UUID(application_id))
+        assert contract is not None
+        assert contract.status == "VOIDED"
+        assert application is not None
+        assert application.status == models.ApplicationStatus.DECLINED
+        for draft in (
+            await db.scalars(
+                select(models.Contract).where(models.Contract.status == "DRAFT")
+            )
+        ).all():
+            draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: UnexpectedESign())
+    assert await worker.send_pending_contract_envelope() is None
+    assert calls == []
+
+
+async def test_successful_envelope_send_normalizes_id_and_advances_application(monkeypatch):
+    class SuccessfulESign:
+        async def send_envelope(self, **kwargs):
+            return {"envelopeId": "  provider-envelope-normalized  "}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        contract_id = client.get(
+            f"/api/v2/applications/{application_id}/contract"
+        ).json()["id"]
+
+    async with SessionLocal() as db:
+        for draft in (
+            await db.scalars(
+                select(models.Contract).where(models.Contract.status == "DRAFT")
+            )
+        ).all():
+            if draft.id != uuid.UUID(contract_id):
+                draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: SuccessfulESign())
+    assert await worker.send_pending_contract_envelope() == contract_id
+
+    async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        application = await db.get(models.Application, uuid.UUID(application_id))
+        history = list(
+            (
+                await db.scalars(
+                    select(models.ApplicationStatusHistory)
+                    .where(
+                        models.ApplicationStatusHistory.application_id
+                        == uuid.UUID(application_id)
+                    )
+                    .order_by(models.ApplicationStatusHistory.created_at)
+                )
+            ).all()
+        )
+        assert contract is not None
+        assert contract.status == "SENT"
+        assert contract.external_envelope_id == "provider-envelope-normalized"
+        assert application is not None
+        assert application.status == models.ApplicationStatus.CONTRACT_SENT
+        assert [row.to_status for row in history][-2:] == [
+            models.ApplicationStatus.CONTRACT_READY.value,
+            models.ApplicationStatus.CONTRACT_SENT.value,
+        ]
+
+
+async def test_blank_envelope_identifier_never_marks_contract_sent(monkeypatch):
+    class BlankIdentifierESign:
+        async def send_envelope(self, **kwargs):
+            return {"envelopeId": "   "}
+
+    with TestClient(app) as client:
+        application_id, submission_id, lender_id, program_id = (
+            _prepare_matched_submission(client)
+        )
+        _create_and_accept_offer(
+            client, application_id, submission_id, lender_id, program_id
+        )
+        contract_id = client.get(
+            f"/api/v2/applications/{application_id}/contract"
+        ).json()["id"]
+
+    async with SessionLocal() as db:
+        for draft in (
+            await db.scalars(
+                select(models.Contract).where(models.Contract.status == "DRAFT")
+            )
+        ).all():
+            if draft.id != uuid.UUID(contract_id):
+                draft.status = "VOIDED"
+        await db.commit()
+
+    monkeypatch.setattr(worker, "esign_live_send_enabled", lambda: True)
+    monkeypatch.setattr(worker, "esign_adapter", lambda: BlankIdentifierESign())
+    assert await worker.send_pending_contract_envelope() is None
+
+    async with SessionLocal() as db:
+        contract = await db.get(models.Contract, uuid.UUID(contract_id))
+        application = await db.get(models.Application, uuid.UUID(application_id))
+        assert contract is not None
+        assert contract.status == "DRAFT"
+        assert contract.external_envelope_id is None
+        assert contract.provider_attempt_count == 1
+        assert "identifier" in contract.provider_last_error
+        assert application is not None
+        assert application.status == models.ApplicationStatus.CONDITIONS_COMPLETE

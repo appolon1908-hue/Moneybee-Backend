@@ -383,16 +383,23 @@ async def decline_funding(
         .with_for_update()
         .limit(1)
     )
-    if contract is not None and contract.status == "SENT":
-        if not contract.external_envelope_id:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "CONTRACT_VOID_RECONCILIATION_REQUIRED"},
+    if contract is not None:
+        if contract.status == "SENT":
+            if not contract.external_envelope_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "CONTRACT_VOID_RECONCILIATION_REQUIRED"},
+                )
+            await ensure_provider_void_confirmed(
+                db, contract, reason=payload.reason, adapter=esign_adapter()
             )
-        await ensure_provider_void_confirmed(
-            db, contract, reason=payload.reason, adapter=esign_adapter()
-        )
-        services.transition_contract(db, contract, "VOIDED", user, reason=payload.reason)
+            services.transition_contract(
+                db, contract, "VOIDED", user, reason=payload.reason
+            )
+        elif contract.status == "DRAFT":
+            services.transition_contract(
+                db, contract, "VOIDED", user, reason=payload.reason
+            )
     await services.transition_funding(db, funding, "DECLINED", user, reason=payload.reason)
     await db.flush()
     db.add(

@@ -92,6 +92,19 @@ class S3ObjectStorageAdapter:
             ExpiresIn=min(max(expires_seconds, 60), 900),
         )
 
+    async def bucket_versioning_enabled(self) -> bool:
+        client = self._client()
+        try:
+            response = await asyncio.to_thread(
+                client.get_bucket_versioning,
+                Bucket=settings.object_storage_bucket,
+            )
+        except Exception as exc:
+            raise ProviderError(
+                "s3", "Bucket versioning status could not be verified"
+            ) from exc
+        return response.get("Status") == "Enabled"
+
     async def head_private(self, *, object_key: str) -> dict:
         client = self._client()
         try:

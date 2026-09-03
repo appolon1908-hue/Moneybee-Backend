@@ -15,10 +15,21 @@ from app.integration_models import IntegrationInboxMessage, OperationalException
 from app.integrations.base import ProviderError
 from app.integrations.middleware import canonical_event_type
 from app.integrations.registry import esign_adapter, malware_scanner, middleware_adapter, storage_adapter
-from app.models import Contract, Document, Funding, IntegrationEvent, Owner, OutboxEvent, OutboxStatus
+from app.models import (
+    Application,
+    ApplicationStatus,
+    Contract,
+    Document,
+    Funding,
+    IntegrationEvent,
+    Owner,
+    OutboxEvent,
+    OutboxStatus,
+)
 from app.services import (
     effective_capabilities,
     evaluate_renewal_eligibility,
+    transition_application,
     transition_contract,
     transition_funding,
 )
@@ -247,6 +258,47 @@ async def send_pending_contract_envelope() -> str | None:
         if contract is None:
             return None
         _lease_provider_item(contract, now)
+        application = await db.scalar(
+            select(Application)
+            .where(Application.id == contract.application_id)
+            .with_for_update()
+        )
+        if application is None:
+            _provider_failed(
+                contract,
+                ProviderError("moneybee", "contract application is missing"),
+                datetime.now(UTC),
+            )
+            return None
+        if application.status in {
+            ApplicationStatus.DECLINED,
+            ApplicationStatus.CANCELLED,
+            ApplicationStatus.EXPIRED,
+            ApplicationStatus.WITHDRAWN,
+        }:
+            transition_contract(
+                db,
+                contract,
+                "VOIDED",
+                SYSTEM_PRINCIPAL,
+                reason=f"Application is terminal: {application.status.value}",
+            )
+            _provider_succeeded(contract)
+            return str(contract.id)
+        if application.status not in {
+            ApplicationStatus.CONDITIONS_COMPLETE,
+            ApplicationStatus.CONTRACT_READY,
+        }:
+            _provider_failed(
+                contract,
+                ProviderError(
+                    "moneybee",
+                    f"application is not ready for contract delivery: "
+                    f"{application.status.value}",
+                ),
+                datetime.now(UTC),
+            )
+            return None
         signer = await db.scalar(
             select(Owner)
             .where(Owner.application_id == contract.application_id)
@@ -283,10 +335,11 @@ async def send_pending_contract_envelope() -> str | None:
                     )
                 )
             return None
-        envelope_id = str(
-            result.get("envelopeId") or result.get("envelope_id") or ""
-        ) or None
-        if envelope_id is None:
+        raw_envelope_id = result.get("envelopeId") or result.get("envelope_id")
+        envelope_id = (
+            str(raw_envelope_id).strip() if raw_envelope_id is not None else ""
+        )
+        if not envelope_id:
             _provider_failed(
                 contract,
                 ProviderError("docusign", "provider response omitted envelope identifier"),
@@ -296,6 +349,21 @@ async def send_pending_contract_envelope() -> str | None:
         contract.provider = "docusign"
         contract.external_envelope_id = envelope_id
         transition_contract(db, contract, "SENT", SYSTEM_PRINCIPAL)
+        if application.status == ApplicationStatus.CONDITIONS_COMPLETE:
+            transition_application(
+                db,
+                application,
+                ApplicationStatus.CONTRACT_READY,
+                SYSTEM_PRINCIPAL,
+                reason="E-sign envelope prepared for delivery",
+            )
+        transition_application(
+            db,
+            application,
+            ApplicationStatus.CONTRACT_SENT,
+            SYSTEM_PRINCIPAL,
+            reason="E-sign envelope sent",
+        )
         _provider_succeeded(contract)
         return str(contract.id)
 
@@ -336,11 +404,31 @@ async def scan_pending_document() -> str | None:
             return None
         _lease_provider_item(document, now)
         try:
-            if not document.storage_version_id:
-                raise ProviderError("s3", "immutable stored-object version is missing")
+            version_id = (document.storage_version_id or "").strip()
+            if not version_id or version_id.lower() == "null":
+                document.status = "REUPLOAD_REQUIRED"
+                document.scan_provider = "storage-versioning"
+                document.scan_result = "IMMUTABLE_STORAGE_VERSION_REQUIRED"
+                document.provider_last_error = "immutable stored-object version is missing"
+                document.provider_next_attempt_at = None
+                document.provider_terminal_at = None
+                document.provider_lease_owner = None
+                document.provider_lease_expires_at = None
+                db.add(
+                    OperationalException(
+                        fingerprint=f"DOCUMENT_REUPLOAD_REQUIRED:{document.id}",
+                        code="DOCUMENT_REUPLOAD_REQUIRED",
+                        severity="HIGH",
+                        resource_type="document",
+                        resource_id=str(document.id),
+                        retry_action="CREATE_NEW_VERSIONED_UPLOAD_SESSION",
+                        comments=[],
+                    )
+                )
+                return str(document.id)
             content = await storage_adapter().get_private(
                 object_key=document.storage_key,
-                version_id=document.storage_version_id,
+                version_id=version_id,
             )
             actual_sha256 = hashlib.sha256(content).hexdigest()
             if not secrets.compare_digest(actual_sha256, document.sha256.lower()):

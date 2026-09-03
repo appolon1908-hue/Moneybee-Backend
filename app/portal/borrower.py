@@ -672,16 +672,35 @@ async def complete_document_upload_session(
         problem("DOCUMENT_HASH_MISMATCH", "The uploaded document checksum does not match.", 409)
     adapter = S3ObjectStorageAdapter()
     try:
+        versioning_enabled = await adapter.bucket_versioning_enabled()
+    except ProviderError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "DOCUMENT_STORAGE_VERSION_UNAVAILABLE",
+                "message": "Object-storage versioning could not be verified.",
+            },
+        ) from exc
+    if not versioning_enabled:
+        problem(
+            "DOCUMENT_STORAGE_VERSION_UNAVAILABLE",
+            "The object-storage bucket must have versioning enabled.",
+            409,
+        )
+    try:
         metadata = await adapter.head_private(object_key=item.storage_key)
     except ProviderError as exc:
         raise HTTPException(
             status_code=409,
-            detail={"code": "DOCUMENT_UPLOAD_NOT_FOUND", "message": "The uploaded object could not be verified."},
+            detail={
+                "code": "DOCUMENT_UPLOAD_NOT_FOUND",
+                "message": "The uploaded object could not be verified.",
+            },
         ) from exc
     if int(metadata.get("ContentLength") or -1) != item.size_bytes:
         problem("DOCUMENT_SIZE_MISMATCH", "The stored document size does not match.", 409)
     version_id = str(metadata.get("VersionId") or "").strip()
-    if not version_id:
+    if not version_id or version_id.lower() == "null":
         problem(
             "DOCUMENT_STORAGE_VERSION_UNAVAILABLE",
             "The uploaded object is not protected by immutable storage versioning.",
