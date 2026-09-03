@@ -7,6 +7,12 @@ umask 077
 : "${KNOWN_HOSTS_FILE:?KNOWN_HOSTS_FILE is required}"
 : "${EVIDENCE_DIR:?EVIDENCE_DIR is required}"
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+python "$SCRIPT_DIR/validate-source-authority.py" \
+  --source-lock "$REPO_ROOT/deploy/repository-source.lock.json" \
+  --operation server-contact
+
 [[ "$TARGET_HOST" == "49.12.145.107" ]] || {
   echo "ERROR=UNAPPROVED_TARGET_HOST" >&2
   exit 1
