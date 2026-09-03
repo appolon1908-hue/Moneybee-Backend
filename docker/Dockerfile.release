@@ -33,7 +33,11 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
+# The base image's global copies are outside the application venv and are not
+# runtime dependencies. Remove them so fixed packages in /opt/venv are the only
+# copies present and whole-filesystem scanning remains meaningful.
 RUN python -m venv /opt/venv \
+    && python -m pip uninstall --yes setuptools msgpack \
     && addgroup --system moneybee \
     && adduser --system --ingroup moneybee --home /nonexistent --no-create-home moneybee
 
