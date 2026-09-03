@@ -28,6 +28,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: backend
+      - name: Require authorized repository source before deployment
+        run: |
+          python backend/ops/validate-source-authority.py \
+            --source-lock backend/deploy/repository-source.lock.json \
+            --operation deployment
       - name: Require reviewed runtime and release locks
         id: locks
         run: |
