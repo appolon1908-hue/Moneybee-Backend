@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "status": "RECOVERED_FROM_PRIOR_RELEASE_ARTIFACT",
+  "repository": "appolon1908-hue/Moneybee-Backend",
+  "source_sha": "5d7a868551ce426f5afefbd32d63d0256b809899",
+  "workflow_run_id": 33701885567,
+  "artifact_id": 9873854546,
+  "artifact_digest": "sha256:47c327ab6c78b27c586500b0b5b7c6f6eaf4fe6f1975c7beb055075f547fa9f9",
+  "images": {
+    "api": "ghcr.io/appolon1908-hue/moneybee-api@sha256:5474c1ec779100251b0b9222cfa51b4aea01d91611bf01ef56ca4a8705f47477",
+    "worker": "ghcr.io/appolon1908-hue/moneybee-worker@sha256:8902ac5ece55a22b71791e642570a477d738d73eab1c7f806fabd6e6da6c0950",
+    "migrate": "ghcr.io/appolon1908-hue/moneybee-migrate@sha256:1f17794b9c145bf41a5bc41351ed6c85a674a4bcc9ef62b8e4c1ce8cb1f8bc58"
+  },
+  "runtime_deployment_confirmed": false,
+  "note": "These are real registry identities recovered from the prior successful release artifact. Read-only runtime inventory must determine whether they are the currently deployed rollback set before deployment authorization."
+}
