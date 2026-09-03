@@ -1,17 +1,20 @@
 name: runtime-path-preflight-read-only
 
 on:
+  push:
+    branches:
+      - "release/runtime-preflight"
   workflow_dispatch:
     inputs:
       target_host:
-        description: "Approved MoneyBee staging candidate"
+        description: Approved MoneyBee staging candidate
         required: true
         default: "49.12.145.107"
         type: string
       ssh_user:
-        description: "Read-only preflight SSH user"
+        description: Read-only preflight SSH user
         required: true
-        default: "root"
+        default: root
         type: string
 
 permissions:
@@ -23,37 +26,57 @@ concurrency:
 
 jobs:
   preflight:
+    if: github.ref == 'refs/heads/release/runtime-preflight'
     environment: staging-preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      TARGET_HOST: ${{ github.event_name == 'workflow_dispatch' && inputs.target_host || '49.12.145.107' }}
+      SSH_USER: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_user || vars.MONEYBEE_STAGING_SSH_USER || 'root' }}
+      EVIDENCE_DIR: ${{ runner.temp }}/moneybee-runtime-evidence
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
       - name: Require authorized repository source before server contact
         run: |
           python ops/validate-source-authority.py \
             --source-lock deploy/repository-source.lock.json \
             --operation server-contact
+
       - name: Install strict SSH material
         env:
           SSH_PRIVATE_KEY: ${{ secrets.MONEYBEE_STAGING_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.MONEYBEE_STAGING_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
           install -d -m 700 "$HOME/.ssh"
           printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/id_ed25519"
           printf '%s\n' "$SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
       - name: Capture read-only runtime evidence
-        env:
-          TARGET_HOST: ${{ inputs.target_host }}
-          SSH_USER: ${{ inputs.ssh_user }}
-          EVIDENCE_DIR: ${{ runner.temp }}/moneybee-runtime-evidence
         run: |
           export KNOWN_HOSTS_FILE="$HOME/.ssh/known_hosts"
           bash ops/runtime-path-preflight.sh
+
+      - name: Verify evidence packet checksums
+        run: |
+          set -euo pipefail
+          test -s "$EVIDENCE_DIR/runtime-preflight.raw.txt"
+          test -s "$EVIDENCE_DIR/runtime-paths.candidate.json"
+          test -s "$EVIDENCE_DIR/runtime-inventory.json"
+          (
+            cd "$EVIDENCE_DIR"
+            sha256sum -c SHA256SUMS
+          )
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: moneybee-runtime-path-evidence-${{ github.run_id }}
+          name: moneybee-runtime-path-evidence-${{ github.sha }}-${{ github.run_id }}
           path: ${{ runner.temp }}/moneybee-runtime-evidence/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
