@@ -1,8 +1,8 @@
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "mission_id": "MONEYBEE_REPOSITORY_TO_PRODUCTION_2026_09_02",
   "generated_at": "2026-09-02T00:00:00-04:00",
-  "updated_at": "2026-09-03T08:23:50-04:00",
+  "updated_at": "2026-09-03T08:28:00-04:00",
   "status": "PHASE_01_PROTECTED_MERGES_COMPLETE_PHASE_02_REQUIRED",
   "deployment_authorized": false,
   "server_contact_authorized": false,
@@ -36,9 +36,16 @@
     "release_branch": "release/moneybee-repository-complete-20260902",
     "protected_source_head": "f19f3560c1abebee6f8ff7b5bcafec0e3ab07809",
     "protected_merge_sha": "474ab4eb96898f2d428b03b5fcee989b5b4182f9",
+    "required_final_merge_sha": "474ab4eb96898f2d428b03b5fcee989b5b4182f9",
     "exact_head_ci": {
-      "backend_ci": {"run_id": 33752672777, "result": "PASS"},
-      "secure_scaffold_ci": {"run_id": 33752672812, "result": "PASS"}
+      "backend_ci": {
+        "run_id": 33752672777,
+        "result": "PASS"
+      },
+      "secure_scaffold_ci": {
+        "run_id": 33752672812,
+        "result": "PASS"
+      }
     },
     "openapi": {
       "canonical_v2_paths": 176,
@@ -46,9 +53,18 @@
       "artifact_digest": "sha256:9844bd703e893ede5f6bbe6d8831e3321d75c454ee6ecd41536bba3fd3cb1932"
     },
     "sbom_artifacts": {
-      "api": {"artifact_id": 9892280718, "digest": "sha256:8436ab4fe1bc7d8ba102a8b59f9b18acd802f14a0140c8dfce307bd334a33923"},
-      "worker": {"artifact_id": 9892267172, "digest": "sha256:67548a47066b47fb787dca1a1b54b9c4b563f49a2b64a3a48e2b0b0e093eb64c"},
-      "migrate": {"artifact_id": 9892283084, "digest": "sha256:0caf6013cd535f53caf5ea7b29a0db3ab63565373c684cfcad947c72d9ff25af"}
+      "api": {
+        "artifact_id": 9892280718,
+        "digest": "sha256:8436ab4fe1bc7d8ba102a8b59f9b18acd802f14a0140c8dfce307bd334a33923"
+      },
+      "worker": {
+        "artifact_id": 9892267172,
+        "digest": "sha256:67548a47066b47fb787dca1a1b54b9c4b563f49a2b64a3a48e2b0b0e093eb64c"
+      },
+      "migrate": {
+        "artifact_id": 9892283084,
+        "digest": "sha256:0caf6013cd535f53caf5ea7b29a0db3ab63565373c684cfcad947c72d9ff25af"
+      }
     },
     "review_threads_unresolved": 0
   },
@@ -58,8 +74,13 @@
     "release_branch": "release/moneybee-frontend-repository-complete-20260902",
     "protected_source_head": "f598d8cd480723f4ea403eebd7a09754c94e339b",
     "protected_merge_sha": "bc2ec33dbd8f3e1358e0358e0194c34aae916854",
+    "required_final_merge_sha": "bc2ec33dbd8f3e1358e0358e0194c34aae916854",
     "protected_backend_contract_sha": "474ab4eb96898f2d428b03b5fcee989b5b4182f9",
-    "exact_head_ci": {"run_id": 33754229519, "result": "PASS"},
+    "required_final_backend_contract_sha": "474ab4eb96898f2d428b03b5fcee989b5b4182f9",
+    "exact_head_ci": {
+      "run_id": 33754229519,
+      "result": "PASS"
+    },
     "contract_artifact": {
       "artifact_id": 9892806880,
       "digest": "sha256:c38e2bc2949df81e86000c994d491f959ca90f95a62763b3e388276afb9e76d3"
@@ -91,6 +112,8 @@
     "phase_07_final_certification": "BLOCKED_ON_PHASE_06"
   },
   "required_before_deployment": {
+    "backend_codex_environment_created": false,
+    "frontend_codex_environment_created": false,
     "backend_main_contains_certified_release": true,
     "frontend_main_contains_certified_release": true,
     "backend_exact_head_ci_pass": true,
