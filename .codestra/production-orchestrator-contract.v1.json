@@ -1,0 +1,56 @@
+{
+  "schema_version": "codestra.production-orchestrator-contract.v1",
+  "repository": "appolon1908-hue/Moneybee-Backend",
+  "repository_id": 1343760409,
+  "default_branch": "main",
+  "role": "application",
+  "release_intent_workflow": ".github/workflows/manual-release-intent.yml",
+  "deployment_authority": true,
+  "require_verified_commit": true,
+  "required_checks": [
+    "verify",
+    "postgres-identity-tenancy",
+    "containers (api)",
+    "containers (worker)",
+    "containers (migrate)",
+    "application",
+    "deployment-policy"
+  ],
+  "supported_phases": [
+    "plan",
+    "staging",
+    "canary",
+    "production"
+  ],
+  "artifact_policy": {
+    "minimum_images": 1,
+    "maximum_images": 3,
+    "require_digest": true,
+    "allow_rebuild_after_staging": false,
+    "allow_retag_after_staging": false,
+    "require_sbom": true,
+    "require_provenance": true,
+    "require_signature": false
+  },
+  "environments": {
+    "staging": "staging-readonly",
+    "canary": "production-readonly-canary",
+    "production": "production"
+  },
+  "native_workflows": {
+    "ci": ".github/workflows/ci.yml",
+    "release_images": ".github/workflows/release-backend-images.yml",
+    "staging_packet": ".github/workflows/deploy-staging.yml"
+  },
+  "safety": {
+    "external_effects_default": false,
+    "live_email_delivery": false,
+    "live_sms_delivery": false,
+    "live_pstn_dialing": false,
+    "odoo_write": false,
+    "n8n_external_delivery": false,
+    "live_trading": false,
+    "payment_execution": false
+  },
+  "blockers": []
+}
