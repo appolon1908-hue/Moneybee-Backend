@@ -24,6 +24,27 @@ jobs:
       TRIVY_IMAGE: ${{ vars.TRIVY_IMAGE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install repository dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+      - name: Run repository verification gate before publishing
+        run: |
+          ruff check app tests migrations scripts ops
+          python -m compileall -q app tests migrations ops scripts
+          python scripts/check_no_private_keys.py
+          pytest -q
+          python scripts/verify_openapi_contract.py
+          python scripts/generate_endpoint_catalog.py --check
+      - name: Record OpenAPI and endpoint-catalog checksums
+        run: |
+          mkdir -p dist
+          sha256sum openapi.json | awk '{print $1}' >dist/openapi.sha256
+          sha256sum docs/API_ENDPOINT_CATALOG.md | awk '{print $1}' >dist/endpoint-catalog.sha256
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Verify immutable build inputs
         run: |
@@ -111,19 +132,28 @@ jobs:
             -v "$PWD/dist:/work" \
             "$TRIVY_IMAGE" image --format cyclonedx --output /work/migrate.cdx.json \
             "${{ steps.build.outputs.migrate_name }}@${{ steps.build.outputs.migrate_digest }}"
+      - name: Record SBOM digests
+        run: |
+          for target in api worker migrate; do
+            sha256sum "dist/$target.cdx.json" | awk -v t="$target" '{print t "_sbom_sha256=" $1}' >>"$GITHUB_OUTPUT"
+          done
+        id: sboms
       - name: Attest API image
+        id: attest_api
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.build.outputs.api_name }}
           subject-digest: ${{ steps.build.outputs.api_digest }}
           push-to-registry: true
       - name: Attest worker image
+        id: attest_worker
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.build.outputs.worker_name }}
           subject-digest: ${{ steps.build.outputs.worker_digest }}
           push-to-registry: true
       - name: Attest migrate image
+        id: attest_migrate
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.build.outputs.migrate_name }}
@@ -137,20 +167,47 @@ jobs:
           WORKER_DIGEST: ${{ steps.build.outputs.worker_digest }}
           MIGRATE_NAME: ${{ steps.build.outputs.migrate_name }}
           MIGRATE_DIGEST: ${{ steps.build.outputs.migrate_digest }}
+          API_SBOM_SHA256: ${{ steps.sboms.outputs.api_sbom_sha256 }}
+          WORKER_SBOM_SHA256: ${{ steps.sboms.outputs.worker_sbom_sha256 }}
+          MIGRATE_SBOM_SHA256: ${{ steps.sboms.outputs.migrate_sbom_sha256 }}
+          API_ATTESTATION_ID: ${{ steps.attest_api.outputs.attestation-id }}
+          API_ATTESTATION_URL: ${{ steps.attest_api.outputs.attestation-url }}
+          WORKER_ATTESTATION_ID: ${{ steps.attest_worker.outputs.attestation-id }}
+          WORKER_ATTESTATION_URL: ${{ steps.attest_worker.outputs.attestation-url }}
+          MIGRATE_ATTESTATION_ID: ${{ steps.attest_migrate.outputs.attestation-id }}
+          MIGRATE_ATTESTATION_URL: ${{ steps.attest_migrate.outputs.attestation-url }}
         run: |
           python - <<'PY'
           import json, os
           from datetime import UTC, datetime
+
+          def component(name_env, digest_env, sbom_env, attestation_id_env, attestation_url_env):
+              return {
+                  "image": os.environ[name_env] + "@" + os.environ[digest_env],
+                  "sbom_sha256": os.environ[sbom_env],
+                  "provenance": {
+                      "attestation_id": os.environ.get(attestation_id_env) or None,
+                      "attestation_url": os.environ.get(attestation_url_env) or None,
+                  },
+              }
+
           manifest = {
-              "schema_version": 1,
+              "schema_version": 2,
               "repository": os.environ["GITHUB_REPOSITORY"],
               "source_sha": os.environ["GITHUB_SHA"],
               "created_at": datetime.now(UTC).isoformat(),
+              "components": {
+                  "api": component("API_NAME", "API_DIGEST", "API_SBOM_SHA256", "API_ATTESTATION_ID", "API_ATTESTATION_URL"),
+                  "worker": component("WORKER_NAME", "WORKER_DIGEST", "WORKER_SBOM_SHA256", "WORKER_ATTESTATION_ID", "WORKER_ATTESTATION_URL"),
+                  "migrate": component("MIGRATE_NAME", "MIGRATE_DIGEST", "MIGRATE_SBOM_SHA256", "MIGRATE_ATTESTATION_ID", "MIGRATE_ATTESTATION_URL"),
+              },
               "images": {
                   "api": os.environ["API_NAME"] + "@" + os.environ["API_DIGEST"],
                   "worker": os.environ["WORKER_NAME"] + "@" + os.environ["WORKER_DIGEST"],
                   "migrate": os.environ["MIGRATE_NAME"] + "@" + os.environ["MIGRATE_DIGEST"],
               },
+              "openapi_checksum": "sha256:" + open("dist/openapi.sha256").read().strip(),
+              "endpoint_catalog_checksum": "sha256:" + open("dist/endpoint-catalog.sha256").read().strip(),
               "production_authorized": False,
           }
           open("dist/backend-release.json", "w").write(
